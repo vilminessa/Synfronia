@@ -1,0 +1,15 @@
+# Скачанные медиа
+downloads/
+
+# PyInstaller
+build/
+dist/
+*.spec.bak
+/YTdownloader.exe
+__pycache__/
+*.pyc
+
+# Локальные настройки и служебные файлы
+settings.json
+selftest.log
+out*.txt
