@@ -97,11 +97,13 @@ class App(tk.Tk):
         self.url_var = tk.StringVar()
         self.url_entry = ttk.Entry(frame, textvariable=self.url_var)
         self.url_entry.grid(row=0, column=1, columnspan=2, sticky="ew", **pad)
+        self._attach_clipboard(self.url_entry)
 
         ttk.Label(frame, text="Папка скачивания:").grid(row=1, column=0, sticky="w", **pad)
         self.path_var = tk.StringVar(value=str(default_download_dir()))
         self.path_entry = ttk.Entry(frame, textvariable=self.path_var)
         self.path_entry.grid(row=1, column=1, sticky="ew", **pad)
+        self._attach_clipboard(self.path_entry)
         self.browse_btn = ttk.Button(frame, text="Обзор…", command=self._browse)
         self.browse_btn.grid(row=1, column=2, sticky="ew", **pad)
 
@@ -159,6 +161,24 @@ class App(tk.Tk):
         frame.rowconfigure(8, weight=1)
 
         self._restore_settings()
+
+    @staticmethod
+    def _attach_clipboard(widget) -> None:
+        menu = tk.Menu(widget, tearoff=0)
+        menu.add_command(label="Копировать", command=lambda: widget.event_generate("<<Copy>>"))
+        menu.add_command(label="Вставить", command=lambda: widget.event_generate("<<Paste>>"))
+        menu.add_command(label="Вырезать", command=lambda: widget.event_generate("<<Cut>>"))
+        menu.add_separator()
+        menu.add_command(label="Выделить всё", command=lambda: widget.event_generate("<<SelectAll>>"))
+        menu.add_command(label="Очистить", command=lambda: widget.delete(0, "end"))
+        widget.bind("<Button-3>", lambda e: (widget.focus_set(), menu.tk_popup(e.x_root, e.y_root)))
+        for seq, evt in (
+            ("<Control-c>", "<<Copy>>"),
+            ("<Control-x>", "<<Cut>>"),
+            ("<Control-v>", "<<Paste>>"),
+            ("<Control-a>", "<<SelectAll>>"),
+        ):
+            widget.bind(seq, lambda e, evt=evt: widget.event_generate(evt))
 
     def _restore_settings(self) -> None:
         subs = SUBTITLE_LABELS.get(self.settings.get("subtitles", "ru"), "Русские")
