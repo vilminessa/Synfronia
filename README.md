@@ -1,6 +1,6 @@
 <div align="center">
 
-# YTdownloader
+# Synfronia
 
 Скачивание видео и целых плейлистов YouTube с **вшиванием метаданных,
 субтитров и обложки**, конвертацией в **HEVC** — в простом
@@ -40,15 +40,15 @@
 
 ### Готовый exe
 
-Скачайте `YTdownloader.exe` из [релизов](../../releases), запустите —
+Скачайте `Synfronia.exe` из [релизов](../../releases), запустите —
 приложение готово к работе. Рядом с ним положите
 `THIRD_PARTY_NOTICES.md` (лицензии компонентов).
 
 ### Из исходников
 
 ```bat
-git clone https://github.com/vilminessa/YTdownloader.git
-cd YTdownloader
+git clone https://github.com/vilminessa/Synfronia.git
+cd Synfronia
 pip install -r requirements.txt
 python gui.py
 ```
@@ -73,7 +73,7 @@ python download.py <URL> [--subtitles ru] [--quality 720] [--hevc] [--dir C:\vid
 ### Самопроверка (для отладки сборки)
 
 ```bat
-YTdownloader.exe --selftest C:\videos https://youtu.be/GUS0q7gZdNE --subtitles ru --quality 720 --hevc
+Synfronia.exe --selftest C:\videos https://youtu.be/GUS0q7gZdNE --subtitles ru --quality 720 --hevc
 ```
 
 Результаты пишутся в `selftest.log`, файлы — в указанный каталог.
@@ -81,7 +81,7 @@ YTdownloader.exe --selftest C:\videos https://youtu.be/GUS0q7gZdNE --subtitles r
 ## Сборка exe
 
 ```bat
-python -m PyInstaller --onefile --windowed --name YTdownloader `
+python -m PyInstaller --onefile --windowed --name Synfronia `
   --distpath . --workpath build --specpath . --collect-all yt_dlp gui.py
 ```
 
@@ -92,6 +92,7 @@ core.py          — движок загрузки (обвязка над yt-dlp
 gui.py           — интерфейс Tkinter + скрытый режим --selftest
 download.py      — CLI-обёртка
 requirements.txt — yt-dlp, pyinstaller
+Synfronia.spec   — конфиг сборки exe
 LICENSE          — лицензия проекта (PolyForm Noncommercial 1.0.0)
 THIRD_PARTY_NOTICES.md — источники и лицензии всех компонентов
 ```

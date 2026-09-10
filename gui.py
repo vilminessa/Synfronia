@@ -68,7 +68,7 @@ class SettingsDialog(tk.Toplevel):
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("YT Downloader")
+        self.title("Synfronia")
         self.minsize(640, 460)
 
         self.settings = load_settings()

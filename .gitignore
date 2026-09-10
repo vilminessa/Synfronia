@@ -5,7 +5,7 @@ downloads/
 build/
 dist/
 *.spec.bak
-/YTdownloader.exe
+/Synfronia.exe
 __pycache__/
 *.pyc
 

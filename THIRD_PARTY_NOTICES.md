@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-This project (YTdownloader) uses the following third-party components.
+This project (Synfronia) uses the following third-party components.
 Their licenses are reproduced or linked below in accordance with the
 requirements of each license.
 
