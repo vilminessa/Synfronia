@@ -3,11 +3,12 @@
 # Synfronia
 
 Скачивание видео и целых плейлистов YouTube с **вшиванием метаданных,
-субтитров и обложки**, конвертацией в **HEVC** — в простом
-десктопном приложении Windows на основе [yt-dlp](https://github.com/yt-dlp/yt-dlp).
+субтитров и обложки**, конвертацией в **HEVC** — десктопное приложение
+Windows с **web-интерфейсом** ([pywebview](https://pywebview.flowrl.com/) /
+EdgeChromium) на основе [yt-dlp](https://github.com/yt-dlp/yt-dlp).
 
 ![Python](https://img.shields.io/badge/Python-3.14-blue?logo=python&logoColor=white)
-![GUI](https://img.shields.io/badge/GUI-Tkinter-8A2BE2)
+![GUI](https://img.shields.io/badge/UI-web%20%28pywebview%29-8A2BE2)
 ![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial-important)
 ![Build](https://img.shields.io/badge/build-PyInstaller-orange)
 
@@ -31,7 +32,8 @@
 
 ## Требования
 
-- Windows (для exe-версии больше ничего не нужно).
+- Windows 10/11 с **WebView2 Runtime** (по умолчанию входит в состав Edge;
+  для exe-версии больше ничего не нужно).
 - Из исходников: Python 3.12+ и внешний **ffmpeg** в `PATH`
   (приложение найдёт его автоматически) — требуется для склейки,
   метаданных и конвертации.
@@ -81,17 +83,19 @@ Synfronia.exe --selftest C:\videos https://youtu.be/GUS0q7gZdNE --subtitles ru -
 ## Сборка exe
 
 ```bat
-python -m PyInstaller --onefile --windowed --name Synfronia `
-  --distpath . --workpath build --specpath . --collect-all yt_dlp gui.py
+python -m PyInstaller Synfronia.spec --distpath . --workpath build --noconfirm
 ```
+
+spec собирает один файл (`--onefile --windowed`), включая yt-dlp, webview
+и рантайм .NET (pythonnet) для EdgeChromium.
 
 ## Состав
 
 ```
 core.py          — движок загрузки (обвязка над yt-dlp)
-gui.py           — интерфейс Tkinter + скрытый режим --selftest
+gui.py           — web-интерфейс (pywebview) + скрытый режим --selftest
 download.py      — CLI-обёртка
-requirements.txt — yt-dlp, pyinstaller
+requirements.txt — yt-dlp, pywebview, pyinstaller
 Synfronia.spec   — конфиг сборки exe
 LICENSE          — лицензия проекта (PolyForm Noncommercial 1.0.0)
 THIRD_PARTY_NOTICES.md — источники и лицензии всех компонентов
@@ -105,9 +109,11 @@ THIRD_PARTY_NOTICES.md — источники и лицензии всех ко�
 | Компонент | Лицензия | Источник |
 |---|---|---|
 | yt-dlp | Unlicense (public domain) | https://github.com/yt-dlp/yt-dlp |
+| pywebview | BSD-3-Clause | https://github.com/r0x0r/pywebview |
+| pythonnet / pythonnet-clr | MIT | https://github.com/pythonnet/pythonnet |
 | PyInstaller (только сборка) | GPL-2.0+ с исключением | https://github.com/pyinstaller/pyinstaller |
 | ffmpeg (внешний, не входит в exe) | GPL | https://ffmpeg.org/ |
-| Python / tkinter | PSF | https://www.python.org/ |
+| Python | PSF | https://www.python.org/ |
 | certifi, urllib3, idna, cffi, cryptography | MPL-2.0 / MIT / BSD-3 / MIT-0 / Apache-2.0 | см. notices |
 
 Цвета интерфейса взяты из палитр [color-hex.com](https://color-hex.com/).

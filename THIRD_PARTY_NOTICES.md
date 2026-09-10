@@ -7,13 +7,18 @@ requirements of each license.
 | Component | Version | License | Source |
 |---|---|---|---|
 | [yt-dlp](https://github.com/yt-dlp/yt-dlp) | 2026.8.19 (bundled) | Unlicense | https://github.com/yt-dlp/yt-dlp |
+| [pywebview](https://github.com/r0x0r/pywebview) | 6.2.1 (bundled) | BSD-3-Clause | https://github.com/r0x0r/pywebview |
+| pythonnet | 3.1.0 (bundled) | MIT | https://github.com/pythonnet/pythonnet |
+| clr_loader | 0.3.1 (bundled) | MIT | https://github.com/pythonnet/clr-loader |
+| bottle | 0.13.4 (bundled) | MIT | https://github.com/bottlepy/bottle |
+| proxy_tools | 0.1.0 (bundled) | MIT | https://github.com/TkTech/proxy_tools |
 | [PyInstaller](https://github.com/pyinstaller/pyinstaller) | 6.22.2 (build-time only) | GPL-2.0-or-later with special exception | https://github.com/pyinstaller/pyinstaller |
 | certifi | 2026.7.22 (bundled) | MPL-2.0 | https://github.com/certifi/python-certifi |
 | urllib3 | 2.7.0 (bundled) | MIT | https://github.com/urllib3/urllib3 |
 | idna | 3.19 (bundled) | BSD-3-Clause | https://github.com/kjd/idna |
 | cffi | 2.1.1 (bundled) | MIT-0 | https://github.com/python-cffi/cffi |
 | cryptography | 50.0.1 (bundled) | Apache-2.0 OR BSD-3-Clause | https://github.com/pyca/cryptography |
-| CPython / tkinter | 3.14.2 (bundled) | PSF License Agreement | https://www.python.org/ |
+| CPython | 3.14.2 (bundled) | PSF License Agreement | https://www.python.org/ |
 | ffmpeg | any recent build (external, NOT bundled) | GPL-2.0-or-later | https://ffmpeg.org/ |
 
 ## yt-dlp — Unlicense
@@ -154,6 +159,84 @@ without modification, are permitted provided that the conditions in
 the PSF License Agreement are met. The full license text is available
 at http://www.python.org/psf/license/ and is distributed with CPython
 in the file `LICENSE`.
+
+## pywebview — BSD 3-Clause License
+
+Copyright (c) 2017 Roman Frołow and other contributors.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+1. Redistributions of source code must retain the above copyright
+   notice, this list of conditions and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright
+   notice, this list of conditions and the following disclaimer in
+   the documentation and/or other materials provided with the
+   distribution.
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived
+   from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+Full text: https://github.com/r0x0r/pywebview/blob/master/LICENSE
+
+## pythonnet, clr_loader, proxy_tools — MIT License
+
+Copyright (c) respective authors and contributors (pythonnet/clr_loader:
+Python.NET; proxy_tools: TkTech).
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.
+
+Full texts:
+- pythonnet: https://github.com/pythonnet/pythonnet/blob/master/LICENSE
+- clr_loader: https://github.com/pythonnet/clr-loader/blob/main/LICENSE
+- proxy_tools: https://github.com/TkTech/proxy_tools/blob/master/LICENSE
+
+## bottle — MIT License
+
+Copyright (c) 2009-2024 Marcel Hellkamp.
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.
+
+Full text: https://github.com/bottlepy/bottle/blob/master/LICENSE
 
 ## PyInstaller — GPL-2.0-or-later with special exception
 

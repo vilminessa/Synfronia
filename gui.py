@@ -1,15 +1,14 @@
-"""Tkinter-интерфейс для загрузчика YouTube (yt-dlp)."""
+"""Web-интерфейс (pywebview/EdgeChromium) для Synfronia."""
 
-import queue
+import sys
 import threading
-import tkinter as tk
-from tkinter import filedialog, messagebox, scrolledtext, ttk
+
+import webview
 
 from core import (
     DEFAULT_SETTINGS,
     QUALITY_FORMATS,
     SUBTITLE_OPTIONS,
-    THEMES,
     Downloader,
     base_dir,
     default_download_dir,
@@ -19,372 +18,428 @@ from core import (
     save_settings,
 )
 
-SUBTITLE_LABELS = {"off": "Выкл", "ru": "Русские", "en": "Английские", "all": "Все"}
-QUALITY_LABELS = {"lossless": "Lossless (максимум)", "1080": "1080p", "720": "720p", "240": "240p"}
+THEME_COLORS = {
+    "scary_forest": {"bg": "#0c1622", "surface": "#1f2b29", "widget": "#23444b", "text": "#dcdedd", "accent": "#628d7c"},
+    "technology_day": {"bg": "#00181a", "surface": "#00585a", "widget": "#003638", "text": "#dcdedd", "accent": "#00989b"},
+    "technology_pinks": {"bg": "#ffebec", "surface": "#ffcbe2", "widget": "#ffffff", "text": "#5d2547", "accent": "#c15f9b"},
+}
+
+HTML = r"""<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Synfronia</title>
+<style>
+  :root {
+    --bg: #0c1622; --surface: #1f2b29; --widget: #23444b;
+    --text: #dcdedd; --accent: #628d7c; --warn: #ffb454;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 16px; font-family: "Segoe UI", system-ui, sans-serif;
+    background: var(--bg); color: var(--text); font-size: 14px;
+  }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { opacity: .65; font-size: 12px; margin-bottom: 14px; }
+  label { display: block; margin: 10px 0 4px; font-size: 13px; opacity: .9; }
+  input[type=text], select {
+    width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--surface);
+    background: var(--widget); color: var(--text); font-size: 14px; outline: none;
+  }
+  input[type=text]:focus, select:focus { border-color: var(--accent); }
+  input:disabled, select:disabled, button:disabled { opacity: .45; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .row input[type=text] { flex: 1; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+  .check { display: flex; align-items: center; gap: 6px; margin: 10px 0 4px; font-size: 13px; }
+  .check input { width: 15px; height: 15px; accent-color: var(--accent); }
+  button {
+    padding: 8px 18px; border: none; border-radius: 6px; cursor: pointer;
+    background: var(--surface); color: var(--text); font-size: 14px;
+  }
+  button:hover { background: var(--accent); color: var(--bg); }
+  button:disabled:hover { background: var(--surface); color: var(--text); cursor: default; }
+  .actions { margin-top: 16px; display: flex; gap: 8px; align-items: center; }
+  .pb-wrap { margin-top: 14px; height: 10px; border-radius: 5px; background: var(--surface); overflow: hidden; }
+  #pb { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+  #pb.indeterminate { width: 30%; animation: slide 1.2s infinite; }
+  @keyframes slide { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
+  #status { margin-top: 6px; font-size: 13px; height: 18px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  #log {
+    width: 100%; min-height: 150px; margin-top: 6px; resize: vertical;
+    background: var(--widget); color: var(--text); border: 1px solid var(--surface);
+    border-radius: 6px; padding: 8px; font-family: Consolas, monospace; font-size: 12px;
+  }
+  #warn {
+    display: none; margin-top: 10px; padding: 8px 12px; border-radius: 6px;
+    background: rgba(255, 180, 84, .15); border: 1px solid var(--warn); color: var(--warn); font-size: 13px;
+  }
+</style>
+</head>
+<body>
+  <h1>Synfronia</h1>
+  <div class="sub">Скачивание видео и плейлистов YouTube (yt-dlp)</div>
+
+  <label for="url">Ссылка (видео/плейлист):</label>
+  <input type="text" id="url" placeholder="https://www.youtube.com/watch?v=…" autofocus>
+
+  <label for="dest">Папка скачивания:</label>
+  <div class="row">
+    <input type="text" id="dest">
+    <button id="browse">Обзор…</button>
+  </div>
+
+  <div class="check"><input type="checkbox" id="playlist"><span>Скачать весь плейлист (иначе только одно видео)</span></div>
+  <div class="check"><input type="checkbox" id="group"><span>Сгруппировать: плейлист в подпапку с его названием</span></div>
+
+  <div class="grid">
+    <div>
+      <label for="theme">Тема:</label>
+      <select id="theme"></select>
+    </div>
+    <div>
+      <label for="subs">Субтитры:</label>
+      <select id="subs">
+        <option value="off">Выкл</option>
+        <option value="ru">Русские</option>
+        <option value="en">Английские</option>
+        <option value="all">Все</option>
+      </select>
+    </div>
+    <div>
+      <label for="qual">Качество:</label>
+      <select id="qual">
+        <option value="lossless">Lossless (максимум)</option>
+        <option value="1080">1080p</option>
+        <option value="720">720p</option>
+        <option value="240">240p</option>
+      </select>
+    </div>
+    <div><div class="check" style="margin-top:22px"><input type="checkbox" id="hevc"><span>Конвертировать в HEVC (H.265)</span></div></div>
+  </div>
+
+  <div id="warn">ffmpeg не найден — слияние, субтитры, метаданные и HEVC будут недоступны.</div>
+
+  <div class="actions">
+    <button id="download">Скачать</button>
+    <button id="stop" disabled>Отмена</button>
+  </div>
+
+  <div class="pb-wrap"><div id="pb"></div></div>
+  <div id="status">Готов.</div>
+  <textarea id="log" readonly></textarea>
+
+<script>
+  var THEMES = {
+    scary_forest:   { bg: "#0c1622", surface: "#1f2b29", widget: "#23444b", text: "#dcdedd", accent: "#628d7c" },
+    technology_day: { bg: "#00181a", surface: "#00585a", widget: "#003638", text: "#dcdedd", accent: "#00989b" },
+    technology_pinks: { bg: "#ffebec", surface: "#ffcbe2", widget: "#ffffff", text: "#5d2547", accent: "#c15f9b" }
+  };
+  var since = 0;
+  var busy = false;
+
+  function applyTheme(key) {
+    var c = THEMES[key] || THEMES.scary_forest;
+    var root = document.documentElement.style;
+    root.setProperty("--bg", c.bg); root.setProperty("--surface", c.surface);
+    root.setProperty("--widget", c.widget); root.setProperty("--text", c.text);
+    root.setProperty("--accent", c.accent);
+  }
+
+  function setBusy(b) {
+    if (b === busy) return;
+    busy = b;
+    document.getElementById("download").disabled = b;
+    document.getElementById("stop").disabled = !b;
+    ["url", "dest", "browse", "playlist", "group", "theme", "subs", "qual", "hevc"]
+      .forEach(function(id) { document.getElementById(id).disabled = b; });
+  }
+
+  async function tick() {
+    if (typeof pywebview === "undefined") { setTimeout(tick, 300); return; }
+    try {
+      var st = await pywebview.api.poll(since);
+      if (st.logs && st.logs.length) {
+        var box = document.getElementById("log");
+        box.value += st.logs.join("\n") + "\n";
+        box.scrollTop = box.scrollHeight;
+        since += st.logs.length;
+      }
+      setBusy(st.busy);
+      var p = st.progress || {};
+      var bar = document.getElementById("pb");
+      if (p.mode === "indeterminate") { bar.classList.add("indeterminate"); bar.style.width = "30%"; }
+      else { bar.classList.remove("indeterminate"); bar.style.width = (p.value || 0) + "%"; }
+      document.getElementById("status").textContent = st.status || "";
+    } catch (e) {}
+    setTimeout(tick, 200);
+  }
+
+  function collect() {
+    return {
+      url: document.getElementById("url").value.trim(),
+      dest: document.getElementById("dest").value.trim(),
+      playlist: document.getElementById("playlist").checked,
+      group: document.getElementById("group").checked,
+      subtitles: document.getElementById("subs").value,
+      quality: document.getElementById("qual").value,
+      hevc: document.getElementById("hevc").checked,
+    };
+  }
+
+  function init() {
+    if (window.__initDone) return;
+    window.__initDone = true;
+    var themeSel = document.getElementById("theme");
+    Object.keys(THEMES).forEach(function(k) {
+      var o = document.createElement("option");
+      o.value = k; o.textContent = k;
+      themeSel.appendChild(o);
+    });
+    pywebview.api.get_initial().then(function(init) {
+    document.getElementById("dest").value = init.default_dir;
+    document.getElementById("group").checked = init.settings.group_playlist !== false;
+    document.getElementById("hevc").checked = !!init.settings.hevc;
+    var selects = { subs: ["subtitles", "ru"], qual: ["quality", "lossless"], theme: ["theme", "scary_forest"] };
+    var keys = Object.keys(selects);
+    var i;
+    for (i = 0; i < keys.length; i++) {
+      var s = selects[keys[i]];
+      document.getElementById(keys[i]).value = init.settings[s[0]] || s[1];
+    }
+    document.getElementById("theme").value = init.settings.theme || "scary_forest";
+    applyTheme(document.getElementById("theme").value);
+    if (!init.ffmpeg) document.getElementById("warn").style.display = "block";
+    document.getElementById("theme").addEventListener("change", function() {
+      applyTheme(this.value); pywebview.api.save_setting("theme", this.value);
+    });
+    document.getElementById("subs").addEventListener("change", function() {
+      pywebview.api.save_setting("subtitles", this.value);
+    });
+    document.getElementById("qual").addEventListener("change", function() {
+      pywebview.api.save_setting("quality", this.value);
+    });
+    document.getElementById("hevc").addEventListener("change", function() {
+      pywebview.api.save_setting("hevc", this.checked);
+    });
+    document.getElementById("group").addEventListener("change", function() {
+      pywebview.api.save_setting("group_playlist", this.checked);
+    });
+    document.getElementById("download").addEventListener("click", async function() {
+      var cfg = collect();
+      if (!cfg.url) { document.getElementById("status").textContent = "Введите ссылку на видео или плейлист."; return; }
+      var res = await pywebview.api.start_download(cfg);
+      if (res && res.error) document.getElementById("status").textContent = res.error;
+    });
+    document.getElementById("stop").addEventListener("click", function() {
+      pywebview.api.stop_download();
+    });
+    document.getElementById("browse").addEventListener("click", async function() {
+      var p = await pywebview.api.browse_folder();
+      if (p) document.getElementById("dest").value = p;
+    });
+    document.getElementById("url").addEventListener("keydown", function(ev) {
+      if (ev.key === "Enter") document.getElementById("download").click();
+    });
+    }).catch(function(e) { console.error("init error:", e); });
+  }
+  if (window.pywebview !== undefined) { init(); }
+  else { window.addEventListener("pywebviewready", init); }
+  setTimeout(tick, 400);
+</script>
+</body>
+</html>
+"""
 
 
-class SettingsDialog(tk.Toplevel):
-    """Настройки: пока только выбор цветовой темы."""
-
-    def __init__(self, master: "App"):
-        super().__init__(master)
-        self.master = master
-        self.title("Настройки")
-        self.transient(master)
-        self.resizable(False, False)
-
-        self._keys = list(THEMES)
-        self._original = master.settings["theme"]
-
-        ttk.Label(self, text="Цветовая тема:").grid(row=0, column=0, padx=10, pady=(10, 4), sticky="w")
-        labels = [THEMES[k]["label"] for k in self._keys]
-        self.combo = ttk.Combobox(self, values=labels, state="readonly", width=30)
-        self.combo.grid(row=0, column=1, padx=(0, 10), pady=(10, 4))
-        self.combo.current(self._keys.index(master.settings["theme"]))
-        self.combo.bind("<<ComboboxSelected>>", self._preview)
-
-        btns = ttk.Frame(self)
-        btns.grid(row=1, column=0, columnspan=2, pady=10)
-        ttk.Button(btns, text="OK", command=self._ok).pack(side="left", padx=4)
-        ttk.Button(btns, text="Отмена", command=self._cancel).pack(side="left", padx=4)
-
-        self.grab_set()
-
-    def _preview(self, _event=None) -> None:
-        self.master.apply_theme(self._keys[self.combo.current()])
-
-    def _ok(self) -> None:
-        key = self._keys[self.combo.current()]
-        self.master.apply_theme(key)
-        self.master.settings["theme"] = key
-        self.master._save_settings()
-        self.destroy()
-
-    def _cancel(self) -> None:
-        self.master.apply_theme(self._original)
-        self.destroy()
-
-
-class App(tk.Tk):
-    def __init__(self):
-        super().__init__()
-        self.title("Synfronia")
-        self.minsize(640, 460)
-
+class Api:
+    def __init__(self) -> None:
         self.settings = load_settings()
-        self.queue: "queue.Queue[tuple]" = queue.Queue()
         self.dl: Downloader | None = None
+        self._lock = threading.Lock()
+        self._logs: list[str] = []
+        self._status = "Готов."
+        self._busy = False
+        self._progress = {"mode": "determinate", "value": 0.0}
 
-        self._build_ui()
-        self.apply_theme(self.settings["theme"])
+    # -- состояние (poll из JS) ----------------------------------------------
+    def poll(self, since: int = 0) -> dict:
+        with self._lock:
+            return {
+                "busy": self._busy,
+                "status": self._status,
+                "progress": dict(self._progress),
+                "logs": list(self._logs[since:]),
+            }
 
-        if not find_ffmpeg():
-            self._log("warning", "ffmpeg не найден: слияние/субтитры/метаданные будут недоступны.")
-        else:
-            self._log("info", "ffmpeg найден — слияние и встраивание включены.")
+    def get_initial(self) -> dict:
+        return {
+            "settings": dict(self.settings),
+            "ffmpeg": bool(find_ffmpeg()),
+            "default_dir": str(default_download_dir()),
+        }
 
-        self.after(100, self._drain)
+    # -- настройки -----------------------------------------------------------
+    def save_setting(self, key: str, value) -> str:
+        if key in DEFAULT_SETTINGS:
+            self.settings[key] = value
+            try:
+                save_settings(self.settings)
+                return "ok"
+            except OSError as exc:
+                return f"error: {exc}"
+        return "unknown key"
 
-    # -- построение интерфейса ----------------------------------------------
-    def _build_ui(self) -> None:
-        pad = {"padx": 8, "pady": 4}
+    # -- диалог папки --------------------------------------------------------
+    def browse_folder(self):
+        win = webview.windows[0] if webview.windows else None
+        if not win:
+            return None
+        result = win.create_file_dialog(webview.FOLDER_DIALOG)
+        return str(result[0]) if result else None
 
-        frame = ttk.Frame(self, padding=8)
-        frame.pack(fill="both", expand=True)
-        frame.columnconfigure(1, weight=1)
-
-        ttk.Label(frame, text="Ссылка (видео/плейлист):").grid(row=0, column=0, sticky="w", **pad)
-        self.url_var = tk.StringVar()
-        self.url_entry = ttk.Entry(frame, textvariable=self.url_var)
-        self.url_entry.grid(row=0, column=1, columnspan=2, sticky="ew", **pad)
-        self._attach_clipboard(self.url_entry)
-
-        ttk.Label(frame, text="Папка скачивания:").grid(row=1, column=0, sticky="w", **pad)
-        self.path_var = tk.StringVar(value=str(default_download_dir()))
-        self.path_entry = ttk.Entry(frame, textvariable=self.path_var)
-        self.path_entry.grid(row=1, column=1, sticky="ew", **pad)
-        self._attach_clipboard(self.path_entry)
-        self.browse_btn = ttk.Button(frame, text="Обзор…", command=self._browse)
-        self.browse_btn.grid(row=1, column=2, sticky="ew", **pad)
-
-        self.playlist_var = tk.BooleanVar()
-        self.playlist_check = ttk.Checkbutton(
-            frame, text="Скачать весь плейлист (иначе только одно видео)", variable=self.playlist_var
-        )
-        self.playlist_check.grid(row=2, column=0, columnspan=3, sticky="w", **pad)
-
-        self.group_var = tk.BooleanVar(value=bool(self.settings.get("group_playlist", True)))
-        self.group_check = ttk.Checkbutton(
-            frame, text="Сгруппировать: плейлист в подпапку с его названием", variable=self.group_var
-        )
-        self.group_check.grid(row=3, column=0, columnspan=3, sticky="w", **pad)
-        self.group_var.trace_add("write", lambda *_: self._on_group_change())
-
-        opts_row = ttk.Frame(frame)
-        opts_row.grid(row=4, column=0, columnspan=3, sticky="w", **pad)
-
-        ttk.Label(opts_row, text="Субтитры:").pack(side="left")
-        self.subtitles_combo = ttk.Combobox(
-            opts_row, state="readonly", width=12, values=list(SUBTITLE_LABELS.values())
-        )
-        self.subtitles_combo.pack(side="left", padx=(4, 12))
-        self.subtitles_combo.bind("<<ComboboxSelected>>", lambda *_: self._on_subtitles_change())
-
-        ttk.Label(opts_row, text="Качество:").pack(side="left")
-        self.quality_combo = ttk.Combobox(
-            opts_row, state="readonly", width=18, values=list(QUALITY_LABELS.values())
-        )
-        self.quality_combo.pack(side="left", padx=(4, 12))
-        self.quality_combo.bind("<<ComboboxSelected>>", lambda *_: self._on_quality_change())
-
-        self.hevc_var = tk.BooleanVar(value=bool(self.settings.get("hevc", False)))
-        self.hevc_check = ttk.Checkbutton(opts_row, text="Конвертировать в HEVC (H.265)", variable=self.hevc_var)
-        self.hevc_check.pack(side="left")
-        self.hevc_var.trace_add("write", lambda *_: self._on_hevc_change())
-
-        buttons = ttk.Frame(frame)
-        buttons.grid(row=5, column=0, columnspan=3, sticky="we", **pad)
-        ttk.Button(buttons, text="Настройки…", command=self._open_settings).pack(side="left")
-        self.download_btn = ttk.Button(buttons, text="Скачать", command=self._start)
-        self.download_btn.pack(side="left", padx=(8, 0))
-        self.cancel_btn = ttk.Button(buttons, text="Отмена", command=self._cancel, state="disabled")
-        self.cancel_btn.pack(side="left", padx=(8, 0))
-
-        self.pb = ttk.Progressbar(frame, maximum=100)
-        self.pb.grid(row=6, column=0, columnspan=3, sticky="ew", **pad)
-
-        self.status_var = tk.StringVar(value="Готов.")
-        ttk.Label(frame, textvariable=self.status_var).grid(row=7, column=0, columnspan=3, sticky="w", **pad)
-
-        self.log = scrolledtext.ScrolledText(frame, height=14, state="disabled")
-        self.log.grid(row=8, column=0, columnspan=3, sticky="nsew", **pad)
-        frame.rowconfigure(8, weight=1)
-
-        self._restore_settings()
-
-    @staticmethod
-    def _attach_clipboard(widget) -> None:
-        menu = tk.Menu(widget, tearoff=0)
-        menu.add_command(label="Копировать", command=lambda: widget.event_generate("<<Copy>>"))
-        menu.add_command(label="Вставить", command=lambda: widget.event_generate("<<Paste>>"))
-        menu.add_command(label="Вырезать", command=lambda: widget.event_generate("<<Cut>>"))
-        menu.add_separator()
-        menu.add_command(label="Выделить всё", command=lambda: widget.event_generate("<<SelectAll>>"))
-        menu.add_command(label="Очистить", command=lambda: widget.delete(0, "end"))
-        widget.bind("<Button-3>", lambda e: (widget.focus_set(), menu.tk_popup(e.x_root, e.y_root)))
-        for seq, evt in (
-            ("<Control-c>", "<<Copy>>"),
-            ("<Control-x>", "<<Cut>>"),
-            ("<Control-v>", "<<Paste>>"),
-            ("<Control-a>", "<<SelectAll>>"),
-        ):
-            widget.bind(seq, lambda e, evt=evt: widget.event_generate(evt))
-
-    def _restore_settings(self) -> None:
-        subs = SUBTITLE_LABELS.get(self.settings.get("subtitles", "ru"), "Русские")
-        self.subtitles_combo.set(subs)
-        qual = QUALITY_LABELS.get(self.settings.get("quality", "lossless"), "Lossless (максимум)")
-        self.quality_combo.set(qual)
-
-    # -- сохранение настроек -------------------------------------------------
-    def _save_settings(self) -> None:
-        try:
-            save_settings(self.settings)
-        except OSError as exc:
-            messagebox.showerror("Ошибка", f"Не удалось сохранить настройки:\n{exc}")
-
-    def _on_group_change(self) -> None:
-        self.settings["group_playlist"] = bool(self.group_var.get())
-        self._save_settings()
-
-    def _on_subtitles_change(self) -> None:
-        label = self.subtitles_combo.get()
-        key = next((k for k, v in SUBTITLE_LABELS.items() if v == label), "ru")
-        self.settings["subtitles"] = key
-        self._save_settings()
-
-    def _on_quality_change(self) -> None:
-        label = self.quality_combo.get()
-        key = next((k for k, v in QUALITY_LABELS.items() if v == label), "lossless")
-        self.settings["quality"] = key
-        self._save_settings()
-
-    def _on_hevc_change(self) -> None:
-        self.settings["hevc"] = bool(self.hevc_var.get())
-        self._save_settings()
-
-    def _open_settings(self) -> None:
-        SettingsDialog(self)
-
-    # -- темы ----------------------------------------------------------------
-    def apply_theme(self, key: str) -> None:
-        colors = THEMES.get(key) or THEMES["scary_forest"]
-        style = ttk.Style(self)
-        style.theme_use("clam")
-
-        bg, surface, widget = colors["bg"], colors["surface"], colors["widget"]
-        text, accent = colors["text"], colors["accent"]
-
-        self.configure(background=bg)
-        style.configure(".", background=bg, foreground=text)
-        style.configure("TFrame", background=bg)
-        style.configure("TLabel", background=bg, foreground=text)
-        style.configure("TCheckbutton", background=bg, foreground=text)
-        style.map("TCheckbutton", background=[("active", bg)])
-        style.configure("TButton", background=surface, foreground=text, bordercolor=surface)
-        style.map(
-            "TButton",
-            background=[("active", accent), ("pressed", accent)],
-            foreground=[("active", bg), ("pressed", bg)],
-        )
-        style.configure(
-            "TEntry",
-            fieldbackground=widget,
-            foreground=text,
-            insertcolor=text,
-            bordercolor=surface,
-        )
-        style.configure(
-            "TCombobox",
-            fieldbackground=widget,
-            background=widget,
-            foreground=text,
-            arrowcolor=accent,
-        )
-        style.map(
-            "TCombobox",
-            fieldbackground=[("readonly", widget)],
-            foreground=[("readonly", text)],
-            selectbackground=[("readonly", accent)],
-            selectforeground=[("readonly", bg)],
-        )
-        style.configure(
-            "Horizontal.TProgressbar",
-            troughcolor=surface,
-            background=accent,
-            bordercolor=surface,
-            lightcolor=accent,
-            darkcolor=accent,
-        )
-        self.option_add("*TCombobox*Listbox.background", widget)
-        self.option_add("*TCombobox*Listbox.foreground", text)
-        self.option_add("*TCombobox*Listbox.selectBackground", accent)
-        self.option_add("*TCombobox*Listbox.selectForeground", bg)
-
-        self.log.configure(
-            bg=widget,
-            fg=text,
-            insertbackground=text,
-            highlightbackground=surface,
-            highlightcolor=accent,
-        )
-        self.status_var.set(self.status_var.get())
-
-    # -- обработчики UI ------------------------------------------------------
-    def _browse(self) -> None:
-        chosen = filedialog.askdirectory(initialdir=self.path_var.get() or str(default_download_dir()))
-        if chosen:
-            self.path_var.set(chosen)
-
-    def _start(self) -> None:
-        url = self.url_var.get().strip()
-        dest = self.path_var.get().strip() or str(default_download_dir())
-        playlist = self.playlist_var.get()
-
+    # -- загрузка ------------------------------------------------------------
+    def start_download(self, cfg: dict) -> dict:
+        url = (cfg.get("url") or "").strip()
+        dest = (cfg.get("dest") or "").strip() or str(default_download_dir())
         if not url:
-            messagebox.showwarning("Пустая ссылка", "Введите ссылку на видео или плейлист.")
-            return
+            return {"error": "Введите ссылку на видео или плейлист."}
+        playlist = bool(cfg.get("playlist"))
         if not playlist and is_playlist(url):
-            self._log("info", "Ссылка на плейлист без флажка — скачается только одно видео.")
-
-        self._set_busy(True)
-        self.pb["value"] = 0
-        self.status_var.set("Запуск…")
-        self.dl = Downloader(
-            on_log=lambda lvl, msg: self.queue.put(("log", lvl, msg)),
-            on_progress=lambda d: self.queue.put(("progress", d)),
-        )
+            self._log("warning", "Ссылка на плейлист без флажка — скачается только одно видео.")
+        with self._lock:
+            self._busy = True
+            self._status = "Запуск…"
+            self._progress = {"mode": "indeterminate"}
+        self.dl = Downloader(on_log=self._log, on_progress=self._on_progress)
         threading.Thread(
-            target=lambda: self.dl.download(
-                url,
-                dest,
-                playlist=playlist,
-                group=bool(self.group_var.get()),
-                subtitles=self.settings["subtitles"],
-                quality=self.settings["quality"],
-                hevc=bool(self.hevc_var.get()),
-            ),
+            target=lambda: self._run(url, dest, playlist,
+                                     bool(cfg.get("group", True)),
+                                     cfg.get("subtitles", "ru"),
+                                     cfg.get("quality", "lossless"),
+                                     bool(cfg.get("hevc", False))),
             daemon=True,
             name="yt-dlp",
         ).start()
+        return {}
 
-    def _cancel(self) -> None:
-        if self.dl:
-            self.dl.stop()
-            self._log("warning", "Запрос остановки…")
-
-    def _set_busy(self, busy: bool) -> None:
-        state = "disabled" if busy else "normal"
-        for w in (self.url_entry, self.path_entry, self.browse_btn,
-                  self.playlist_check, self.group_check,
-                  self.subtitles_combo, self.quality_combo, self.hevc_check,
-                  self.download_btn):
-            w.configure(state=state)
-        self.cancel_btn.configure(state="normal" if busy else "disabled")
-
-    # -- поток -> UI ---------------------------------------------------------
-    def _drain(self) -> None:
+    def _run(self, url, dest, playlist, group, subtitles, quality, hevc) -> None:
         try:
-            while True:
-                kind, *payload = self.queue.get_nowait()
-                if kind == "log":
-                    self._log(*payload)
-                elif kind == "progress":
-                    self._on_progress(payload[0])
-        except queue.Empty:
-            pass
-        self.after(100, self._drain)
+            self.dl.download(
+                url,
+                dest,
+                playlist=playlist,
+                group=group,
+                subtitles=subtitles,
+                quality=quality,
+                hevc=hevc,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._log("error", str(exc))
+        finally:
+            with self._lock:
+                self._busy = False
+                self._status = "Готов."
+                self._progress = {"mode": "determinate", "value": 100.0}
+
+    def stop_download(self) -> None:
+        if self.dl:
+            self._log("warning", "Запрос остановки…")
+            self.dl.stop()
+
+    # -- коллбеки от core ----------------------------------------------------
+    def _log(self, level: str, msg: str) -> None:
+        with self._lock:
+            self._logs.append(f"[{level}] {msg}")
 
     def _on_progress(self, d: dict) -> None:
         status = d.get("status")
-        if status == "downloading":
-            percent = d.get("percent")
-            if percent is None:
-                self.pb.config(mode="indeterminate")
-                self.pb.start(12)
-            else:
-                self.pb.stop()
-                self.pb.config(mode="determinate", value=percent)
-            name = d.get("filename") or ""
-            speed = d.get("speed")
-            eta = d.get("eta")
-            bits = f"{percent:.0f}%" if percent is not None else "…"
-            spd = f"{speed / 1024 / 1024:.1f} МБ/с" if speed else ""
-            eta_s = f" ETA {int(eta)}с" if eta else ""
-            self.status_var.set(f"{name} — {bits}{spd and ' | ' + spd}{eta_s}")
-        elif status == "postprocessing":
-            self.pb.config(mode="indeterminate")
-            self.pb.start(12)
-            self.status_var.set(d.get("msg", "Постобработка…"))
-        elif status == "done":
-            self.pb.stop()
-            self.pb.config(mode="determinate")
-            self._set_busy(False)
-            self.status_var.set("Готов.")
+        with self._lock:
+            if status == "downloading":
+                percent = d.get("percent")
+                name = d.get("filename") or ""
+                if percent is None:
+                    self._status = f"{name} — идёт загрузка…"
+                    self._progress = {"mode": "indeterminate"}
+                else:
+                    self._progress = {"mode": "determinate", "value": percent}
+                    bits = f"{percent:.0f}%"
+                    spd = f"{d['speed'] / 1024 / 1024:.1f} МБ/с" if d.get("speed") else ""
+                    eta = f" ETA {int(d['eta'])}с" if d.get("eta") else ""
+                    self._status = f"{name} — {bits}{(' | ' + spd) if spd else ''}{eta}"
+            elif status == "postprocessing":
+                self._status = d.get("msg", "Постобработка…")
+                self._progress = {"mode": "indeterminate"}
+            elif status == "done":
+                self._progress = {"mode": "determinate", "value": 100.0}
 
-    # -- лог -----------------------------------------------------------------
-    def _log(self, level: str, msg: str) -> None:
-        self.log.configure(state="normal")
-        self.log.insert("end", f"{msg}\n")
-        self.log.configure(state="disabled")
-        self.log.see("end")
+
+def main() -> None:
+    webview.create_window(
+        "Synfronia",
+        html=HTML,
+        js_api=Api(),
+        width=980,
+        height=780,
+        min_size=(780, 560),
+        background_color="#0c1622",
+    )
+    webview.start()
+
+
+def diagnose_freeze() -> None:
+    import io
+    import time
+    import traceback
+
+    lines: list[str] = []
+    t0 = time.time()
+
+    def step(name: str) -> None:
+        lines.append(f"[{time.time() - t0:6.2f}s] {name}")
+        with open("gui_diag.log", "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
+
+    step(f"start frozen={hasattr(sys, '_MEIPASS')}")
+    try:
+        import webview.platforms.edgechromium as ec  # noqa: PLC0415
+
+        step("edgechromium import ok")
+    except Exception:
+        step("edgechromium import FAILED")
+        traceback.print_exc(file=sys.stdout)
+    try:
+        step("before import clr")
+        import clr  # noqa: PLC0415
+
+        step("after import clr")
+        import clr_loader  # noqa: PLC0415
+
+        step("clr_loader ok")
+    except Exception:
+        step("clr/clr_loader FAILED")
+        traceback.print_exc(file=sys.stdout)
+    try:
+        step("before AddReference(WebView2.WinForms)")
+        clr.AddReference("Microsoft.Web.WebView2.WinForms")
+        step("AddReference(WebView2.WinForms) ok")
+        from webview.util import interop_dll_path  # noqa: PLC0415
+
+        step(f"interop dll: {interop_dll_path('Microsoft.Web.WebView2.Core.dll')}")
+        clr.AddReference(interop_dll_path("Microsoft.Web.WebView2.Core.dll"))
+        step("AddReference(Core.dll) ok")
+    except Exception:
+        step("WebView2 AddReference FAILED")
+        traceback.print_exc(file=sys.stdout)
+    step("diagnose done")
 
 
 if __name__ == "__main__":
-    import sys
-
+    if "--diagnose-freeze" in sys.argv:
+        diagnose_freeze()
+        sys.exit(0)
     if "--selftest" in sys.argv:
-        from core import Downloader
+        from core import Downloader  # noqa: PLC0415
 
         dest = sys.argv[2] if len(sys.argv) > 2 else "downloads_selftest"
         url = sys.argv[3] if len(sys.argv) > 3 else "https://youtu.be/GUS0q7gZdNE"
@@ -404,4 +459,4 @@ if __name__ == "__main__":
         print("selftest done")
         sys.exit(0)
 
-    App().mainloop()
+    main()
