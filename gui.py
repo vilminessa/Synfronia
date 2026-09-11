@@ -1,5 +1,6 @@
 """Web-интерфейс (pywebview/EdgeChromium) для Synfronia."""
 
+import json
 import sys
 import threading
 
@@ -7,8 +8,7 @@ import webview
 
 from core import (
     DEFAULT_SETTINGS,
-    QUALITY_FORMATS,
-    SUBTITLE_OPTIONS,
+    I18N,
     Downloader,
     available_transcoders,
     base_dir,
@@ -17,6 +17,7 @@ from core import (
     is_playlist,
     load_settings,
     save_settings,
+    tr,
 )
 
 HTML = r"""<!DOCTYPE html>
@@ -34,8 +35,15 @@ HTML = r"""<!DOCTYPE html>
     margin: 0; padding: 16px; font-family: "Segoe UI", system-ui, sans-serif;
     background: var(--bg); color: var(--text); font-size: 14px;
   }
-  h1 { font-size: 22px; margin: 0 0 4px; }
+  h1 { font-size: 22px; margin: 0 0 8px; }
   .sub { opacity: .65; font-size: 12px; }
+  .clicker-row { text-align: center; margin-top: 6px; }
+  .clicker {
+    background: none; border: none; color: var(--text); opacity: .35;
+    font-size: 16px; line-height: 1; padding: 2px 8px; cursor: pointer;
+    transition: opacity .15s, transform .15s;
+  }
+  .clicker:hover { opacity: 1; transform: scale(1.2); }
   .head { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 14px; }
   .brand { flex: 1; min-width: 0; }
   .icon-btn {
@@ -45,15 +53,15 @@ HTML = r"""<!DOCTYPE html>
   .logo {
     position: relative; display: inline-block;
     font-family: "Segoe UI", system-ui, sans-serif; font-size: 22px; font-weight: 700;
-    letter-spacing: 0.02em; color: var(--text); white-space: nowrap;
-    text-shadow: 0 0 0.15em var(--accent); filter: blur(0.007em);
+    letter-spacing: 0.02em; line-height: 1.15; color: var(--text); white-space: nowrap;
+    text-shadow: 0 0 0.12em var(--accent); filter: blur(0.006em);
     animation: logo-shake 2.5s linear forwards; user-select: none;
   }
-  .logo span {
-    position: absolute; top: 0; left: 0;
-    clip-path: polygon(10% 0%, 44% 0%, 70% 100%, 55% 100%);
+  .logo span, .logo::before, .logo::after {
+    position: absolute; top: 0; left: 0; line-height: inherit;
   }
-  .logo::before, .logo::after { content: attr(data-text); position: absolute; top: 0; left: 0; opacity: .75; }
+  .logo span { clip-path: polygon(10% 0%, 44% 0%, 70% 100%, 55% 100%); }
+  .logo::before, .logo::after { content: attr(data-text); opacity: .75; }
   .logo::before {
     clip-path: polygon(0% 0%, 10% 0%, 55% 100%, 0% 100%);
     animation: logo-crack1 2.5s linear forwards;
@@ -136,71 +144,62 @@ HTML = r"""<!DOCTYPE html>
   <div class="head">
     <div class="brand">
       <h1 class="logo" data-text="Synfronia"><span>Synfronia</span></h1>
-      <div class="sub">Скачивание видео и плейлистов YouTube (yt-dlp)</div>
+      <div class="sub" data-i18n="ui.sub">Скачивание видео и плейлистов YouTube (yt-dlp)</div>
     </div>
-    <button type="button" id="settings-btn" class="icon-btn" title="Настройки">&#x2699;&#xFE0E;</button>
+    <button type="button" id="settings-btn" class="icon-btn" data-i18n-title="ui.settings" title="Настройки">&#x2699;&#xFE0E;</button>
   </div>
 
   <div class="tabs">
-    <button type="button" id="tab-video" class="tab active">Видео</button>
-    <button type="button" id="tab-playlist" class="tab">Плейлист</button>
+    <button type="button" id="tab-video" class="tab active" data-i18n="tab.video">Видео</button>
+    <button type="button" id="tab-playlist" class="tab" data-i18n="tab.playlist">Плейлист</button>
   </div>
 
   <div id="panel-video" class="panel">
-    <label for="url-video">Ссылка на видео:</label>
+    <label for="url-video" data-i18n="url.video.label">Ссылка на видео:</label>
     <input type="text" id="url-video" placeholder="https://www.youtube.com/watch?v=…" autofocus>
   </div>
 
   <div id="panel-playlist" class="panel" hidden>
-    <label for="url-playlist">Ссылка на плейлист:</label>
+    <label for="url-playlist" data-i18n="url.playlist.label">Ссылка на плейлист:</label>
     <input type="text" id="url-playlist" placeholder="https://www.youtube.com/playlist?list=…">
-    <div class="check"><input type="checkbox" id="group"><span>Сгруппировать: плейлист в подпапку с его названием</span></div>
+    <div class="check"><input type="checkbox" id="group"><span data-i18n="group.label">Сгруппировать: плейлист в подпапку с его названием</span></div>
   </div>
 
-  <div id="warn">ffmpeg не найден — слияние, субтитры, метаданные и перекодировка будут недоступны.</div>
+  <div id="warn" data-i18n="warn.ffmpeg">ffmpeg не найден — слияние, субтитры, метаданные и перекодировка будут недоступны.</div>
 
   <div class="actions">
-    <button id="download">Скачать</button>
-    <button id="stop" disabled>Отмена</button>
+    <button id="download" data-i18n="btn.download">Скачать</button>
+    <button id="stop" disabled data-i18n="btn.stop">Отмена</button>
   </div>
 
   <div class="pb-wrap"><div id="pb"></div></div>
   <div id="status">Готов.</div>
   <textarea id="log" readonly></textarea>
+  <div class="clicker-row">
+    <button type="button" id="clicker" class="clicker" data-i18n-title="clicker.title" title="…">&#x25CF;</button>
+  </div>
 
   <div id="settings-overlay" class="overlay" hidden></div>
   <div id="settings-sheet" class="sheet" hidden>
     <div class="sheet-head">
-      <span class="sheet-title">Настройки</span>
-      <button type="button" id="settings-close" class="icon-btn" title="Закрыть">&#x2715;&#xFE0E;</button>
+      <span class="sheet-title" data-i18n="ui.settings">Настройки</span>
+      <button type="button" id="settings-close" class="icon-btn" data-i18n-title="ui.close" title="Закрыть">&#x2715;&#xFE0E;</button>
     </div>
     <div class="sheet-body">
-      <label for="dest">Папка скачивания:</label>
+      <label for="lang" data-i18n="sheet.lang.label">Язык:</label>
+      <select id="lang"></select>
+      <label for="dest" data-i18n="sheet.dest.label">Папка скачивания:</label>
       <div class="row">
         <input type="text" id="dest">
-        <button type="button" id="browse">Обзор…</button>
+        <button type="button" id="browse" data-i18n="sheet.browse">Обзор…</button>
       </div>
-      <label for="theme">Тема:</label>
+      <label for="theme" data-i18n="sheet.theme.label">Тема:</label>
       <select id="theme"></select>
-      <label for="subs">Субтитры:</label>
-      <select id="subs">
-        <option value="off">Выкл</option>
-        <option value="ru">Русские</option>
-        <option value="en">Английские</option>
-        <option value="all">Все</option>
-      </select>
-      <label for="qual">Ограничение качества:</label>
-      <select id="qual">
-        <option value="lossless">Lossless (максимум)</option>
-        <option value="8k">8K</option>
-        <option value="4k">4K</option>
-        <option value="2k">2K (1440p)</option>
-        <option value="1080">1080p</option>
-        <option value="720">720p</option>
-        <option value="480">480p</option>
-        <option value="240">240p</option>
-      </select>
-      <label for="transcode">Перекодировка:</label>
+      <label for="subs" data-i18n="sheet.subs.label">Субтитры:</label>
+      <select id="subs"></select>
+      <label for="qual" data-i18n="sheet.qual.label">Ограничение качества:</label>
+      <select id="qual"></select>
+      <label for="transcode" data-i18n="sheet.transcode.label">Перекодировка:</label>
       <select id="transcode"></select>
       <div id="transcode-note" class="note"></div>
     </div>
@@ -215,9 +214,88 @@ HTML = r"""<!DOCTYPE html>
     audrey_main: { bg: "#fff5f0", surface: "#f9f9f9", widget: "#ededed", text: "#5d5d5d", accent: "#96af9b" },
     night_sky: { bg: "#373051", surface: "#3b2f4d", widget: "#323756", text: "#fffedd", accent: "#fff2c9" }
   };
+  var I18N = __I18N__;
+  var LANGS = ["ru", "en", "ja", "zh-CN", "es", "de"];
+  var TRANS_KEYS = ["none", "libx265", "nvenc", "amf", "qsv"];
+  var QUAL_OPTIONS = [
+    ["lossless", "qual.lossless"], ["8k", "8K"], ["4k", "4K"], ["2k", "2K (1440p)"],
+    ["1080", "1080p"], ["720", "720p"], ["480", "480p"], ["240", "240p"]
+  ];
+  var SUB_OPTIONS = [["off", "subs.off"], ["ru", "subs.ru"], ["en", "subs.en"], ["all", "subs.all"]];
   var since = 0;
   var busy = false;
   var activeTab = "video";
+  var curLang = "ru";
+  var clicks = 0;
+  var transAvailability = { ffmpeg: true, avail: [] };
+
+  function t(key) {
+    var d = I18N[curLang] || I18N.ru;
+    if (d && d[key] !== undefined) return d[key];
+    if (I18N.ru[key] !== undefined) return I18N.ru[key];
+    return key;
+  }
+
+  function fillSelect(id, opts, keepValue) {
+    var sel = document.getElementById(id);
+    if (!keepValue) keepValue = sel.value;
+    sel.innerHTML = "";
+    opts.forEach(function(o) {
+      var opt = document.createElement("option");
+      opt.value = o[0];
+      opt.textContent = t(o[1]);
+      sel.appendChild(opt);
+    });
+    sel.value = keepValue;
+  }
+
+  function buildThemeOptions() { fillSelect("theme", Object.keys(THEMES).map(function(k) { return [k, "theme_" + k]; })); }
+  function buildSubsOptions() { fillSelect("subs", SUB_OPTIONS); }
+  function buildQualOptions() { fillSelect("qual", QUAL_OPTIONS); }
+  function buildTranscodeOptions() {
+    var sel = document.getElementById("transcode");
+    var prev = sel.value;
+    sel.innerHTML = "";
+    var missing = [];
+    TRANS_KEYS.forEach(function(key) {
+      var o = document.createElement("option");
+      o.value = key;
+      var label = t("trans." + key);
+      if (key !== "none" && (!transAvailability.ffmpeg || transAvailability.avail.indexOf(key) === -1)) {
+        o.disabled = true;
+        missing.push(label);
+        o.textContent = label + " " + t("trans.unavailable");
+      } else {
+        o.textContent = label;
+      }
+      sel.appendChild(o);
+    });
+    sel.value = prev;
+    var note = document.getElementById("transcode-note");
+    if (!transAvailability.ffmpeg) {
+      note.textContent = t("trans.note.noffmpeg");
+    } else if (missing.length) {
+      note.textContent = t("trans.note.missing") + missing.join(", ") + ".";
+    }
+  }
+  function buildLangOptions() { fillSelect("lang", LANGS.map(function(k) { return [k, "lang." + k]; })); }
+
+  function applyI18n() {
+    document.querySelectorAll("[data-i18n]").forEach(function(el) {
+      el.textContent = t(el.getAttribute("data-i18n"));
+    });
+    document.querySelectorAll("[data-i18n-title]").forEach(function(el) {
+      el.title = t(el.getAttribute("data-i18n-title"));
+    });
+    buildThemeOptions();
+    buildSubsOptions();
+    buildQualOptions();
+    buildTranscodeOptions();
+    buildLangOptions();
+    document.getElementById("lang").value = curLang;
+    document.documentElement.lang = curLang;
+    if (!busy) document.getElementById("status").textContent = t("status.ready");
+  }
 
   function applyTheme(key) {
     var c = THEMES[key] || THEMES.scary_forest;
@@ -232,7 +310,7 @@ HTML = r"""<!DOCTYPE html>
     busy = b;
     document.getElementById("download").disabled = b;
     document.getElementById("stop").disabled = !b;
-    ["tab-video", "tab-playlist", "url-video", "url-playlist", "settings-btn", "dest", "browse", "group", "theme", "subs", "qual", "transcode"]
+    ["tab-video", "tab-playlist", "url-video", "url-playlist", "settings-btn", "dest", "browse", "group", "theme", "subs", "qual", "transcode", "lang"]
       .forEach(function(id) { document.getElementById(id).disabled = b; });
   }
 
@@ -280,53 +358,25 @@ HTML = r"""<!DOCTYPE html>
   function init() {
     if (window.__initDone) return;
     window.__initDone = true;
-    var themeSel = document.getElementById("theme");
-    Object.keys(THEMES).forEach(function(k) {
-      var o = document.createElement("option");
-      o.value = k; o.textContent = k;
-      themeSel.appendChild(o);
-    });
-    pywebview.api.get_initial().then(function(init) {
-    document.getElementById("dest").value = init.default_dir;
-    document.getElementById("group").checked = init.settings.group_playlist !== false;
-    var selects = { subs: ["subtitles", "ru"], qual: ["quality", "lossless"], theme: ["theme", "scary_forest"] };
-    var keys = Object.keys(selects);
-    var i;
-    for (i = 0; i < keys.length; i++) {
-      var s = selects[keys[i]];
-      document.getElementById(keys[i]).value = init.settings[s[0]] || s[1];
-    }
-    document.getElementById("theme").value = init.settings.theme || "scary_forest";
+    pywebview.api.get_initial().then(function(initData) {
+    curLang = initData.settings.language || "ru";
+    if (LANGS.indexOf(curLang) === -1) curLang = "ru";
+    transAvailability = { ffmpeg: !!initData.ffmpeg, avail: initData.transcoders || [] };
+    buildThemeOptions();
+    buildSubsOptions();
+    buildQualOptions();
+    buildTranscodeOptions();
+    applyI18n();
+    document.getElementById("theme").value = initData.settings.theme || "scary_forest";
+    document.getElementById("subs").value = initData.settings.subtitles || "ru";
+    document.getElementById("qual").value = initData.settings.quality || "lossless";
+    document.getElementById("transcode").value = initData.settings.transcode || "none";
+    document.getElementById("lang").value = curLang;
     applyTheme(document.getElementById("theme").value);
-    if (!init.ffmpeg) document.getElementById("warn").style.display = "block";
-    var transcoders = [
-      { key: "none", label: "По умолчанию (Нет)" },
-      { key: "libx265", label: "HEVC (x265, программный)" },
-      { key: "nvenc", label: "NVIDIA NVENC (H.265)" },
-      { key: "amf", label: "AMD AMF (H.265)" },
-      { key: "qsv", label: "Intel Quick Sync (QSV) (H.265)" }
-    ];
-    var avail = init.transcoders || [];
-    var transSel = document.getElementById("transcode");
-    var missing = [];
-    transcoders.forEach(function(t) {
-      var o = document.createElement("option");
-      o.value = t.key;
-      if (t.key !== "none" && (!init.ffmpeg || avail.indexOf(t.key) === -1)) {
-        o.disabled = true;
-        missing.push(t.label);
-        o.textContent = t.label + " (недоступно)";
-      } else {
-        o.textContent = t.label;
-      }
-      transSel.appendChild(o);
-    });
-    transSel.value = init.settings.transcode || "none";
-    if (!init.ffmpeg) {
-      document.getElementById("transcode-note").textContent = "ffmpeg не найден — перекодировка недоступна.";
-    } else if (missing.length) {
-      document.getElementById("transcode-note").textContent = "В вашей сборке ffmpeg недоступны: " + missing.join(", ") + ".";
-    }
+    document.getElementById("dest").value = initData.default_dir;
+    document.getElementById("group").checked = initData.settings.group_playlist !== false;
+    document.getElementById("status").textContent = t("status.ready");
+    if (!initData.ffmpeg) document.getElementById("warn").style.display = "block";
     document.getElementById("theme").addEventListener("change", function() {
       applyTheme(this.value); pywebview.api.save_setting("theme", this.value);
     });
@@ -342,16 +392,21 @@ HTML = r"""<!DOCTYPE html>
     document.getElementById("group").addEventListener("change", function() {
       pywebview.api.save_setting("group_playlist", this.checked);
     });
+    document.getElementById("lang").addEventListener("change", function() {
+      curLang = this.value;
+      applyI18n();
+      applyTheme(document.getElementById("theme").value);
+      pywebview.api.save_setting("language", this.value);
+    });
     document.getElementById("download").addEventListener("click", async function() {
       var cfg = collect();
       if (!cfg.url) {
         document.getElementById("status").textContent = activeTab === "video"
-          ? "Введите ссылку на видео." : "Введите ссылку на плейлист.";
+          ? t("status.enter.video") : t("status.enter.playlist");
         return;
       }
       if (!cfg.playlist && /[?&]list=/.test(cfg.url)) {
-        document.getElementById("status").textContent =
-          "Это ссылка на плейлист: во вкладке «Видео» скачается только само видео. Откройте вкладку «Плейлист», чтобы скачать всё.";
+        document.getElementById("status").textContent = t("status.playlist.warning");
       }
       var res = await pywebview.api.start_download(cfg);
       if (res && res.error) document.getElementById("status").textContent = res.error;
@@ -362,6 +417,17 @@ HTML = r"""<!DOCTYPE html>
     document.getElementById("browse").addEventListener("click", async function() {
       var p = await pywebview.api.browse_folder();
       if (p) document.getElementById("dest").value = p;
+    });
+    document.getElementById("clicker").addEventListener("click", function() {
+      clicks++;
+      if (clicks >= 322) {
+        clicks = 0;
+        var themeSel = document.getElementById("theme");
+        themeSel.value = "night_sky";
+        applyTheme("night_sky");
+        pywebview.api.save_setting("theme", "night_sky");
+        document.getElementById("status").textContent = t("clicker.unlocked");
+      }
     });
     function openSettings() {
       document.getElementById("settings-overlay").hidden = false;
@@ -394,6 +460,8 @@ HTML = r"""<!DOCTYPE html>
 </html>
 """
 
+HTML = HTML.replace("__I18N__", json.dumps(I18N, ensure_ascii=False))
+
 
 class Api:
     def __init__(self) -> None:
@@ -402,7 +470,8 @@ class Api:
         self._transcoders: list[str] | None = None
         self._lock = threading.Lock()
         self._logs: list[str] = []
-        self._status = "Готов."
+        self._lang = self.settings.get("language", "ru")
+        self._status = tr(self._lang, "p.ready")
         self._busy = False
         self._progress = {"mode": "determinate", "value": 0.0}
 
@@ -430,6 +499,10 @@ class Api:
     def save_setting(self, key: str, value) -> str:
         if key in DEFAULT_SETTINGS:
             self.settings[key] = value
+            if key == "language":
+                self._lang = str(value)
+                if not self._busy:
+                    self._status = tr(self._lang, "p.ready")
             try:
                 save_settings(self.settings)
                 return "ok"
@@ -450,15 +523,15 @@ class Api:
         url = (cfg.get("url") or "").strip()
         dest = (cfg.get("dest") or "").strip() or str(default_download_dir())
         if not url:
-            return {"error": "Введите ссылку на видео или плейлист."}
+            return {"error": tr(self._lang, "p.enter_url")}
         playlist = bool(cfg.get("playlist"))
         if not playlist and is_playlist(url):
-            self._log("warning", "Это ссылка на плейлист во вкладке «Видео» — скачается только одно видео. Для всего плейлиста используйте вкладку «Плейлист».")
+            self._log("warning", tr(self._lang, "p.playlist_warn"))
         with self._lock:
             self._busy = True
-            self._status = "Запуск…"
+            self._status = tr(self._lang, "p.start")
             self._progress = {"mode": "indeterminate"}
-        self.dl = Downloader(on_log=self._log, on_progress=self._on_progress)
+        self.dl = Downloader(on_log=self._log, on_progress=self._on_progress, lang=self._lang)
         threading.Thread(
             target=lambda: self._run(url, dest, playlist,
                                      bool(cfg.get("group", True)),
@@ -486,12 +559,12 @@ class Api:
         finally:
             with self._lock:
                 self._busy = False
-                self._status = "Готов."
+                self._status = tr(self._lang, "p.ready")
                 self._progress = {"mode": "determinate", "value": 100.0}
 
     def stop_download(self) -> None:
         if self.dl:
-            self._log("warning", "Запрос остановки…")
+            self._log("warning", tr(self._lang, "p.stop_req"))
             self.dl.stop()
 
     # -- коллбеки от core ----------------------------------------------------
@@ -506,16 +579,17 @@ class Api:
                 percent = d.get("percent")
                 name = d.get("filename") or ""
                 if percent is None:
-                    self._status = f"{name} — идёт загрузка…"
+                    self._status = f"{name} — {tr(self._lang, 'p.going')}"
                     self._progress = {"mode": "indeterminate"}
                 else:
                     self._progress = {"mode": "determinate", "value": percent}
                     bits = f"{percent:.0f}%"
-                    spd = f"{d['speed'] / 1024 / 1024:.1f} МБ/с" if d.get("speed") else ""
-                    eta = f" ETA {int(d['eta'])}с" if d.get("eta") else ""
+                    spd = f"{d['speed'] / 1024 / 1024:.1f} {tr(self._lang, 'p.mbps')}" if d.get("speed") else ""
+                    eta = (f" {tr(self._lang, 'p.eta_prefix')} {int(d['eta'])}{tr(self._lang, 'p.eta_sec')}"
+                           if d.get("eta") else "")
                     self._status = f"{name} — {bits}{(' | ' + spd) if spd else ''}{eta}"
             elif status == "postprocessing":
-                self._status = d.get("msg", "Постобработка…")
+                self._status = d.get("msg") or tr(self._lang, "p.post")
                 self._progress = {"mode": "indeterminate"}
             elif status == "done":
                 self._progress = {"mode": "determinate", "value": 100.0}

@@ -73,7 +73,472 @@ DEFAULT_SETTINGS = {
     "quality": "lossless",   # lossless / 8k / 4k / 2k / 1080 / 720 / 480 / 240
     "transcode": "none",     # none / libx265 / nvenc / amf / qsv
     "group_playlist": True,
+    "language": "ru",
 }
+
+LANGUAGES = ("ru", "en", "ja", "zh-CN", "es", "de")
+
+I18N = {
+    "ru": {
+        "ui.sub": "Скачивание видео и плейлистов YouTube (yt-dlp)",
+        "ui.settings": "Настройки",
+        "ui.close": "Закрыть",
+        "tab.video": "Видео",
+        "tab.playlist": "Плейлист",
+        "url.video.label": "Ссылка на видео:",
+        "url.playlist.label": "Ссылка на плейлист:",
+        "group.label": "Сгруппировать: плейлист в подпапку с его названием",
+        "warn.ffmpeg": "ffmpeg не найден — слияние, субтитры, метаданные и перекодировка будут недоступны.",
+        "btn.download": "Скачать",
+        "btn.stop": "Отмена",
+        "status.ready": "Готов.",
+        "status.enter.video": "Введите ссылку на видео.",
+        "status.enter.playlist": "Введите ссылку на плейлист.",
+        "status.playlist.warning": "Это ссылка на плейлист: во вкладке «Видео» скачается только само видео. Откройте вкладку «Плейлист», чтобы скачать всё.",
+        "sheet.dest.label": "Папка скачивания:",
+        "sheet.browse": "Обзор…",
+        "sheet.theme.label": "Тема:",
+        "sheet.subs.label": "Субтитры:",
+        "sheet.qual.label": "Ограничение качества:",
+        "sheet.transcode.label": "Перекодировка:",
+        "sheet.lang.label": "Язык:",
+        "subs.off": "Выкл",
+        "subs.ru": "Русские",
+        "subs.en": "Английские",
+        "subs.all": "Все",
+        "qual.lossless": "Lossless (максимум)",
+        "trans.none": "По умолчанию (Нет)",
+        "trans.libx265": "HEVC (x265, программный)",
+        "trans.nvenc": "NVIDIA NVENC (H.265)",
+        "trans.amf": "AMD AMF (H.265)",
+        "trans.qsv": "Intel Quick Sync (QSV) (H.265)",
+        "trans.unavailable": "(недоступно)",
+        "trans.note.noffmpeg": "ffmpeg не найден — перекодировка недоступна.",
+        "trans.note.missing": "В вашей сборке ffmpeg недоступны: ",
+        "theme_scary_forest": "Scary Forest (тёмная)",
+        "theme_technology_day": "Technology day (тёмно-бирюзовая)",
+        "theme_technology_pinks": "Technology Pinks (светлая)",
+        "theme_scarred_mind": "Scarred Mind (тёмная)",
+        "theme_audrey_main": "Audrey Main Colours (светлая)",
+        "theme_night_sky": "Basic Night Sky (тёмная)",
+        "lang.ru": "Русский",
+        "lang.en": "English",
+        "lang.ja": "日本語",
+        "lang.zh": "简体中文",
+        "lang.es": "Español",
+        "lang.de": "Deutsch",
+        "clicker.title": "…",
+        "clicker.unlocked": "Секретная тема «Ночное небо» открыта!",
+        "p.ready": "Готов.",
+        "p.start": "Запуск…",
+        "p.enter_url": "Введите ссылку на видео или плейлист.",
+        "p.playlist_warn": "Это ссылка на плейлист во вкладке «Видео» — скачается только одно видео. Для всего плейлиста используйте вкладку «Плейлист».",
+        "p.stop_req": "Запрос остановки…",
+        "p.going": "идёт загрузка…",
+        "p.mbps": "МБ/с",
+        "p.eta_prefix": "ETA",
+        "p.eta_sec": "с",
+        "p.post": "Постобработка…",
+        "p.mode": "Режим: {mode} (группировка {group})",
+        "p.mode.video": "одно видео",
+        "p.mode.playlist": "плейлист",
+        "p.mode.on": "вкл",
+        "p.mode.off": "выкл",
+        "p.transcoding": "Перекодирование: {label}.",
+        "p.done.playlist": "Готово: {n} видео -> {dest}",
+        "p.done.single": "Готово: {title}",
+        "p.cancelled": "Загрузка отменена пользователем.",
+        "p.error": "Ошибка: {exc}",
+        "p.ffmpeg_missing": "ffmpeg не найден: слияние/субтитры/метаданные будут недоступны.",
+        "p.skip_not_mp4": "Пропуск перекодировки: файл не в mp4.",
+        "p.transcode_run": "Перекодировка ({vcodec})...",
+        "p.postprocess": "Постобработка (ffmpeg: слияние/HEVC/метаданные/субтитры/обложка)...",
+    },
+    "en": {
+        "ui.sub": "Download YouTube videos and playlists (yt-dlp)",
+        "ui.settings": "Settings",
+        "ui.close": "Close",
+        "tab.video": "Video",
+        "tab.playlist": "Playlist",
+        "url.video.label": "Video link:",
+        "url.playlist.label": "Playlist link:",
+        "group.label": "Group: save playlist into a subfolder named after it",
+        "warn.ffmpeg": "ffmpeg not found — merging, subtitles, metadata and transcoding will be unavailable.",
+        "btn.download": "Download",
+        "btn.stop": "Cancel",
+        "status.ready": "Ready.",
+        "status.enter.video": "Enter a video link.",
+        "status.enter.playlist": "Enter a playlist link.",
+        "status.playlist.warning": "This is a playlist link: in the Video tab only the single video will be downloaded. Open the Playlist tab to download everything.",
+        "sheet.dest.label": "Download folder:",
+        "sheet.browse": "Browse…",
+        "sheet.theme.label": "Theme:",
+        "sheet.subs.label": "Subtitles:",
+        "sheet.qual.label": "Quality limit:",
+        "sheet.transcode.label": "Transcoding:",
+        "sheet.lang.label": "Language:",
+        "subs.off": "Off",
+        "subs.ru": "Russian",
+        "subs.en": "English",
+        "subs.all": "All",
+        "qual.lossless": "Lossless (max)",
+        "trans.none": "Default (None)",
+        "trans.libx265": "HEVC (x265, software)",
+        "trans.nvenc": "NVIDIA NVENC (H.265)",
+        "trans.amf": "AMD AMF (H.265)",
+        "trans.qsv": "Intel Quick Sync (QSV) (H.265)",
+        "trans.unavailable": "(unavailable)",
+        "trans.note.noffmpeg": "ffmpeg not found — transcoding is unavailable.",
+        "trans.note.missing": "Not available in your ffmpeg build: ",
+        "theme_scary_forest": "Scary Forest (dark)",
+        "theme_technology_day": "Technology Day (dark teal)",
+        "theme_technology_pinks": "Technology Pinks (light)",
+        "theme_scarred_mind": "Scarred Mind (dark)",
+        "theme_audrey_main": "Audrey Main Colours (light)",
+        "theme_night_sky": "Basic Night Sky (dark)",
+        "lang.ru": "Русский",
+        "lang.en": "English",
+        "lang.ja": "日本語",
+        "lang.zh": "简体中文",
+        "lang.es": "Español",
+        "lang.de": "Deutsch",
+        "clicker.title": "…",
+        "clicker.unlocked": "Secret theme 'Night Sky' unlocked!",
+        "p.ready": "Ready.",
+        "p.start": "Starting…",
+        "p.enter_url": "Enter a video or playlist link.",
+        "p.playlist_warn": "This is a playlist link opened in the Video tab — only the single video will be downloaded. Use the Playlist tab to download everything.",
+        "p.stop_req": "Stop requested…",
+        "p.going": "downloading…",
+        "p.mbps": "MB/s",
+        "p.eta_prefix": "ETA",
+        "p.eta_sec": "s",
+        "p.post": "Post-processing…",
+        "p.mode": "Mode: {mode} (grouping {group})",
+        "p.mode.video": "single video",
+        "p.mode.playlist": "playlist",
+        "p.mode.on": "on",
+        "p.mode.off": "off",
+        "p.transcoding": "Transcoding: {label}.",
+        "p.done.playlist": "Done: {n} videos -> {dest}",
+        "p.done.single": "Done: {title}",
+        "p.cancelled": "Download cancelled by the user.",
+        "p.error": "Error: {exc}",
+        "p.ffmpeg_missing": "ffmpeg not found: merging/subtitles/metadata will be unavailable.",
+        "p.skip_not_mp4": "Skipping transcode: file is not mp4.",
+        "p.transcode_run": "Transcoding ({vcodec})...",
+        "p.postprocess": "Post-processing (ffmpeg: merge/HEVC/metadata/subtitles/thumbnail)...",
+    },
+    "ja": {
+        "ui.sub": "YouTubeの動画とプレイリストをダウンロード（yt-dlp）",
+        "ui.settings": "設定",
+        "ui.close": "閉じる",
+        "tab.video": "動画",
+        "tab.playlist": "プレイリスト",
+        "url.video.label": "動画のURL:",
+        "url.playlist.label": "プレイリストのURL:",
+        "group.label": "グループ化: プレイリストを名前の付いたサブフォルダーに保存",
+        "warn.ffmpeg": "ffmpegが見つかりません — 結合・字幕・メタデータ・再エンコードは利用できません。",
+        "btn.download": "ダウンロード",
+        "btn.stop": "キャンセル",
+        "status.ready": "準備完了。",
+        "status.enter.video": "動画のURLを入力してください。",
+        "status.enter.playlist": "プレイリストのURLを入力してください。",
+        "status.playlist.warning": "これはプレイリストのURLです: 「動画」タブでは単一の動画のみダウンロードされます。「プレイリスト」タブを開くとすべてダウンロードされます。",
+        "sheet.dest.label": "ダウンロード先:",
+        "sheet.browse": "参照…",
+        "sheet.theme.label": "テーマ:",
+        "sheet.subs.label": "字幕:",
+        "sheet.qual.label": "画質制限:",
+        "sheet.transcode.label": "再エンコード:",
+        "sheet.lang.label": "言語:",
+        "subs.off": "なし",
+        "subs.ru": "ロシア語",
+        "subs.en": "英語",
+        "subs.all": "すべて",
+        "qual.lossless": "ロスレス（最高）",
+        "trans.none": "デフォルト（なし）",
+        "trans.libx265": "HEVC（x265・ソフトウェア）",
+        "trans.nvenc": "NVIDIA NVENC（H.265）",
+        "trans.amf": "AMD AMF（H.265）",
+        "trans.qsv": "Intel Quick Sync（QSV）（H.265）",
+        "trans.unavailable": "（利用不可）",
+        "trans.note.noffmpeg": "ffmpegが見つかりません — 再エンコードは利用できません。",
+        "trans.note.missing": "このffmpegビルドでは利用不可: ",
+        "theme_scary_forest": "暗い森（ダーク）",
+        "theme_technology_day": "テクノロジーデー（ダークティール）",
+        "theme_technology_pinks": "テクノロジーピンク（ライト）",
+        "theme_scarred_mind": "傷跡の心（ダーク）",
+        "theme_audrey_main": "オードリー・メイン・カラーズ（ライト）",
+        "theme_night_sky": "夜空（ダーク）",
+        "lang.ru": "Русский",
+        "lang.en": "English",
+        "lang.ja": "日本語",
+        "lang.zh": "简体中文",
+        "lang.es": "Español",
+        "lang.de": "Deutsch",
+        "clicker.title": "…",
+        "clicker.unlocked": "秘密のテーマ「夜空」を解放しました！",
+        "p.ready": "準備完了。",
+        "p.start": "開始中…",
+        "p.enter_url": "動画またはプレイリストのURLを入力してください。",
+        "p.playlist_warn": "「動画」タブで開かれたプレイリストのURLです — 単一の動画のみダウンロードされます。すべてをダウンロードするには「プレイリスト」タブを使用してください。",
+        "p.stop_req": "停止を要求しました…",
+        "p.going": "ダウンロード中…",
+        "p.mbps": "MB/秒",
+        "p.eta_prefix": "残り",
+        "p.eta_sec": "秒",
+        "p.post": "後処理中…",
+        "p.mode": "モード: {mode}（グループ化 {group}）",
+        "p.mode.video": "単一動画",
+        "p.mode.playlist": "プレイリスト",
+        "p.mode.on": "オン",
+        "p.mode.off": "オフ",
+        "p.transcoding": "再エンコード: {label}。",
+        "p.done.playlist": "完了: {n} 動画 -> {dest}",
+        "p.done.single": "完了: {title}",
+        "p.cancelled": "ダウンロードはユーザーによってキャンセルされました。",
+        "p.error": "エラー: {exc}",
+        "p.ffmpeg_missing": "ffmpegが見つかりません: 結合・字幕・メタデータは利用できません。",
+        "p.skip_not_mp4": "再エンコードをスキップ: ファイルがmp4ではありません。",
+        "p.transcode_run": "再エンコード中（{vcodec}）...",
+        "p.postprocess": "後処理（ffmpeg: 結合/HEVC/メタデータ/字幕/サムネイル）...",
+    },
+    "zh-CN": {
+        "ui.sub": "下载 YouTube 视频和播放列表（yt-dlp）",
+        "ui.settings": "设置",
+        "ui.close": "关闭",
+        "tab.video": "视频",
+        "tab.playlist": "播放列表",
+        "url.video.label": "视频链接：",
+        "url.playlist.label": "播放列表链接：",
+        "group.label": "分组：将播放列表保存到以其命名的子文件夹",
+        "warn.ffmpeg": "未找到 ffmpeg — 合并、字幕、元数据和转码将不可用。",
+        "btn.download": "下载",
+        "btn.stop": "取消",
+        "status.ready": "就绪。",
+        "status.enter.video": "请输入视频链接。",
+        "status.enter.playlist": "请输入播放列表链接。",
+        "status.playlist.warning": "这是播放列表链接：在“视频”标签页中只会下载单个视频。请打开“播放列表”标签页以下载全部内容。",
+        "sheet.dest.label": "下载文件夹：",
+        "sheet.browse": "浏览…",
+        "sheet.theme.label": "主题：",
+        "sheet.subs.label": "字幕：",
+        "sheet.qual.label": "画质限制：",
+        "sheet.transcode.label": "转码：",
+        "sheet.lang.label": "语言：",
+        "subs.off": "关闭",
+        "subs.ru": "俄语",
+        "subs.en": "英语",
+        "subs.all": "全部",
+        "qual.lossless": "无损（最高）",
+        "trans.none": "默认（无）",
+        "trans.libx265": "HEVC（x265，软件）",
+        "trans.nvenc": "NVIDIA NVENC（H.265）",
+        "trans.amf": "AMD AMF（H.265）",
+        "trans.qsv": "Intel Quick Sync (QSV)（H.265）",
+        "trans.unavailable": "（不可用）",
+        "trans.note.noffmpeg": "未找到 ffmpeg — 转码不可用。",
+        "trans.note.missing": "您的 ffmpeg 版本中不可用：",
+        "theme_scary_forest": "黑暗森林（深色）",
+        "theme_technology_day": "科技之日（深青）",
+        "theme_technology_pinks": "科技粉红（浅色）",
+        "theme_scarred_mind": "伤痕之心（深色）",
+        "theme_audrey_main": "奥黛丽主色（浅色）",
+        "theme_night_sky": "夜空（深色）",
+        "lang.ru": "Русский",
+        "lang.en": "English",
+        "lang.ja": "日本語",
+        "lang.zh": "简体中文",
+        "lang.es": "Español",
+        "lang.de": "Deutsch",
+        "clicker.title": "…",
+        "clicker.unlocked": "解锁了秘密主题「夜空」！",
+        "p.ready": "就绪。",
+        "p.start": "正在启动…",
+        "p.enter_url": "请输入视频或播放列表链接。",
+        "p.playlist_warn": "这是在“视频”标签页中打开的播放列表链接 — 只会下载单个视频。请使用“播放列表”标签页下载全部内容。",
+        "p.stop_req": "正在停止…",
+        "p.going": "正在下载…",
+        "p.mbps": "MB/秒",
+        "p.eta_prefix": "剩余",
+        "p.eta_sec": "秒",
+        "p.post": "后处理中…",
+        "p.mode": "模式：{mode}（分组 {group}）",
+        "p.mode.video": "单个视频",
+        "p.mode.playlist": "播放列表",
+        "p.mode.on": "开",
+        "p.mode.off": "关",
+        "p.transcoding": "转码：{label}。",
+        "p.done.playlist": "完成：{n} 个视频 -> {dest}",
+        "p.done.single": "完成：{title}",
+        "p.cancelled": "下载已被用户取消。",
+        "p.error": "错误：{exc}",
+        "p.ffmpeg_missing": "未找到 ffmpeg：合并/字幕/元数据将不可用。",
+        "p.skip_not_mp4": "跳过转码：文件不是 mp4。",
+        "p.transcode_run": "正在转码（{vcodec}）...",
+        "p.postprocess": "后处理（ffmpeg：合并/HEVC/元数据/字幕/缩略图）...",
+    },
+    "es": {
+        "ui.sub": "Descarga vídeos y listas de reproducción de YouTube (yt-dlp)",
+        "ui.settings": "Configuración",
+        "ui.close": "Cerrar",
+        "tab.video": "Vídeo",
+        "tab.playlist": "Lista de reproducción",
+        "url.video.label": "Enlace del vídeo:",
+        "url.playlist.label": "Enlace de la lista:",
+        "group.label": "Agrupar: guardar la lista en una subcarpeta con su nombre",
+        "warn.ffmpeg": "No se encontró ffmpeg: la combinación, los subtítulos, los metadatos y la transcodificación no estarán disponibles.",
+        "btn.download": "Descargar",
+        "btn.stop": "Cancelar",
+        "status.ready": "Listo.",
+        "status.enter.video": "Introduce un enlace de vídeo.",
+        "status.enter.playlist": "Introduce un enlace de lista de reproducción.",
+        "status.playlist.warning": "Es un enlace de lista: en la pestaña «Vídeo» solo se descargará el propio vídeo. Abre la pestaña «Lista de reproducción» para descargarlo todo.",
+        "sheet.dest.label": "Carpeta de descarga:",
+        "sheet.browse": "Examinar…",
+        "sheet.theme.label": "Tema:",
+        "sheet.subs.label": "Subtítulos:",
+        "sheet.qual.label": "Límite de calidad:",
+        "sheet.transcode.label": "Transcodificación:",
+        "sheet.lang.label": "Idioma:",
+        "subs.off": "Apagado",
+        "subs.ru": "Ruso",
+        "subs.en": "Inglés",
+        "subs.all": "Todos",
+        "qual.lossless": "Lossless (máximo)",
+        "trans.none": "Predeterminado (Ninguno)",
+        "trans.libx265": "HEVC (x265, software)",
+        "trans.nvenc": "NVIDIA NVENC (H.265)",
+        "trans.amf": "AMD AMF (H.265)",
+        "trans.qsv": "Intel Quick Sync (QSV) (H.265)",
+        "trans.unavailable": "(no disponible)",
+        "trans.note.noffmpeg": "No se encontró ffmpeg: la transcodificación no está disponible.",
+        "trans.note.missing": "No disponibles en esta versión de ffmpeg: ",
+        "theme_scary_forest": "Bosque Tenebroso (oscuro)",
+        "theme_technology_day": "Día Tecnológico (verde azulado)",
+        "theme_technology_pinks": "Rosas Tecnológicos (claro)",
+        "theme_scarred_mind": "Mente Marcada (oscuro)",
+        "theme_audrey_main": "Colores de Audrey (claro)",
+        "theme_night_sky": "Cielo Nocturno (oscuro)",
+        "lang.ru": "Русский",
+        "lang.en": "English",
+        "lang.ja": "日本語",
+        "lang.zh": "简体中文",
+        "lang.es": "Español",
+        "lang.de": "Deutsch",
+        "clicker.title": "…",
+        "clicker.unlocked": "¡Tema secreto «Cielo Nocturno» desbloqueado!",
+        "p.ready": "Listo.",
+        "p.start": "Iniciando…",
+        "p.enter_url": "Introduce un enlace de vídeo o lista de reproducción.",
+        "p.playlist_warn": "Es un enlace de lista abierto en la pestaña «Vídeo»: solo se descargará un vídeo. Utiliza la pestaña «Lista de reproducción» para descargarlo todo.",
+        "p.stop_req": "Solicitud de detención…",
+        "p.going": "descargando…",
+        "p.mbps": "MB/s",
+        "p.eta_prefix": "ETA",
+        "p.eta_sec": "s",
+        "p.post": "Postprocesado…",
+        "p.mode": "Modo: {mode} (agrupación {group})",
+        "p.mode.video": "vídeo único",
+        "p.mode.playlist": "lista de reproducción",
+        "p.mode.on": "sí",
+        "p.mode.off": "no",
+        "p.transcoding": "Transcodificación: {label}.",
+        "p.done.playlist": "Listo: {n} vídeos -> {dest}",
+        "p.done.single": "Listo: {title}",
+        "p.cancelled": "Descarga cancelada por el usuario.",
+        "p.error": "Error: {exc}",
+        "p.ffmpeg_missing": "No se encontró ffmpeg: combinación/subtítulos/metadatos no estarán disponibles.",
+        "p.skip_not_mp4": "Se omite la transcodificación: el archivo no es mp4.",
+        "p.transcode_run": "Transcodificando ({vcodec})...",
+        "p.postprocess": "Postprocesado (ffmpeg: combinación/HEVC/metadatos/subtítulos/miniatura)...",
+    },
+    "de": {
+        "ui.sub": "YouTube-Videos und -Wiedergabelisten herunterladen (yt-dlp)",
+        "ui.settings": "Einstellungen",
+        "ui.close": "Schließen",
+        "tab.video": "Video",
+        "tab.playlist": "Wiedergabeliste",
+        "url.video.label": "Video-Link:",
+        "url.playlist.label": "Wiedergabelisten-Link:",
+        "group.label": "Gruppieren: Wiedergabeliste in einen Unterordner mit ihrem Namen speichern",
+        "warn.ffmpeg": "ffmpeg wurde nicht gefunden — Zusammenführen, Untertitel, Metadaten und Transkodierung sind nicht verfügbar.",
+        "btn.download": "Herunterladen",
+        "btn.stop": "Abbrechen",
+        "status.ready": "Bereit.",
+        "status.enter.video": "Bitte einen Video-Link eingeben.",
+        "status.enter.playlist": "Bitte einen Wiedergabelisten-Link eingeben.",
+        "status.playlist.warning": "Dies ist ein Listen-Link: Im Tab «Video» wird nur das einzelne Video heruntergeladen. Öffnen Sie den Tab «Wiedergabeliste», um alles zu laden.",
+        "sheet.dest.label": "Download-Ordner:",
+        "sheet.browse": "Durchsuchen…",
+        "sheet.theme.label": "Design:",
+        "sheet.subs.label": "Untertitel:",
+        "sheet.qual.label": "Qualitätslimit:",
+        "sheet.transcode.label": "Transkodierung:",
+        "sheet.lang.label": "Sprache:",
+        "subs.off": "Aus",
+        "subs.ru": "Russisch",
+        "subs.en": "Englisch",
+        "subs.all": "Alle",
+        "qual.lossless": "Lossless (max)",
+        "trans.none": "Standard (Keine)",
+        "trans.libx265": "HEVC (x265, Software)",
+        "trans.nvenc": "NVIDIA NVENC (H.265)",
+        "trans.amf": "AMD AMF (H.265)",
+        "trans.qsv": "Intel Quick Sync (QSV) (H.265)",
+        "trans.unavailable": "(nicht verfügbar)",
+        "trans.note.noffmpeg": "ffmpeg nicht gefunden — Transkodierung ist nicht verfügbar.",
+        "trans.note.missing": "In dieser ffmpeg-Version nicht verfügbar: ",
+        "theme_scary_forest": "Spukwald (dunkel)",
+        "theme_technology_day": "Technik-Tag (dunkles Petrol)",
+        "theme_technology_pinks": "Technik-Rosa (hell)",
+        "theme_scarred_mind": "Narben-Geist (dunkel)",
+        "theme_audrey_main": "Audrey-Farben (hell)",
+        "theme_night_sky": "Nachthimmel (dunkel)",
+        "lang.ru": "Русский",
+        "lang.en": "English",
+        "lang.ja": "日本語",
+        "lang.zh": "简体中文",
+        "lang.es": "Español",
+        "lang.de": "Deutsch",
+        "clicker.title": "…",
+        "clicker.unlocked": "Geheimes Design „Nachthimmel“ freigeschaltet!",
+        "p.ready": "Bereit.",
+        "p.start": "Starte…",
+        "p.enter_url": "Bitte einen Video- oder Listen-Link eingeben.",
+        "p.playlist_warn": "Dies ist ein Listen-Link im Tab «Video» — nur das einzelne Video wird heruntergeladen. Verwenden Sie den Tab «Wiedergabeliste», um alles zu laden.",
+        "p.stop_req": "Abbruch angefordert…",
+        "p.going": "lädt herunter…",
+        "p.mbps": "MB/s",
+        "p.eta_prefix": "ETA",
+        "p.eta_sec": "s",
+        "p.post": "Nachbearbeitung…",
+        "p.mode": "Modus: {mode} (Gruppierung {group})",
+        "p.mode.video": "einzelnes Video",
+        "p.mode.playlist": "Wiedergabeliste",
+        "p.mode.on": "an",
+        "p.mode.off": "aus",
+        "p.transcoding": "Transkodierung: {label}.",
+        "p.done.playlist": "Fertig: {n} Videos -> {dest}",
+        "p.done.single": "Fertig: {title}",
+        "p.cancelled": "Download vom Benutzer abgebrochen.",
+        "p.error": "Fehler: {exc}",
+        "p.ffmpeg_missing": "ffmpeg nicht gefunden: Zusammenführen/Untertitel/Metadaten sind nicht verfügbar.",
+        "p.skip_not_mp4": "Transkodierung übersprungen: Datei ist kein mp4.",
+        "p.transcode_run": "Transkodierung ({vcodec})...",
+        "p.postprocess": "Nachbearbeitung (ffmpeg: Zusammenführen/HEVC/Metadaten/Untertitel/Thumbnail)...",
+    },
+}
+
+
+def tr(lang: str, key: str, **kwargs) -> str:
+    """Переводит строку по ключу, с подстановкой {…} при наличии аргументов."""
+    d = I18N.get(lang) or I18N["ru"]
+    text = d.get(key)
+    if text is None:
+        text = I18N["ru"].get(key) or key
+    return text.format(**kwargs) if kwargs else text
 
 SUBTITLE_OPTIONS = {
     "off": None,
@@ -209,19 +674,20 @@ class _StopDownload(Exception):
 class TranscodePP(FFmpegPostProcessor):
     """Перекодирует видео выбранным кодировщиком (x265/NVENC/AMF/QSV)."""
 
-    def __init__(self, downloader=None, encoder: str = "libx265"):
+    def __init__(self, downloader=None, encoder: str = "libx265", lang: str = "ru"):
         super().__init__(downloader)
         self._config = TRANSCODERS.get(encoder) or TRANSCODERS["libx265"]
+        self._lang = lang
 
     @FFmpegPostProcessor._restrict_to(images=False)
     def run(self, info):
         filename = info.get("filepath")
         if not filename or info.get("ext", "").lower() != "mp4":
-            self.to_screen("Пропуск перекодировки: файл не в mp4.")
+            self.to_screen(tr(self._lang, "p.skip_not_mp4"))
             return [], info
         cfg = self._config
         temp = f"{filename}.tmp.mp4"
-        self.to_screen(f"Перекодировка ({cfg['vcodec']})...")
+        self.to_screen(tr(self._lang, "p.transcode_run", vcodec=cfg["vcodec"]))
         self.run_ffmpeg(
             filename,
             temp,
@@ -236,10 +702,14 @@ class TranscodePP(FFmpegPostProcessor):
 class Downloader:
     """Запускает yt-dlp в рабочем потоке и стучится в UI через колбэки."""
 
-    def __init__(self, on_log=None, on_progress=None):
+    def __init__(self, on_log=None, on_progress=None, lang: str = "ru"):
         self._on_log = on_log or (lambda *_: None)
         self._on_progress = on_progress or (lambda *_: None)
+        self._lang = lang if lang in LANGUAGES else "ru"
         self._stop = threading.Event()
+
+    def _t(self, key: str, **kwargs) -> str:
+        return tr(self._lang, key, **kwargs)
 
     def stop(self) -> None:
         self._stop.set()
@@ -286,7 +756,7 @@ class Downloader:
                     "status": "postprocessing",
                     "filename": "",
                     "percent": None,
-                    "msg": "Постобработка (ffmpeg: слияние/HEVC/метаданные/субтитры/обложка)...",
+                    "msg": self._t("p.postprocess"),
                 }
             )
 
@@ -329,12 +799,12 @@ class Downloader:
         if ffmpeg:
             opts["ffmpeg_location"] = ffmpeg
         else:
-            self._log("warning", "ffmpeg не найден: слияние/субтитры/метаданные будут недоступны.")
+            self._log("warning", self._t("p.ffmpeg_missing"))
         return opts
 
     def _register_pps(self, ydl: YoutubeDL, subs_on: bool, transcode: str) -> None:
         if transcode and transcode != "none":
-            ydl.add_post_processor(TranscodePP(ydl, transcode))
+            ydl.add_post_processor(TranscodePP(ydl, transcode, self._lang))
         if subs_on:
             ydl.add_post_processor(FFmpegEmbedSubtitlePP(ydl))
         ydl.add_post_processor(FFmpegMetadataPP(ydl))
@@ -354,11 +824,13 @@ class Downloader:
         os.makedirs(dest, exist_ok=True)
         opts = self._build_opts(dest, playlist, group, subtitles, quality)
         subs_on = bool(SUBTITLE_OPTIONS.get(subtitles))
-        self._log("info", f"Режим: {'плейлист' if playlist else 'одно видео'} "
-                          f"(группировка {'вкл' if playlist and group else 'выкл'})")
+        mode = self._t("p.mode.playlist" if playlist else "p.mode.video")
+        grouping = self._t("p.mode.on") if playlist and group else self._t("p.mode.off")
+        self._log("info", self._t("p.mode", mode=mode, group=grouping))
         if transcode and transcode != "none":
             encoder = TRANSCODERS.get(transcode)
-            self._log("info", f"Перекодирование: {encoder['label'] if encoder else transcode}.")
+            label = self._t("trans." + transcode) if "trans." + transcode in I18N["ru"] else (encoder["label"] if encoder else transcode)
+            self._log("info", self._t("p.transcoding", label=label))
         try:
             with YoutubeDL(self._add_ffmpeg(opts)) as ydl:
                 self._register_pps(ydl, subs_on, transcode)
@@ -366,15 +838,15 @@ class Downloader:
                 short = None
                 if info and info.get("_type") == "playlist":
                     done = [e for e in info.get("entries", []) if e]
-                    short = f"Готово: {len(done)} видео -> {os.path.basename(dest)}"
+                    short = self._t("p.done.playlist", n=len(done), dest=os.path.basename(dest))
                 elif info:
-                    short = f"Готово: {info.get('title', '?')}"
+                    short = self._t("p.done.single", title=info.get("title", "?"))
                 if short:
                     self._log("info", short)
         except _StopDownload:
-            self._log("warning", "Загрузка отменена пользователем.")
+            self._log("warning", self._t("p.cancelled"))
         except Exception as exc:  # noqa: BLE001
-            self._log("error", f"Ошибка: {exc}")
+            self._log("error", self._t("p.error", exc=exc))
         finally:
             self._stop.clear()
             self._on_progress({"status": "done"})
@@ -391,12 +863,13 @@ if __name__ == "__main__":
     parser.add_argument("--subtitles", choices=list(SUBTITLE_OPTIONS), default="ru")
     parser.add_argument("--quality", choices=list(QUALITY_FORMATS), default="lossless")
     parser.add_argument("--transcode", choices=list(TRANSCODERS), default="none")
+    parser.add_argument("--lang", choices=list(LANGUAGES), default="ru")
     args = parser.parse_args()
 
     def _log(level, msg):
         print(f"[{level}] {msg}")
 
-    dl = Downloader(on_log=_log)
+    dl = Downloader(on_log=_log, lang=args.lang)
     dl.download(
         args.url, args.dest,
         playlist=args.playlist,

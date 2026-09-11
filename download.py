@@ -4,6 +4,7 @@ import argparse
 import sys
 
 from core import (
+    LANGUAGES,
     QUALITY_FORMATS,
     SUBTITLE_OPTIONS,
     TRANSCODERS,
@@ -23,6 +24,7 @@ def main() -> int:
     parser.add_argument("--quality", choices=QUALITY_FORMATS, default="lossless")
     parser.add_argument("--transcode", choices=TRANSCODERS, default="none",
                         help="перекодировка: none (нет), libx265, nvenc, amf, qsv")
+    parser.add_argument("--lang", choices=LANGUAGES, default="ru")
     args = parser.parse_args()
 
     playlist = args.playlist or is_playlist(args.url)
@@ -30,7 +32,7 @@ def main() -> int:
     def _log(level: str, msg: str) -> None:
         print(f"[{level}] {msg}")
 
-    dl = Downloader(on_log=_log)
+    dl = Downloader(on_log=_log, lang=args.lang)
     dl.download(
         args.url,
         args.dest,
