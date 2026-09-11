@@ -37,13 +37,22 @@ HTML = r"""<!DOCTYPE html>
   }
   h1 { font-size: 22px; margin: 0 0 8px; }
   .sub { opacity: .65; font-size: 12px; }
-  .clicker-row { text-align: center; margin-top: 6px; }
+  .clicker-row { text-align: center; margin-top: 10px; }
   .clicker {
-    background: none; border: none; color: var(--text); opacity: .35;
-    font-size: 16px; line-height: 1; padding: 2px 8px; cursor: pointer;
-    transition: opacity .15s, transform .15s;
+    width: 46px; height: 46px; border-radius: 12px;
+    background: var(--surface); border: 1px solid var(--widget); color: var(--text);
+    font-size: 20px; line-height: 1; cursor: pointer; vertical-align: middle;
+    transition: transform .08s, background .15s, border-color .15s;
   }
-  .clicker:hover { opacity: 1; transform: scale(1.2); }
+  .clicker:hover { background: var(--widget); }
+  .clicker:active, .clicker.pressed {
+    transform: scale(.82);
+    background: var(--accent); border-color: var(--accent); color: var(--bg);
+  }
+  .clicker-count {
+    display: inline-block; margin-left: 8px; font-size: 12px; opacity: .7;
+    vertical-align: middle; font-variant-numeric: tabular-nums;
+  }
   .head { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 14px; }
   .brand { flex: 1; min-width: 0; }
   .icon-btn {
@@ -51,39 +60,15 @@ HTML = r"""<!DOCTYPE html>
     display: flex; align-items: center; justify-content: center; flex: none;
   }
   .logo {
-    position: relative; display: inline-block;
+    display: inline-block;
     font-family: "Segoe UI", system-ui, sans-serif; font-size: 22px; font-weight: 700;
     letter-spacing: 0.02em; line-height: 1.15; color: var(--text); white-space: nowrap;
-    text-shadow: 0 0 0.12em var(--accent); filter: blur(0.006em);
-    animation: logo-shake 2.5s linear forwards; user-select: none;
+    user-select: none;
+    animation: logo-bloom 3.5s ease-in-out infinite;
   }
-  .logo span, .logo::before, .logo::after {
-    position: absolute; top: 0; left: 0; line-height: inherit;
-  }
-  .logo span { clip-path: polygon(10% 0%, 44% 0%, 70% 100%, 55% 100%); }
-  .logo::before, .logo::after { content: attr(data-text); opacity: .75; }
-  .logo::before {
-    clip-path: polygon(0% 0%, 10% 0%, 55% 100%, 0% 100%);
-    animation: logo-crack1 2.5s linear forwards;
-  }
-  .logo::after {
-    clip-path: polygon(44% 0%, 100% 0%, 100% 100%, 70% 100%);
-    animation: logo-crack2 2.5s linear forwards;
-  }
-  @keyframes logo-shake {
-    5%, 15%, 25%, 35%, 55%, 65%, 75%, 95% { filter: blur(0.012em); transform: translateY(0.6px); }
-    10%, 30%, 40%, 50%, 70%, 80%, 90% { filter: blur(0.005em); transform: translateY(-0.6px); }
-    20%, 60% { filter: blur(0.02em); transform: translate(-1px, 0.8px); }
-    45%, 85% { filter: blur(0.02em); transform: translate(1px, -0.8px); }
-    100% { filter: blur(0.006em); transform: translate(0, 0) rotate(-0.4deg); }
-  }
-  @keyframes logo-crack1 {
-    0%, 85% { transform: translate(0, 0); }
-    100% { transform: translate(-1.5px, 1px); }
-  }
-  @keyframes logo-crack2 {
-    0%, 85% { transform: translate(0, 0); }
-    100% { transform: translate(1.5px, -1px); }
+  @keyframes logo-bloom {
+    0%, 100% { text-shadow: 0 0 5px var(--accent), 0 0 12px var(--accent), 0 0 24px var(--accent); opacity: .92; }
+    50% { text-shadow: 0 0 8px var(--accent), 0 0 20px var(--accent), 0 0 44px var(--accent); opacity: 1; }
   }
   .tabs { display: flex; gap: 8px; margin-bottom: 14px; }
   .tab {
@@ -143,7 +128,7 @@ HTML = r"""<!DOCTYPE html>
 <body>
   <div class="head">
     <div class="brand">
-      <h1 class="logo" data-text="Synfronia"><span>Synfronia</span></h1>
+      <h1 class="logo">Synfronia</h1>
       <div class="sub" data-i18n="ui.sub">Скачивание видео и плейлистов YouTube (yt-dlp)</div>
     </div>
     <button type="button" id="settings-btn" class="icon-btn" data-i18n-title="ui.settings" title="Настройки">&#x2699;&#xFE0E;</button>
@@ -177,6 +162,7 @@ HTML = r"""<!DOCTYPE html>
   <textarea id="log" readonly></textarea>
   <div class="clicker-row">
     <button type="button" id="clicker" class="clicker" data-i18n-title="clicker.title" title="…">&#x25CF;</button>
+    <span id="clicker-count" class="clicker-count">0/322</span>
   </div>
 
   <div id="settings-overlay" class="overlay" hidden></div>
@@ -368,7 +354,7 @@ HTML = r"""<!DOCTYPE html>
     buildTranscodeOptions();
     applyI18n();
     document.getElementById("theme").value = initData.settings.theme || "scary_forest";
-    document.getElementById("subs").value = initData.settings.subtitles || "ru";
+    document.getElementById("subs").value = initData.settings.subtitles || "en";
     document.getElementById("qual").value = initData.settings.quality || "lossless";
     document.getElementById("transcode").value = initData.settings.transcode || "none";
     document.getElementById("lang").value = curLang;
@@ -419,9 +405,15 @@ HTML = r"""<!DOCTYPE html>
       if (p) document.getElementById("dest").value = p;
     });
     document.getElementById("clicker").addEventListener("click", function() {
+      var btn = document.getElementById("clicker");
+      var countEl = document.getElementById("clicker-count");
       clicks++;
+      btn.classList.add("pressed");
+      setTimeout(function() { btn.classList.remove("pressed"); }, 120);
+      countEl.textContent = Math.min(clicks, 322) + "/322";
       if (clicks >= 322) {
         clicks = 0;
+        countEl.textContent = "0/322";
         var themeSel = document.getElementById("theme");
         themeSel.value = "night_sky";
         applyTheme("night_sky");
@@ -535,7 +527,7 @@ class Api:
         threading.Thread(
             target=lambda: self._run(url, dest, playlist,
                                      bool(cfg.get("group", True)),
-                                     cfg.get("subtitles", "ru"),
+                                     cfg.get("subtitles", "en"),
                                      cfg.get("quality", "lossless"),
                                      cfg.get("transcode", "none") or "none"),
             daemon=True,
@@ -664,7 +656,7 @@ if __name__ == "__main__":
 
         dest = sys.argv[2] if len(sys.argv) > 2 else "downloads_selftest"
         url = sys.argv[3] if len(sys.argv) > 3 else "https://youtu.be/GUS0q7gZdNE"
-        subtitles = "ru"
+        subtitles = "en"
         quality = "lossless"
         transcode = "none"
         for opt in sys.argv[4:]:

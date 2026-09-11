@@ -20,7 +20,7 @@ def main() -> int:
     parser.add_argument("--dest", default=str(default_download_dir()), help="папка для сохранения")
     parser.add_argument("--playlist", action="store_true", help="качать весь плейлист целиком")
     parser.add_argument("--no-group", action="store_true", help="не класть плейлист в подпапку")
-    parser.add_argument("--subtitles", choices=SUBTITLE_OPTIONS, default="ru")
+    parser.add_argument("--subtitles", choices=SUBTITLE_OPTIONS, default="en")
     parser.add_argument("--quality", choices=QUALITY_FORMATS, default="lossless")
     parser.add_argument("--transcode", choices=TRANSCODERS, default="none",
                         help="перекодировка: none (нет), libx265, nvenc, amf, qsv")

@@ -69,7 +69,7 @@ THEMES = {
 
 DEFAULT_SETTINGS = {
     "theme": "scary_forest",
-    "subtitles": "ru",       # off / ru / en / all
+    "subtitles": "en",       # off / ru / en / all
     "quality": "lossless",   # lossless / 8k / 4k / 2k / 1080 / 720 / 480 / 240
     "transcode": "none",     # none / libx265 / nvenc / amf / qsv
     "group_playlist": True,
@@ -817,7 +817,7 @@ class Downloader:
         dest: str,
         playlist: bool = False,
         group: bool = True,
-        subtitles: str = "ru",
+        subtitles: str = "en",
         quality: str = "lossless",
         transcode: str = "none",
     ) -> None:
@@ -860,7 +860,7 @@ if __name__ == "__main__":
     parser.add_argument("--dest", default=str(default_download_dir()))
     parser.add_argument("--playlist", action="store_true")
     parser.add_argument("--no-group", action="store_true")
-    parser.add_argument("--subtitles", choices=list(SUBTITLE_OPTIONS), default="ru")
+    parser.add_argument("--subtitles", choices=list(SUBTITLE_OPTIONS), default="en")
     parser.add_argument("--quality", choices=list(QUALITY_FORMATS), default="lossless")
     parser.add_argument("--transcode", choices=list(TRANSCODERS), default="none")
     parser.add_argument("--lang", choices=list(LANGUAGES), default="ru")
