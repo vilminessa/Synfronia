@@ -275,7 +275,6 @@ class Downloader:
         hevc: bool = False,
     ) -> None:
         os.makedirs(dest, exist_ok=True)
-        playlist = playlist or is_playlist(url)
         opts = self._build_opts(dest, playlist, group, subtitles, quality)
         subs_on = bool(SUBTITLE_OPTIONS.get(subtitles))
         self._log("info", f"Режим: {'плейлист' if playlist else 'одно видео'} "

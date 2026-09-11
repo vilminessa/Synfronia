@@ -41,6 +41,13 @@ HTML = r"""<!DOCTYPE html>
   }
   h1 { font-size: 18px; margin: 0 0 4px; }
   .sub { opacity: .65; font-size: 12px; margin-bottom: 14px; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+  .tab {
+    padding: 8px 22px; border: 1px solid var(--surface); border-radius: 8px;
+    background: var(--surface); color: var(--text); font-size: 14px; cursor: pointer;
+  }
+  .tab.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+  .panel { margin-bottom: 4px; }
   label { display: block; margin: 10px 0 4px; font-size: 13px; opacity: .9; }
   input[type=text], select {
     width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--surface);
@@ -80,17 +87,27 @@ HTML = r"""<!DOCTYPE html>
   <h1>Synfronia</h1>
   <div class="sub">Скачивание видео и плейлистов YouTube (yt-dlp)</div>
 
-  <label for="url">Ссылка (видео/плейлист):</label>
-  <input type="text" id="url" placeholder="https://www.youtube.com/watch?v=…" autofocus>
+  <div class="tabs">
+    <button type="button" id="tab-video" class="tab active">Видео</button>
+    <button type="button" id="tab-playlist" class="tab">Плейлист</button>
+  </div>
+
+  <div id="panel-video" class="panel">
+    <label for="url-video">Ссылка на видео:</label>
+    <input type="text" id="url-video" placeholder="https://www.youtube.com/watch?v=…" autofocus>
+  </div>
+
+  <div id="panel-playlist" class="panel" hidden>
+    <label for="url-playlist">Ссылка на плейлист:</label>
+    <input type="text" id="url-playlist" placeholder="https://www.youtube.com/playlist?list=…">
+    <div class="check"><input type="checkbox" id="group"><span>Сгруппировать: плейлист в подпапку с его названием</span></div>
+  </div>
 
   <label for="dest">Папка скачивания:</label>
   <div class="row">
     <input type="text" id="dest">
     <button id="browse">Обзор…</button>
   </div>
-
-  <div class="check"><input type="checkbox" id="playlist"><span>Скачать весь плейлист (иначе только одно видео)</span></div>
-  <div class="check"><input type="checkbox" id="group"><span>Сгруппировать: плейлист в подпапку с его названием</span></div>
 
   <div class="grid">
     <div>
@@ -137,6 +154,7 @@ HTML = r"""<!DOCTYPE html>
   };
   var since = 0;
   var busy = false;
+  var activeTab = "video";
 
   function applyTheme(key) {
     var c = THEMES[key] || THEMES.scary_forest;
@@ -151,8 +169,17 @@ HTML = r"""<!DOCTYPE html>
     busy = b;
     document.getElementById("download").disabled = b;
     document.getElementById("stop").disabled = !b;
-    ["url", "dest", "browse", "playlist", "group", "theme", "subs", "qual", "hevc"]
+    ["tab-video", "tab-playlist", "url-video", "url-playlist", "dest", "browse", "group", "theme", "subs", "qual", "hevc"]
       .forEach(function(id) { document.getElementById(id).disabled = b; });
+  }
+
+  function switchTab(name) {
+    activeTab = name;
+    document.getElementById("tab-video").classList.toggle("active", name === "video");
+    document.getElementById("tab-playlist").classList.toggle("active", name === "playlist");
+    document.getElementById("panel-video").hidden = name !== "video";
+    document.getElementById("panel-playlist").hidden = name !== "playlist";
+    if (!busy) document.getElementById(name === "video" ? "url-video" : "url-playlist").focus();
   }
 
   async function tick() {
@@ -177,9 +204,9 @@ HTML = r"""<!DOCTYPE html>
 
   function collect() {
     return {
-      url: document.getElementById("url").value.trim(),
+      url: document.getElementById(activeTab === "video" ? "url-video" : "url-playlist").value.trim(),
       dest: document.getElementById("dest").value.trim(),
-      playlist: document.getElementById("playlist").checked,
+      playlist: activeTab === "playlist",
       group: document.getElementById("group").checked,
       subtitles: document.getElementById("subs").value,
       quality: document.getElementById("qual").value,
@@ -227,7 +254,15 @@ HTML = r"""<!DOCTYPE html>
     });
     document.getElementById("download").addEventListener("click", async function() {
       var cfg = collect();
-      if (!cfg.url) { document.getElementById("status").textContent = "Введите ссылку на видео или плейлист."; return; }
+      if (!cfg.url) {
+        document.getElementById("status").textContent = activeTab === "video"
+          ? "Введите ссылку на видео." : "Введите ссылку на плейлист.";
+        return;
+      }
+      if (!cfg.playlist && /[?&]list=/.test(cfg.url)) {
+        document.getElementById("status").textContent =
+          "Это ссылка на плейлист: во вкладке «Видео» скачается только само видео. Откройте вкладку «Плейлист», чтобы скачать всё.";
+      }
       var res = await pywebview.api.start_download(cfg);
       if (res && res.error) document.getElementById("status").textContent = res.error;
     });
@@ -238,9 +273,13 @@ HTML = r"""<!DOCTYPE html>
       var p = await pywebview.api.browse_folder();
       if (p) document.getElementById("dest").value = p;
     });
-    document.getElementById("url").addEventListener("keydown", function(ev) {
-      if (ev.key === "Enter") document.getElementById("download").click();
+    ["url-video", "url-playlist"].forEach(function(id) {
+      document.getElementById(id).addEventListener("keydown", function(ev) {
+        if (ev.key === "Enter") document.getElementById("download").click();
+      });
     });
+    document.getElementById("tab-video").addEventListener("click", function() { switchTab("video"); });
+    document.getElementById("tab-playlist").addEventListener("click", function() { switchTab("playlist"); });
     }).catch(function(e) { console.error("init error:", e); });
   }
   if (window.pywebview !== undefined) { init(); }
@@ -306,7 +345,7 @@ class Api:
             return {"error": "Введите ссылку на видео или плейлист."}
         playlist = bool(cfg.get("playlist"))
         if not playlist and is_playlist(url):
-            self._log("warning", "Ссылка на плейлист без флажка — скачается только одно видео.")
+            self._log("warning", "Это ссылка на плейлист во вкладке «Видео» — скачается только одно видео. Для всего плейлиста используйте вкладку «Плейлист».")
         with self._lock:
             self._busy = True
             self._status = "Запуск…"
