@@ -10,6 +10,7 @@ from core import (
     QUALITY_FORMATS,
     SUBTITLE_OPTIONS,
     Downloader,
+    available_transcoders,
     base_dir,
     default_download_dir,
     find_ffmpeg,
@@ -17,12 +18,6 @@ from core import (
     load_settings,
     save_settings,
 )
-
-THEME_COLORS = {
-    "scary_forest": {"bg": "#0c1622", "surface": "#1f2b29", "widget": "#23444b", "text": "#dcdedd", "accent": "#628d7c"},
-    "technology_day": {"bg": "#00181a", "surface": "#00585a", "widget": "#003638", "text": "#dcdedd", "accent": "#00989b"},
-    "technology_pinks": {"bg": "#ffebec", "surface": "#ffcbe2", "widget": "#ffffff", "text": "#5d2547", "accent": "#c15f9b"},
-}
 
 HTML = r"""<!DOCTYPE html>
 <html lang="ru">
@@ -39,8 +34,49 @@ HTML = r"""<!DOCTYPE html>
     margin: 0; padding: 16px; font-family: "Segoe UI", system-ui, sans-serif;
     background: var(--bg); color: var(--text); font-size: 14px;
   }
-  h1 { font-size: 18px; margin: 0 0 4px; }
-  .sub { opacity: .65; font-size: 12px; margin-bottom: 14px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { opacity: .65; font-size: 12px; }
+  .head { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 14px; }
+  .brand { flex: 1; min-width: 0; }
+  .icon-btn {
+    width: 36px; height: 36px; padding: 0; font-size: 18px; line-height: 1;
+    display: flex; align-items: center; justify-content: center; flex: none;
+  }
+  .logo {
+    position: relative; display: inline-block;
+    font-family: "Segoe UI", system-ui, sans-serif; font-size: 22px; font-weight: 700;
+    letter-spacing: 0.02em; color: var(--text); white-space: nowrap;
+    text-shadow: 0 0 0.15em var(--accent); filter: blur(0.007em);
+    animation: logo-shake 2.5s linear forwards; user-select: none;
+  }
+  .logo span {
+    position: absolute; top: 0; left: 0;
+    clip-path: polygon(10% 0%, 44% 0%, 70% 100%, 55% 100%);
+  }
+  .logo::before, .logo::after { content: attr(data-text); position: absolute; top: 0; left: 0; opacity: .75; }
+  .logo::before {
+    clip-path: polygon(0% 0%, 10% 0%, 55% 100%, 0% 100%);
+    animation: logo-crack1 2.5s linear forwards;
+  }
+  .logo::after {
+    clip-path: polygon(44% 0%, 100% 0%, 100% 100%, 70% 100%);
+    animation: logo-crack2 2.5s linear forwards;
+  }
+  @keyframes logo-shake {
+    5%, 15%, 25%, 35%, 55%, 65%, 75%, 95% { filter: blur(0.012em); transform: translateY(0.6px); }
+    10%, 30%, 40%, 50%, 70%, 80%, 90% { filter: blur(0.005em); transform: translateY(-0.6px); }
+    20%, 60% { filter: blur(0.02em); transform: translate(-1px, 0.8px); }
+    45%, 85% { filter: blur(0.02em); transform: translate(1px, -0.8px); }
+    100% { filter: blur(0.006em); transform: translate(0, 0) rotate(-0.4deg); }
+  }
+  @keyframes logo-crack1 {
+    0%, 85% { transform: translate(0, 0); }
+    100% { transform: translate(-1.5px, 1px); }
+  }
+  @keyframes logo-crack2 {
+    0%, 85% { transform: translate(0, 0); }
+    100% { transform: translate(1.5px, -1px); }
+  }
   .tabs { display: flex; gap: 8px; margin-bottom: 14px; }
   .tab {
     padding: 8px 22px; border: 1px solid var(--surface); border-radius: 8px;
@@ -67,6 +103,19 @@ HTML = r"""<!DOCTYPE html>
   button:hover { background: var(--accent); color: var(--bg); }
   button:disabled:hover { background: var(--surface); color: var(--text); cursor: default; }
   .actions { margin-top: 16px; display: flex; gap: 8px; align-items: center; }
+  .overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 50;
+  }
+  .sheet {
+    position: fixed; top: 0; right: 0; bottom: 0; width: 330px; max-width: 92vw;
+    background: var(--surface); border-left: 1px solid var(--widget);
+    padding: 14px 16px; overflow-y: auto; z-index: 51;
+    box-shadow: -8px 0 24px rgba(0,0,0,.45);
+  }
+  .sheet-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+  .sheet-title { font-size: 16px; font-weight: 600; }
+  .sheet-body label { margin-top: 14px; }
+  .note { margin-top: 6px; font-size: 12px; opacity: .7; }
   .pb-wrap { margin-top: 14px; height: 10px; border-radius: 5px; background: var(--surface); overflow: hidden; }
   #pb { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
   #pb.indeterminate { width: 30%; animation: slide 1.2s infinite; }
@@ -84,8 +133,13 @@ HTML = r"""<!DOCTYPE html>
 </style>
 </head>
 <body>
-  <h1>Synfronia</h1>
-  <div class="sub">Скачивание видео и плейлистов YouTube (yt-dlp)</div>
+  <div class="head">
+    <div class="brand">
+      <h1 class="logo" data-text="Synfronia"><span>Synfronia</span></h1>
+      <div class="sub">Скачивание видео и плейлистов YouTube (yt-dlp)</div>
+    </div>
+    <button type="button" id="settings-btn" class="icon-btn" title="Настройки">&#x2699;&#xFE0E;</button>
+  </div>
 
   <div class="tabs">
     <button type="button" id="tab-video" class="tab active">Видео</button>
@@ -103,39 +157,7 @@ HTML = r"""<!DOCTYPE html>
     <div class="check"><input type="checkbox" id="group"><span>Сгруппировать: плейлист в подпапку с его названием</span></div>
   </div>
 
-  <label for="dest">Папка скачивания:</label>
-  <div class="row">
-    <input type="text" id="dest">
-    <button id="browse">Обзор…</button>
-  </div>
-
-  <div class="grid">
-    <div>
-      <label for="theme">Тема:</label>
-      <select id="theme"></select>
-    </div>
-    <div>
-      <label for="subs">Субтитры:</label>
-      <select id="subs">
-        <option value="off">Выкл</option>
-        <option value="ru">Русские</option>
-        <option value="en">Английские</option>
-        <option value="all">Все</option>
-      </select>
-    </div>
-    <div>
-      <label for="qual">Качество:</label>
-      <select id="qual">
-        <option value="lossless">Lossless (максимум)</option>
-        <option value="1080">1080p</option>
-        <option value="720">720p</option>
-        <option value="240">240p</option>
-      </select>
-    </div>
-    <div><div class="check" style="margin-top:22px"><input type="checkbox" id="hevc"><span>Конвертировать в HEVC (H.265)</span></div></div>
-  </div>
-
-  <div id="warn">ffmpeg не найден — слияние, субтитры, метаданные и HEVC будут недоступны.</div>
+  <div id="warn">ffmpeg не найден — слияние, субтитры, метаданные и перекодировка будут недоступны.</div>
 
   <div class="actions">
     <button id="download">Скачать</button>
@@ -146,11 +168,52 @@ HTML = r"""<!DOCTYPE html>
   <div id="status">Готов.</div>
   <textarea id="log" readonly></textarea>
 
+  <div id="settings-overlay" class="overlay" hidden></div>
+  <div id="settings-sheet" class="sheet" hidden>
+    <div class="sheet-head">
+      <span class="sheet-title">Настройки</span>
+      <button type="button" id="settings-close" class="icon-btn" title="Закрыть">&#x2715;&#xFE0E;</button>
+    </div>
+    <div class="sheet-body">
+      <label for="dest">Папка скачивания:</label>
+      <div class="row">
+        <input type="text" id="dest">
+        <button type="button" id="browse">Обзор…</button>
+      </div>
+      <label for="theme">Тема:</label>
+      <select id="theme"></select>
+      <label for="subs">Субтитры:</label>
+      <select id="subs">
+        <option value="off">Выкл</option>
+        <option value="ru">Русские</option>
+        <option value="en">Английские</option>
+        <option value="all">Все</option>
+      </select>
+      <label for="qual">Ограничение качества:</label>
+      <select id="qual">
+        <option value="lossless">Lossless (максимум)</option>
+        <option value="8k">8K</option>
+        <option value="4k">4K</option>
+        <option value="2k">2K (1440p)</option>
+        <option value="1080">1080p</option>
+        <option value="720">720p</option>
+        <option value="480">480p</option>
+        <option value="240">240p</option>
+      </select>
+      <label for="transcode">Перекодировка:</label>
+      <select id="transcode"></select>
+      <div id="transcode-note" class="note"></div>
+    </div>
+  </div>
+
 <script>
   var THEMES = {
     scary_forest:   { bg: "#0c1622", surface: "#1f2b29", widget: "#23444b", text: "#dcdedd", accent: "#628d7c" },
     technology_day: { bg: "#00181a", surface: "#00585a", widget: "#003638", text: "#dcdedd", accent: "#00989b" },
-    technology_pinks: { bg: "#ffebec", surface: "#ffcbe2", widget: "#ffffff", text: "#5d2547", accent: "#c15f9b" }
+    technology_pinks: { bg: "#ffebec", surface: "#ffcbe2", widget: "#ffffff", text: "#5d2547", accent: "#c15f9b" },
+    scarred_mind: { bg: "#252b47", surface: "#2f3b65", widget: "#1e2542", text: "#b9c2d6", accent: "#f1b970" },
+    audrey_main: { bg: "#fff5f0", surface: "#f9f9f9", widget: "#ededed", text: "#5d5d5d", accent: "#96af9b" },
+    night_sky: { bg: "#373051", surface: "#3b2f4d", widget: "#323756", text: "#fffedd", accent: "#fff2c9" }
   };
   var since = 0;
   var busy = false;
@@ -169,7 +232,7 @@ HTML = r"""<!DOCTYPE html>
     busy = b;
     document.getElementById("download").disabled = b;
     document.getElementById("stop").disabled = !b;
-    ["tab-video", "tab-playlist", "url-video", "url-playlist", "dest", "browse", "group", "theme", "subs", "qual", "hevc"]
+    ["tab-video", "tab-playlist", "url-video", "url-playlist", "settings-btn", "dest", "browse", "group", "theme", "subs", "qual", "transcode"]
       .forEach(function(id) { document.getElementById(id).disabled = b; });
   }
 
@@ -210,7 +273,7 @@ HTML = r"""<!DOCTYPE html>
       group: document.getElementById("group").checked,
       subtitles: document.getElementById("subs").value,
       quality: document.getElementById("qual").value,
-      hevc: document.getElementById("hevc").checked,
+      transcode: document.getElementById("transcode").value,
     };
   }
 
@@ -226,7 +289,6 @@ HTML = r"""<!DOCTYPE html>
     pywebview.api.get_initial().then(function(init) {
     document.getElementById("dest").value = init.default_dir;
     document.getElementById("group").checked = init.settings.group_playlist !== false;
-    document.getElementById("hevc").checked = !!init.settings.hevc;
     var selects = { subs: ["subtitles", "ru"], qual: ["quality", "lossless"], theme: ["theme", "scary_forest"] };
     var keys = Object.keys(selects);
     var i;
@@ -237,6 +299,34 @@ HTML = r"""<!DOCTYPE html>
     document.getElementById("theme").value = init.settings.theme || "scary_forest";
     applyTheme(document.getElementById("theme").value);
     if (!init.ffmpeg) document.getElementById("warn").style.display = "block";
+    var transcoders = [
+      { key: "none", label: "По умолчанию (Нет)" },
+      { key: "libx265", label: "HEVC (x265, программный)" },
+      { key: "nvenc", label: "NVIDIA NVENC (H.265)" },
+      { key: "amf", label: "AMD AMF (H.265)" },
+      { key: "qsv", label: "Intel Quick Sync (QSV) (H.265)" }
+    ];
+    var avail = init.transcoders || [];
+    var transSel = document.getElementById("transcode");
+    var missing = [];
+    transcoders.forEach(function(t) {
+      var o = document.createElement("option");
+      o.value = t.key;
+      if (t.key !== "none" && (!init.ffmpeg || avail.indexOf(t.key) === -1)) {
+        o.disabled = true;
+        missing.push(t.label);
+        o.textContent = t.label + " (недоступно)";
+      } else {
+        o.textContent = t.label;
+      }
+      transSel.appendChild(o);
+    });
+    transSel.value = init.settings.transcode || "none";
+    if (!init.ffmpeg) {
+      document.getElementById("transcode-note").textContent = "ffmpeg не найден — перекодировка недоступна.";
+    } else if (missing.length) {
+      document.getElementById("transcode-note").textContent = "В вашей сборке ffmpeg недоступны: " + missing.join(", ") + ".";
+    }
     document.getElementById("theme").addEventListener("change", function() {
       applyTheme(this.value); pywebview.api.save_setting("theme", this.value);
     });
@@ -246,8 +336,8 @@ HTML = r"""<!DOCTYPE html>
     document.getElementById("qual").addEventListener("change", function() {
       pywebview.api.save_setting("quality", this.value);
     });
-    document.getElementById("hevc").addEventListener("change", function() {
-      pywebview.api.save_setting("hevc", this.checked);
+    document.getElementById("transcode").addEventListener("change", function() {
+      pywebview.api.save_setting("transcode", this.value);
     });
     document.getElementById("group").addEventListener("change", function() {
       pywebview.api.save_setting("group_playlist", this.checked);
@@ -273,6 +363,20 @@ HTML = r"""<!DOCTYPE html>
       var p = await pywebview.api.browse_folder();
       if (p) document.getElementById("dest").value = p;
     });
+    function openSettings() {
+      document.getElementById("settings-overlay").hidden = false;
+      document.getElementById("settings-sheet").hidden = false;
+    }
+    function closeSettings() {
+      document.getElementById("settings-overlay").hidden = true;
+      document.getElementById("settings-sheet").hidden = true;
+    }
+    document.getElementById("settings-btn").addEventListener("click", openSettings);
+    document.getElementById("settings-close").addEventListener("click", closeSettings);
+    document.getElementById("settings-overlay").addEventListener("click", closeSettings);
+    document.addEventListener("keydown", function(ev) {
+      if (ev.key === "Escape") closeSettings();
+    });
     ["url-video", "url-playlist"].forEach(function(id) {
       document.getElementById(id).addEventListener("keydown", function(ev) {
         if (ev.key === "Enter") document.getElementById("download").click();
@@ -295,6 +399,7 @@ class Api:
     def __init__(self) -> None:
         self.settings = load_settings()
         self.dl: Downloader | None = None
+        self._transcoders: list[str] | None = None
         self._lock = threading.Lock()
         self._logs: list[str] = []
         self._status = "Готов."
@@ -312,10 +417,13 @@ class Api:
             }
 
     def get_initial(self) -> dict:
+        if self._transcoders is None:
+            self._transcoders = available_transcoders()
         return {
             "settings": dict(self.settings),
             "ffmpeg": bool(find_ffmpeg()),
             "default_dir": str(default_download_dir()),
+            "transcoders": list(self._transcoders),
         }
 
     # -- настройки -----------------------------------------------------------
@@ -356,13 +464,13 @@ class Api:
                                      bool(cfg.get("group", True)),
                                      cfg.get("subtitles", "ru"),
                                      cfg.get("quality", "lossless"),
-                                     bool(cfg.get("hevc", False))),
+                                     cfg.get("transcode", "none") or "none"),
             daemon=True,
             name="yt-dlp",
         ).start()
         return {}
 
-    def _run(self, url, dest, playlist, group, subtitles, quality, hevc) -> None:
+    def _run(self, url, dest, playlist, group, subtitles, quality, transcode) -> None:
         try:
             self.dl.download(
                 url,
@@ -371,7 +479,7 @@ class Api:
                 group=group,
                 subtitles=subtitles,
                 quality=quality,
-                hevc=hevc,
+                transcode=transcode,
             )
         except Exception as exc:  # noqa: BLE001
             self._log("error", str(exc))
@@ -484,17 +592,19 @@ if __name__ == "__main__":
         url = sys.argv[3] if len(sys.argv) > 3 else "https://youtu.be/GUS0q7gZdNE"
         subtitles = "ru"
         quality = "lossless"
-        hevc = False
+        transcode = "none"
         for opt in sys.argv[4:]:
             if opt.startswith("--subtitles="):
                 subtitles = opt.split("=", 1)[1]
             elif opt.startswith("--quality="):
                 quality = opt.split("=", 1)[1]
+            elif opt.startswith("--transcode="):
+                transcode = opt.split("=", 1)[1]
             elif opt == "--hevc":
-                hevc = True
+                transcode = "libx265"
         with open(base_dir() / "selftest.log", "w", encoding="utf-8") as f:
             dl = Downloader(on_log=lambda lvl, msg: f.write(f"[{lvl}] {msg}\n"))
-            dl.download(url, dest, subtitles=subtitles, quality=quality, hevc=hevc)
+            dl.download(url, dest, subtitles=subtitles, quality=quality, transcode=transcode)
         print("selftest done")
         sys.exit(0)
 

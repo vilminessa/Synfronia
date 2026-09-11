@@ -6,6 +6,7 @@ import sys
 from core import (
     QUALITY_FORMATS,
     SUBTITLE_OPTIONS,
+    TRANSCODERS,
     Downloader,
     default_download_dir,
     is_playlist,
@@ -20,7 +21,8 @@ def main() -> int:
     parser.add_argument("--no-group", action="store_true", help="не класть плейлист в подпапку")
     parser.add_argument("--subtitles", choices=SUBTITLE_OPTIONS, default="ru")
     parser.add_argument("--quality", choices=QUALITY_FORMATS, default="lossless")
-    parser.add_argument("--hevc", action="store_true", help="конвертировать видео в HEVC (H.265)")
+    parser.add_argument("--transcode", choices=TRANSCODERS, default="none",
+                        help="перекодировка: none (нет), libx265, nvenc, amf, qsv")
     args = parser.parse_args()
 
     playlist = args.playlist or is_playlist(args.url)
@@ -36,7 +38,7 @@ def main() -> int:
         group=not args.no_group,
         subtitles=args.subtitles,
         quality=args.quality,
-        hevc=args.hevc,
+        transcode=args.transcode,
     )
     return 0 if not dl.stopped else 1
 

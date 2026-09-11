@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -40,13 +41,37 @@ THEMES = {
         "text": "#5d2547",
         "accent": "#c15f9b",
     },
+    "scarred_mind": {
+        "label": "Scarred Mind (тёмная)",
+        "bg": "#252b47",
+        "surface": "#2f3b65",
+        "widget": "#1e2542",
+        "text": "#b9c2d6",
+        "accent": "#f1b970",
+    },
+    "audrey_main": {
+        "label": "Audrey Main Colours (светлая)",
+        "bg": "#fff5f0",
+        "surface": "#f9f9f9",
+        "widget": "#ededed",
+        "text": "#5d5d5d",
+        "accent": "#96af9b",
+    },
+    "night_sky": {
+        "label": "Basic Night Sky (тёмная)",
+        "bg": "#373051",
+        "surface": "#3b2f4d",
+        "widget": "#323756",
+        "text": "#fffedd",
+        "accent": "#fff2c9",
+    },
 }
 
 DEFAULT_SETTINGS = {
     "theme": "scary_forest",
     "subtitles": "ru",       # off / ru / en / all
-    "quality": "lossless",   # lossless / 1080 / 720 / 240
-    "hevc": False,
+    "quality": "lossless",   # lossless / 8k / 4k / 2k / 1080 / 720 / 480 / 240
+    "transcode": "none",     # none / libx265 / nvenc / amf / qsv
     "group_playlist": True,
 }
 
@@ -59,13 +84,48 @@ SUBTITLE_OPTIONS = {
 
 QUALITY_FORMATS = {
     "lossless": "bv*+ba/b",
+    "8k": "bv*[height<=4320]+ba/b[height<=4320]",
+    "4k": "bv*[height<=2160]+ba/b[height<=2160]",
+    "2k": "bv*[height<=1440]+ba/b[height<=1440]",
     "1080": "bv*[height<=1080]+ba/b[height<=1080]",
     "720": "bv*[height<=720]+ba/b[height<=720]",
+    "480": "bv*[height<=480]+ba/b[height<=480]",
     "240": "bv*[height<=240]+ba/b[height<=240]",
 }
 
-HEVC_PRESET = "medium"
-HEVC_CRF = 23
+TRANSCODERS = {
+    "libx265": {
+        "label": "HEVC (x265, программный)",
+        "vcodec": "libx265",
+        "tag": "hvc1",
+        "args": ["-preset", "medium", "-crf", "23"],
+    },
+    "nvenc": {
+        "label": "NVIDIA NVENC (H.265)",
+        "vcodec": "hevc_nvenc",
+        "tag": "hvc1",
+        "args": ["-preset", "p5", "-cq", "23"],
+    },
+    "amf": {
+        "label": "AMD AMF (H.265)",
+        "vcodec": "hevc_amf",
+        "tag": "hvc1",
+        "args": ["-quality", "quality", "-qp", "23"],
+    },
+    "qsv": {
+        "label": "Intel Quick Sync (QSV) (H.265)",
+        "vcodec": "hevc_qsv",
+        "tag": "hvc1",
+        "args": ["-preset", "medium", "-global_quality", "23"],
+    },
+}
+
+ENCODER_NAMES = {
+    "libx265": "libx265",
+    "nvenc": "hevc_nvenc",
+    "amf": "hevc_amf",
+    "qsv": "hevc_qsv",
+}
 
 
 # -- пути и настройки --------------------------------------------------------
@@ -90,6 +150,8 @@ def load_settings() -> dict:
     try:
         data = json.loads(settings_path().read_text(encoding="utf-8"))
         if isinstance(data, dict):
+            if "hevc" in data and "transcode" not in data:
+                settings["transcode"] = "libx265" if data["hevc"] else "none"
             for key in DEFAULT_SETTINGS:
                 if key in data:
                     settings[key] = data[key]
@@ -117,6 +179,24 @@ def find_ffmpeg() -> str | None:
     return None
 
 
+def available_transcoders(ffmpeg: str | None = None) -> list[str]:
+    """Ключи перекодировщиков, доступных в текущей сборке ffmpeg."""
+    ffmpeg = ffmpeg or find_ffmpeg()
+    if not ffmpeg:
+        return list(ENCODER_NAMES)
+    try:
+        proc = subprocess.run(
+            [ffmpeg, "-hide_banner", "-loglevel", "error", "-encoders"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return list(ENCODER_NAMES)
+    output = proc.stdout or ""
+    return [name for name, enc in ENCODER_NAMES.items() if re.search(rf"\b{re.escape(enc)}\b", output)]
+
+
 def is_playlist(url: str) -> bool:
     """Простая эвристика: признак ссылки на плейлист по ?list=."""
     return bool(_PLAYLIST_RE.search(url or ""))
@@ -126,31 +206,28 @@ class _StopDownload(Exception):
     pass
 
 
-class HEVCConvertPP(FFmpegPostProcessor):
-    """Перекодирует видео в HEVC (H.265): запускается после слияния, до встраивания."""
+class TranscodePP(FFmpegPostProcessor):
+    """Перекодирует видео выбранным кодировщиком (x265/NVENC/AMF/QSV)."""
 
-    def __init__(self, downloader=None):
+    def __init__(self, downloader=None, encoder: str = "libx265"):
         super().__init__(downloader)
+        self._config = TRANSCODERS.get(encoder) or TRANSCODERS["libx265"]
 
     @FFmpegPostProcessor._restrict_to(images=False)
     def run(self, info):
         filename = info.get("filepath")
         if not filename or info.get("ext", "").lower() != "mp4":
-            self.to_screen("Пропуск HEVC-конвертации: файл не в mp4.")
+            self.to_screen("Пропуск перекодировки: файл не в mp4.")
             return [], info
+        cfg = self._config
         temp = f"{filename}.tmp.mp4"
-        self.to_screen("Конвертация в HEVC (H.265)...")
+        self.to_screen(f"Перекодировка ({cfg['vcodec']})...")
         self.run_ffmpeg(
             filename,
             temp,
-            [
-                "-map", "0",
-                "-c:v", "libx265",
-                "-tag:v", "hvc1",
-                "-preset", HEVC_PRESET,
-                "-crf", str(HEVC_CRF),
-                "-c:a", "copy",
-            ],
+            ["-map", "0", "-c:v", cfg["vcodec"], "-tag:v", cfg["tag"]]
+            + cfg["args"]
+            + ["-c:a", "copy"],
         )
         os.replace(temp, filename)
         return [], info
@@ -255,9 +332,9 @@ class Downloader:
             self._log("warning", "ffmpeg не найден: слияние/субтитры/метаданные будут недоступны.")
         return opts
 
-    def _register_pps(self, ydl: YoutubeDL, subs_on: bool, hevc: bool) -> None:
-        if hevc:
-            ydl.add_post_processor(HEVCConvertPP(ydl))
+    def _register_pps(self, ydl: YoutubeDL, subs_on: bool, transcode: str) -> None:
+        if transcode and transcode != "none":
+            ydl.add_post_processor(TranscodePP(ydl, transcode))
         if subs_on:
             ydl.add_post_processor(FFmpegEmbedSubtitlePP(ydl))
         ydl.add_post_processor(FFmpegMetadataPP(ydl))
@@ -272,18 +349,19 @@ class Downloader:
         group: bool = True,
         subtitles: str = "ru",
         quality: str = "lossless",
-        hevc: bool = False,
+        transcode: str = "none",
     ) -> None:
         os.makedirs(dest, exist_ok=True)
         opts = self._build_opts(dest, playlist, group, subtitles, quality)
         subs_on = bool(SUBTITLE_OPTIONS.get(subtitles))
         self._log("info", f"Режим: {'плейлист' if playlist else 'одно видео'} "
                           f"(группировка {'вкл' if playlist and group else 'выкл'})")
-        if hevc:
-            self._log("info", "HEVC: видео будет перекодировано в H.265.")
+        if transcode and transcode != "none":
+            encoder = TRANSCODERS.get(transcode)
+            self._log("info", f"Перекодирование: {encoder['label'] if encoder else transcode}.")
         try:
             with YoutubeDL(self._add_ffmpeg(opts)) as ydl:
-                self._register_pps(ydl, subs_on, hevc)
+                self._register_pps(ydl, subs_on, transcode)
                 info = ydl.extract_info(url, download=True)
                 short = None
                 if info and info.get("_type") == "playlist":
@@ -312,7 +390,7 @@ if __name__ == "__main__":
     parser.add_argument("--no-group", action="store_true")
     parser.add_argument("--subtitles", choices=list(SUBTITLE_OPTIONS), default="ru")
     parser.add_argument("--quality", choices=list(QUALITY_FORMATS), default="lossless")
-    parser.add_argument("--hevc", action="store_true")
+    parser.add_argument("--transcode", choices=list(TRANSCODERS), default="none")
     args = parser.parse_args()
 
     def _log(level, msg):
@@ -325,5 +403,5 @@ if __name__ == "__main__":
         group=not args.no_group,
         subtitles=args.subtitles,
         quality=args.quality,
-        hevc=args.hevc,
+        transcode=args.transcode,
     )

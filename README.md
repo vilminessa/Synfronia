@@ -21,13 +21,18 @@ EdgeChromium) на основе [yt-dlp](https://github.com/yt-dlp/yt-dlp).
 - **Две вкладки: «Видео» и «Плейлист»** — отдельные конвейеры загрузки:
   видео (одно видео) и плейлисты (целиком, с опциональной группировкой
   в подпапку по названию плейлиста).
-- **Качество** — `lossless` (исходное), `1080`, `720`, `240`.
+- **Настройки в боковой панели** — кнопка-шестерёнка справа вверху открывает
+  панель: папка скачивания, тема, субтитры, ограничение качества, перекодировка.
+- **Качество** — `lossless` (исходное), `8K`, `4K`, `2K`, `1080`, `720`, `480`, `240`.
 - **Субтитры** — вшиваются в файл: `нет / русские / английские / все`.
-- **HEVC (H.265)** — опциональная конвертация в `libx265` со звуком без
-  перекодирования, тегом `hvc1`, ~вдвое меньший размер при том же качестве.
+- **Перекодировка** — по умолчанию выключена; на выбор `libx265` (программный
+  HEVC) и аппаратные `NVIDIA NVENC`, `AMD AMF`, `Intel Quick Sync (QSV)`
+  (доступные варианты определяются из установленного ffmpeg).
 - **Метаданные и обложка** — теги (название, автор, дата), превью вшивается
   как вложение (attached picture).
-- **Три темы оформления**: Scary Forest, Technology day, Technology Pinks.
+- **Шесть тем оформления**: Scary Forest, Technology day, Technology Pinks,
+  а также палитры Scarred Mind, Audrey Main Colours и Basic Night Sky
+  ([color-hex.com](https://www.color-hex.com/)).
 - **Ход загрузки и отмена** — прогресс-бар из логов yt-dlp, кнопка «Стоп».
 - **Настройки сохраняются** в `settings.json` рядом с приложением.
 
@@ -62,22 +67,24 @@ python gui.py
 |---|---|
 | Вкладки | «Видео» — одно видео; «Плейлист» — весь плейлист целиком |
 | Ссылка | URL в соответствующей вкладке (видео или плейлист YouTube) |
+| ⚙ Настройки | шестерёнка справа вверху: папка, тема, субтитры, качество, перекодировка |
 | Каталог | куда сохранять (по умолчанию `downloads\` рядом с приложением) |
-| Качество | `lossless` / 1080 / 720 / 240 |
+| Тема | Scary Forest / Technology day / Technology Pinks / Scarred Mind / Audrey Main / Night Sky |
+| Качество | `lossless` / 8K / 4K / 2K / 1080 / 720 / 480 / 240 |
 | Субтитры | off / ru / en / all (вшиваются в контейнер) |
-| HEVC | конвертировать в H.265 (`hvc1`, crf 23, preset medium) |
+| Перекодировка | none / libx265 / nvenc / amf / qsv (аппаратные — по доступности) |
 | Сгруппировать плейлист | скачать плейлист одним архивом |
 
 ### CLI
 
 ```bat
-python download.py <URL> [--subtitles ru] [--quality 720] [--hevc] [--dir C:\videos]
+python download.py <URL> [--subtitles ru] [--quality 720] [--transcode nvenc] [--dir C:\videos]
 ```
 
 ### Самопроверка (для отладки сборки)
 
 ```bat
-Synfronia.exe --selftest C:\videos https://youtu.be/GUS0q7gZdNE --subtitles ru --quality 720 --hevc
+Synfronia.exe --selftest C:\videos https://youtu.be/GUS0q7gZdNE --subtitles ru --quality 720 --transcode libx265
 ```
 
 Результаты пишутся в `selftest.log`, файлы — в указанный каталог.
