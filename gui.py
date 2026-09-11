@@ -274,6 +274,17 @@ HTML = r"""<!DOCTYPE html>
   }
   function buildLangOptions() { fillSelect("lang", LANGS.map(function(k) { return [k, "lang." + k]; })); }
 
+  function renderClicker() {
+    var btn = document.getElementById("clicker");
+    btn.textContent = clicks === 0 ? t("clicker.hint") : clicks;
+  }
+  function flashClickerMsg() {
+    var el = document.getElementById("clicker-msg");
+    el.textContent = t("clicker.msg1000");
+    el.classList.add("show");
+    setTimeout(function() { el.classList.remove("show"); }, 1100);
+  }
+
   function applyI18n() {
     document.querySelectorAll("[data-i18n]").forEach(function(el) {
       el.textContent = t(el.getAttribute("data-i18n"));
@@ -414,16 +425,6 @@ HTML = r"""<!DOCTYPE html>
       var p = await pywebview.api.browse_folder();
       if (p) document.getElementById("dest").value = p;
     });
-    function renderClicker() {
-      var btn = document.getElementById("clicker");
-      btn.textContent = clicks === 0 ? t("clicker.hint") : clicks;
-    }
-    function flashClickerMsg() {
-      var el = document.getElementById("clicker-msg");
-      el.textContent = t("clicker.msg1000");
-      el.classList.add("show");
-      setTimeout(function() { el.classList.remove("show"); }, 1100);
-    }
     document.getElementById("clicker").addEventListener("click", function() {
       var btn = document.getElementById("clicker");
       clicks++;
