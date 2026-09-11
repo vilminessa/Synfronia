@@ -37,21 +37,23 @@ HTML = r"""<!DOCTYPE html>
   }
   h1 { font-size: 22px; margin: 0 0 8px; }
   .sub { opacity: .65; font-size: 12px; }
-  .clicker-row { text-align: center; margin-top: 10px; }
+  .clicker-row { text-align: center; margin-top: 10px; position: relative; }
+  .clicker-msg {
+    position: absolute; top: -34px; left: 0; right: 0; text-align: center;
+    font-size: 13px; color: var(--accent); opacity: 0; transition: opacity .5s;
+    pointer-events: none; white-space: nowrap;
+  }
+  .clicker-msg.show { opacity: 1; }
   .clicker {
-    width: 46px; height: 46px; border-radius: 12px;
+    min-width: 120px; height: 42px; padding: 0 18px; border-radius: 12px;
     background: var(--surface); border: 1px solid var(--widget); color: var(--text);
-    font-size: 20px; line-height: 1; cursor: pointer; vertical-align: middle;
+    font-size: 15px; line-height: 1; cursor: pointer; vertical-align: middle;
     transition: transform .08s, background .15s, border-color .15s;
   }
   .clicker:hover { background: var(--widget); }
   .clicker:active, .clicker.pressed {
-    transform: scale(.82);
+    transform: scale(.9);
     background: var(--accent); border-color: var(--accent); color: var(--bg);
-  }
-  .clicker-count {
-    display: inline-block; margin-left: 8px; font-size: 12px; opacity: .7;
-    vertical-align: middle; font-variant-numeric: tabular-nums;
   }
   .head { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 14px; }
   .brand { flex: 1; min-width: 0; }
@@ -161,8 +163,8 @@ HTML = r"""<!DOCTYPE html>
   <div id="status">Готов.</div>
   <textarea id="log" readonly></textarea>
   <div class="clicker-row">
-    <button type="button" id="clicker" class="clicker" data-i18n-title="clicker.title" title="…">&#x25CF;</button>
-    <span id="clicker-count" class="clicker-count">0/322</span>
+    <div id="clicker-msg" class="clicker-msg"></div>
+    <button type="button" id="clicker" class="clicker" data-i18n-title="clicker.title" title="…">Кликни меня~</button>
   </div>
 
   <div id="settings-overlay" class="overlay" hidden></div>
@@ -198,7 +200,8 @@ HTML = r"""<!DOCTYPE html>
     technology_pinks: { bg: "#ffebec", surface: "#ffcbe2", widget: "#ffffff", text: "#5d2547", accent: "#c15f9b" },
     scarred_mind: { bg: "#252b47", surface: "#2f3b65", widget: "#1e2542", text: "#b9c2d6", accent: "#f1b970" },
     audrey_main: { bg: "#fff5f0", surface: "#f9f9f9", widget: "#ededed", text: "#5d5d5d", accent: "#96af9b" },
-    night_sky: { bg: "#373051", surface: "#3b2f4d", widget: "#323756", text: "#fffedd", accent: "#fff2c9" }
+    night_sky: { bg: "#373051", surface: "#3b2f4d", widget: "#323756", text: "#fffedd", accent: "#fff2c9" },
+    vilmy: { bg: "#F5F0E6", surface: "#EFE9DC", widget: "#EDE5D3", text: "#1F3A2E", accent: "#B89968" }
   };
   var I18N = __I18N__;
   var LANGS = ["ru", "en", "ja", "zh-CN", "es", "de"];
@@ -213,6 +216,7 @@ HTML = r"""<!DOCTYPE html>
   var activeTab = "video";
   var curLang = "ru";
   var clicks = 0;
+  var vilmyUnlocked = false;
   var transAvailability = { ffmpeg: true, avail: [] };
 
   function t(key) {
@@ -235,7 +239,11 @@ HTML = r"""<!DOCTYPE html>
     sel.value = keepValue;
   }
 
-  function buildThemeOptions() { fillSelect("theme", Object.keys(THEMES).map(function(k) { return [k, "theme_" + k]; })); }
+  function buildThemeOptions() {
+    fillSelect("theme", Object.keys(THEMES).filter(function(k) {
+      return k !== "vilmy" || vilmyUnlocked;
+    }).map(function(k) { return [k, "theme_" + k]; }));
+  }
   function buildSubsOptions() { fillSelect("subs", SUB_OPTIONS); }
   function buildQualOptions() { fillSelect("qual", QUAL_OPTIONS); }
   function buildTranscodeOptions() {
@@ -280,6 +288,7 @@ HTML = r"""<!DOCTYPE html>
     buildLangOptions();
     document.getElementById("lang").value = curLang;
     document.documentElement.lang = curLang;
+    renderClicker();
     if (!busy) document.getElementById("status").textContent = t("status.ready");
   }
 
@@ -348,6 +357,7 @@ HTML = r"""<!DOCTYPE html>
     curLang = initData.settings.language || "ru";
     if (LANGS.indexOf(curLang) === -1) curLang = "ru";
     transAvailability = { ffmpeg: !!initData.ffmpeg, avail: initData.transcoders || [] };
+    if (initData.settings.theme === "vilmy") vilmyUnlocked = true;
     buildThemeOptions();
     buildSubsOptions();
     buildQualOptions();
@@ -404,22 +414,34 @@ HTML = r"""<!DOCTYPE html>
       var p = await pywebview.api.browse_folder();
       if (p) document.getElementById("dest").value = p;
     });
+    function renderClicker() {
+      var btn = document.getElementById("clicker");
+      btn.textContent = clicks === 0 ? t("clicker.hint") : clicks;
+    }
+    function flashClickerMsg() {
+      var el = document.getElementById("clicker-msg");
+      el.textContent = t("clicker.msg1000");
+      el.classList.add("show");
+      setTimeout(function() { el.classList.remove("show"); }, 1100);
+    }
     document.getElementById("clicker").addEventListener("click", function() {
       var btn = document.getElementById("clicker");
-      var countEl = document.getElementById("clicker-count");
       clicks++;
       btn.classList.add("pressed");
       setTimeout(function() { btn.classList.remove("pressed"); }, 120);
-      countEl.textContent = Math.min(clicks, 322) + "/322";
-      if (clicks >= 322) {
-        clicks = 0;
-        countEl.textContent = "0/322";
+      if (clicks === 1000) flashClickerMsg();
+      if (clicks >= 2000) {
+        btn.style.display = "none";
+        vilmyUnlocked = true;
+        buildThemeOptions();
         var themeSel = document.getElementById("theme");
-        themeSel.value = "night_sky";
-        applyTheme("night_sky");
-        pywebview.api.save_setting("theme", "night_sky");
+        themeSel.value = "vilmy";
+        applyTheme("vilmy");
+        pywebview.api.save_setting("theme", "vilmy");
         document.getElementById("status").textContent = t("clicker.unlocked");
+        return;
       }
+      renderClicker();
     });
     function openSettings() {
       document.getElementById("settings-overlay").hidden = false;

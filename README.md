@@ -34,7 +34,7 @@ EdgeChromium) на основе [yt-dlp](https://github.com/yt-dlp/yt-dlp).
 - **Метаданные и обложка** — теги (название, автор, дата), превью вшивается
   как вложение (attached picture).
 - **Шесть тем оформления**: Scary Forest, Technology day, Technology Pinks,
-  а также палитры Scarred Mind, Audrey Main Colours и Basic Night Sky
+  а также палитры Scarred Mind, Audrey Main Colours, Basic Night Sky и Vilmy~
   ([color-hex.com](https://www.color-hex.com/)).
 - **Ход загрузки и отмена** — прогресс-бар из логов yt-dlp, кнопка «Стоп».
 - **Настройки сохраняются** в `settings.json` рядом с приложением.
@@ -73,7 +73,7 @@ python gui.py
 | ⚙ Настройки | шестерёнка справа вверху: язык, папка, тема, субтитры, качество, перекодировка |
 | Язык | Русский / English / 日本語 / 简体中文 / Español / Deutsch |
 | Каталог | куда сохранять (по умолчанию `downloads\` рядом с приложением) |
-| Тема | Scary Forest / Technology day / Technology Pinks / Scarred Mind / Audrey Main / Night Sky |
+| Тема | Scary Forest / Technology day / Technology Pinks / Scarred Mind / Audrey Main / Night Sky / Vilmy~ |
 | Качество | `lossless` / 8K / 4K / 2K / 1080 / 720 / 480 / 240 |
 | Субтитры | off / ru / en / all (вшиваются в контейнер) |
 | Перекодировка | none / libx265 / nvenc / amf / qsv (аппаратные — по доступности) |
