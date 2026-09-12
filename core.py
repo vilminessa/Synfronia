@@ -13,7 +13,12 @@ from pathlib import Path
 
 from yt_dlp import YoutubeDL
 from yt_dlp.postprocessor.embedthumbnail import EmbedThumbnailPP
-from yt_dlp.postprocessor.ffmpeg import FFmpegEmbedSubtitlePP, FFmpegMetadataPP, FFmpegPostProcessor
+from yt_dlp.postprocessor.ffmpeg import (
+    FFmpegMetadataPP,
+    FFmpegPostProcessor,
+    FFmpegPostProcessorError,
+    FFmpegEmbedSubtitlePP,
+)
 
 _PLAYLIST_RE = re.compile(r"[?&]list=")
 
@@ -862,20 +867,46 @@ class TranscodePP(FFmpegPostProcessor):
             self.to_screen(tr(self._lang, "p.skip_not_mp4"))
             return [], info
         temp = f"{out_path}.tmp.mp4"
-        self.to_screen(tr(self._lang, "p.transcode_run", vcodec=cfg["vcodec"]))
-        try:
-            self.run_ffmpeg(
-                filename,
-                temp,
-                ["-map", "0", "-c:v", cfg["vcodec"], "-tag:v", cfg["tag"]]
-                + cfg["args"]
-                + ["-c:a", "copy"],
-            )
-            if os.path.exists(temp):
-                os.replace(temp, out_path)
-        finally:
-            if os.path.exists(temp):
-                os.remove(temp)
+
+        # Список кодеров для попыток: сначала выбранный (NVENC/AMF/QSV),
+        # при недоступном GPU-кодеке падаем на CPU libx265.
+        candidates = [cfg["vcodec"].split("_")[0] if cfg["vcodec"] in ("hevc_nvenc", "hevc_amf", "hevc_qsv") else "libx265"]
+        if cfg["vcodec"] != "libx265":
+            candidates = ["nvenc" if cfg["vcodec"] == "hevc_nvenc" else ("amf" if cfg["vcodec"] == "hevc_amf" else ("qsv" if cfg["vcodec"] == "hevc_qsv" else "libx265"))]
+            candidates.append("libx265")
+
+        last_err = None
+        for enc in candidates:
+            enc_cfg = TRANSCODERS.get(enc) or TRANSCODERS["libx265"]
+            if enc_cfg["vcodec"] == "libx265" and last_err is not None:
+                self.to_screen(tr(self._lang, "p.transcode_fallback", vcodec="libx265"))
+            self.to_screen(tr(self._lang, "p.transcode_run", vcodec=enc_cfg["vcodec"]))
+            try:
+                self.run_ffmpeg(
+                    filename,
+                    temp,
+                    ["-map", "0:v:0", "-map", "0:a?"]
+                    + ([ "-map", "0:s?", "-c:s", "copy" ] if self._copy_subtitles else [])
+                    + ["-c:v", enc_cfg["vcodec"], "-tag:v", enc_cfg["tag"]]
+                    + enc_cfg["args"]
+                    + ["-c:a", "copy"],
+                )
+                if os.path.exists(temp):
+                    os.replace(temp, out_path)
+                last_err = None
+                break
+            except FFmpegPostProcessorError as e:
+                last_err = e
+                self.to_screen(tr(self._lang, "p.transcode_failed", detail=str(e)[:120]))
+                if os.path.exists(temp):
+                    os.remove(temp)
+                continue
+            finally:
+                if os.path.exists(temp):
+                    os.remove(temp)
+        if last_err is not None:
+            self.to_screen(tr(self._lang, "p.transcode_all_failed"))
+            return [], info
         info["filepath"] = out_path
         info["_filename"] = out_path
         return [], info
