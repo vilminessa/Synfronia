@@ -127,46 +127,50 @@ HTML = r"""<!DOCTYPE html>
     background: rgba(255, 180, 84, .15); border: 1px solid var(--warn); color: var(--warn); font-size: 13px;
   }
 
-  /* ---- ffmpeg bloom-оверлей: поверхность океана ---- */
+  /* ---- ffmpeg bloom-оверлей: дождь поверх темы ---- */
   #ffmpeg-overlay {
     position: fixed; inset: 0; z-index: 999; overflow: hidden;
     display: flex; align-items: center; justify-content: center;
     background:
-      radial-gradient(120% 90% at 50% 0%, #0e5f8a 0%, #0a3c5e 42%, #062438 70%, #04101c 100%);
+      radial-gradient(130% 110% at 50% 0%, rgba(40, 47, 80, .72) 0%, rgba(20, 22, 44, .82) 55%, rgba(6, 8, 16, .92) 100%);
     font-family: "Segoe UI", system-ui, sans-serif;
+    -webkit-backdrop-filter: blur(5px);
+    backdrop-filter: blur(5px);
   }
-  #ffmpeg-overlay::before {   /* световая волна bloom сверху */
-    content: ""; position: absolute; left: -40%; right: -30%; top: -220px;
-    height: 520px; opacity: .55; filter: blur(26px); pointer-events: none;
-    background: radial-gradient(ellipse at 50% 0%, rgba(120, 215, 255, .55), rgba(60, 140, 190, .12) 60%, transparent 75%);
-    animation: bloom-drift 9s ease-in-out infinite alternate;
+  /* дождь (по мотивам codepen jh3y/WyNdMG: капли со случайными CSS-переменными) */
+  #ffmpeg-rain { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 1; }
+  #ffmpeg-rain i {
+    position: absolute; top: -30vh; left: var(--x, 50%);
+    width: 2px; height: var(--len, 14vh); border-radius: 3px;
+    background: linear-gradient(180deg, transparent 0%, rgba(205, 230, 255, .9) 60%, rgba(255, 255, 255, .95) 100%);
+    box-shadow: 0 0 6px rgba(140, 200, 255, .35);
+    opacity: var(--op, .6);
+    animation: rain-fall var(--dur, 1s) linear infinite;
+    animation-delay: var(--delay, 0s);
   }
-  #ffmpeg-overlay::after {    /* блики-блики на воде */
-    content: ""; position: absolute; left: -15%; right: -15%; bottom: -18%;
-    height: 46%; pointer-events: none; opacity: .38;
-    background:
-      radial-gradient(40% 60% at 20% 20%, rgba(180,230,255,.5), transparent 60%),
-      radial-gradient(50% 70% at 70% 40%, rgba(90,190,240,.4), transparent 65%),
-      radial-gradient(60% 55% at 45% 80%, rgba(255,255,255,.18), transparent 70%);
-    background-size: 340px 260px, 420px 300px, 480px 320px;
-    animation: bloom-float 13s ease-in-out infinite alternate;
+  @keyframes rain-fall {
+    0%   { transform: translateY(-30vh); }
+    100% { transform: translateY(150vh); }
   }
-  @keyframes bloom-drift { from { transform: translateX(-6%) scale(1); } to { transform: translateX(6%) scale(1.15); } }
-  @keyframes bloom-float { from { transform: translateY(6px) rotate(-.4deg); } to { transform: translateY(-10px) rotate(.5deg); } }
 
-  #ffmpeg-box {
-    position: relative; z-index: 2; text-align: center; color: #eaf6ff;
-    max-width: 560px; padding: 24px; text-shadow: 0 2px 18px rgba(0,10,20,.65);
+  #ffmpeg-box { position: relative; z-index: 2; text-align: center; color: #eaf6ff; max-width: 600px; }
+  /* заголовок в собственном «box» с размытием фона, чтобы читался поверх индикатора */
+  #ffmpeg-head {
+    display: inline-block; margin-bottom: 30px; padding: 20px 40px;
+    background: rgba(12, 16, 28, .38);
+    -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+    border-radius: 22px;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .09), 0 10px 40px rgba(0, 0, 0, .35);
   }
   #ffmpeg-title {
-    margin: 0 0 6px; font-size: 46px; font-weight: 700; letter-spacing: .04em;
+    margin: 0 0 6px; font-size: 44px; font-weight: 700; letter-spacing: .04em;
     color: #fff; animation: ff-title-bloom 3.6s ease-in-out infinite;
   }
   @keyframes ff-title-bloom {
-    0%, 100% { text-shadow: 0 0 14px rgba(130, 225, 255, .65), 0 0 34px rgba(90, 190, 240, .35); }
-    50% { text-shadow: 0 0 22px rgba(130, 225, 255, .95), 0 0 60px rgba(90, 190, 240, .6); }
+    0%, 100% { text-shadow: 0 0 14px rgba(130, 225, 255, .6), 0 0 34px rgba(90, 190, 240, .35); }
+    50% { text-shadow: 0 0 22px rgba(130, 225, 255, .9), 0 0 60px rgba(90, 190, 240, .6); }
   }
-  #ffmpeg-sub { font-size: 15px; opacity: .92; margin: 0 auto 30px; line-height: 1.5; max-width: 440px; }
+  #ffmpeg-sub { font-size: 15px; opacity: .94; margin: 0; line-height: 1.5; max-width: 440px; }
 
   /* кнопка в стиле hyperspace (codepen mephysto/poKNxoY) */
   #ffmpeg-dl {
@@ -186,20 +190,25 @@ HTML = r"""<!DOCTYPE html>
     z-index: 10; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
   }
 
-  /* спиннер в стиле hakimel/kWOKbK */
-  #ffmpeg-spinner { position: absolute; top: 50%; left: 50%; perspective: 240px; }
-  #ffmpeg-spinner i { display: block; position: absolute; opacity: 1; }
-  #ffmpeg-spinner i b {
-    display: block; width: 7px; height: 7px; border-radius: 7px;
-    background: rgba(255,255,255,1); box-shadow: 0 0 16px rgba(255,255,255,.95);
-    animation: ff-spin-pt 3.2s ease-in-out infinite;
+  /* прогресс-кольцо: заполняется по мере скачивания */
+  #ffmpeg-progress { position: relative; width: 170px; height: 170px; margin: 0 auto; }
+  #ffmpeg-ring { width: 170px; height: 170px; transform: rotate(-90deg); display: block; }
+  #ffmpeg-ring circle { fill: none; stroke-width: 9; }
+  #ffmpeg-ring .ring-bg { stroke: rgba(255, 255, 255, .15); }
+  #ffmpeg-ring .ring-fg {
+    stroke: #fff; stroke-linecap: round;
+    stroke-dasharray: 326.7; stroke-dashoffset: 326.7;
+    transition: stroke-dashoffset .25s linear;
+    filter: drop-shadow(0 0 6px rgba(140, 220, 255, .85));
   }
-  @keyframes ff-spin-pt {
-    0% { transform: scale(1); }
-    15% { transform: translate(-3.5px,-3.5px) scale(3); }
-    50% { transform: scale(1); }
+  #ffmpeg-ring.ffmpeg-extracting { animation: ring-spin 1.1s linear infinite; }
+  #ffmpeg-ring.ffmpeg-extracting .ring-fg { stroke-dasharray: 40 286.7; }
+  @keyframes ring-spin { from { transform: rotate(-90deg); } to { transform: rotate(270deg); } }
+  #ffmpeg-percent {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-size: 34px; font-weight: 700; color: #fff; text-shadow: 0 0 12px rgba(140, 220, 255, .9);
   }
-  #ffmpeg-status { margin-top: 34px; font-size: 15px; min-height: 20px; color: #dff3ff; }
+  #ffmpeg-status { margin-top: 26px; font-size: 15px; min-height: 20px; color: #dff3ff; }
   #ffmpeg-retry {
     margin-top: 12px; display: none;
     background: transparent; border: 1px solid rgba(255,255,255,.55); color: #fff;
@@ -238,15 +247,24 @@ HTML = r"""<!DOCTYPE html>
   <div id="warn" data-i18n="warn.ffmpeg">ffmpeg не найден — слияние, субтитры, метаданные и перекодировка будут недоступны.</div>
 
   <div id="ffmpeg-overlay" class="ffmpeg-hidden">
+    <div id="ffmpeg-rain"></div>
     <div id="ffmpeg-box">
-      <div id="ffmpeg-title">Synfronia</div>
-      <div id="ffmpeg-sub" data-i18n="ffmpeg.overlay_hint">Для слияния видео и аудио, субтитров, метаданных и перекодировки нужен ffmpeg.</div>
+      <div id="ffmpeg-head">
+        <div id="ffmpeg-title">Synfronia</div>
+        <div id="ffmpeg-sub" data-i18n="ffmpeg.overlay_hint">Для слияния видео и аудио, субтитров, метаданных и перекодировки нужен ffmpeg.</div>
+      </div>
       <div style="position:relative;display:inline-block">
         <button type="button" id="ffmpeg-dl">
           <span data-i18n="ffmpeg.download">Загрузить FFmpeg</span>
           <canvas width="640" height="148"></canvas>
         </button>
-        <div id="ffmpeg-spinner" class="ffmpeg-hidden"></div>
+        <div id="ffmpeg-progress" class="ffmpeg-hidden">
+          <svg id="ffmpeg-ring" viewBox="0 0 120 120">
+            <circle class="ring-bg" cx="60" cy="60" r="52"></circle>
+            <circle class="ring-fg" cx="60" cy="60" r="52"></circle>
+          </svg>
+          <div id="ffmpeg-percent">0%</div>
+        </div>
       </div>
       <div id="ffmpeg-status"></div>
       <button type="button" id="ffmpeg-retry" data-i18n="ffmpeg.download">Загрузить FFmpeg</button>
@@ -319,10 +337,13 @@ HTML = r"""<!DOCTYPE html>
   var transAvailability = { ffmpeg: true, avail: [] };
   var ffmpegOverlay = document.getElementById("ffmpeg-overlay");
   var ffmpegDlBtn = document.getElementById("ffmpeg-dl");
-  var ffmpegSpinner = document.getElementById("ffmpeg-spinner");
+  var ffmpegRain = document.getElementById("ffmpeg-rain");
+  var ffmpegRing = document.getElementById("ffmpeg-ring");
+  var ffmpegPercent = document.getElementById("ffmpeg-percent");
   var ffmpegStatus = document.getElementById("ffmpeg-status");
   var ffmpegRetry = document.getElementById("ffmpeg-retry");
   var ffmpegFetching = false;
+  var RING_CIRC = 2 * Math.PI * 52;
 
   /* ---- кнопка-гиперпространство (mephysto/poKNxoY) ---- */
   (function hyperspaceButton() {
@@ -382,31 +403,42 @@ HTML = r"""<!DOCTYPE html>
       isGoing = true;
       ffmpegDlBtn.classList.add("active");
       ffmpegDlBtn.querySelector("span").style.display = "block";
-      showFfmpegSpinner();
+      setFfmpegProgress(0);
+      showFfmpegProgress();
       doFfmpegDownload();
     });
     setTimeout(init, 50);
   })();
 
-  /* ---- спиннер hakimel/kWOKbK (100 частиц) ---- */
-  (function buildSpinner() {
-    var lapping = 3.2, radius = 112, particles = 100;
+  /* ---- дождь (по мотивам codepen jh3y/WyNdMG) ---- */
+  (function buildRain() {
     var frag = document.createDocumentFragment();
-    for (var i = 0; i < particles; i++) {
-      var ii = document.createElement("i");
-      var bb = document.createElement("b");
-      var angle = (i / particles) * 360;
-      ii.style.transform = "rotate(" + angle + "deg) translate3d(" + radius + "px, 0, 0)";
-      bb.style.animationDelay = (i * (lapping / (particles - 2))).toFixed(3) + "s";
-      ii.appendChild(bb);
-      frag.appendChild(ii);
+    var drops = 90;
+    for (var i = 0; i < drops; i++) {
+      var d = document.createElement("i");
+      d.style.setProperty("--x", (Math.random() * 100).toFixed(2) + "vw");
+      d.style.setProperty("--len", (9 + Math.random() * 16).toFixed(2) + "vh");
+      d.style.setProperty("--dur", (0.6 + Math.random() * 1.4).toFixed(2) + "s");
+      d.style.setProperty("--delay", (Math.random() * 2.5).toFixed(2) + "s");
+      d.style.setProperty("--op", (0.25 + Math.random() * 0.6).toFixed(2));
+      frag.appendChild(d);
     }
-    ffmpegSpinner.appendChild(frag);
+    ffmpegRain.appendChild(frag);
   })();
 
-  function showFfmpegSpinner() {
+  function setFfmpegProgress(pct) {
+    var v = Math.max(0, Math.min(100, pct || 0));
+    ffmpegRing.classList.remove("ffmpeg-extracting");
+    ffmpegRing.querySelector(".ring-fg").style.strokeDashoffset = (RING_CIRC * (1 - v / 100)).toFixed(1);
+    ffmpegPercent.textContent = String(Math.round(v)) + "%";
+  }
+  function setFfmpegExtracting() {
+    ffmpegRing.classList.add("ffmpeg-extracting");
+    ffmpegPercent.textContent = "\u2026";
+  }
+  function showFfmpegProgress() {
     ffmpegDlBtn.classList.add("ffmpeg-hidden");
-    ffmpegSpinner.classList.remove("ffmpeg-hidden");
+    document.getElementById("ffmpeg-progress").classList.remove("ffmpeg-hidden");
   }
   function updateFfmpegStatus(text) {
     ffmpegStatus.classList.remove("ffmpeg-hidden");
@@ -504,7 +536,7 @@ HTML = r"""<!DOCTYPE html>
   }
 
   function applyTheme(key) {
-    var c = THEMES[key] || THEMES.scary_forest;
+    var c = THEMES[key] || THEMES.scarred_mind;
     var root = document.documentElement.style;
     root.setProperty("--bg", c.bg); root.setProperty("--surface", c.surface);
     root.setProperty("--widget", c.widget); root.setProperty("--text", c.text);
@@ -548,14 +580,17 @@ HTML = r"""<!DOCTYPE html>
       if (ffmpegFetching && st.ffmpeg) {
         var fm = st.ffmpeg;
         if (fm.downloading || fm.extracting) {
-          showFfmpegSpinner();
+          showFfmpegProgress();
           if (fm.extracting) {
+            setFfmpegExtracting();
             updateFfmpegStatus(t("ffmpeg.extracting"));
           } else {
+            setFfmpegProgress(fm.pct || 0);
             updateFfmpegStatus(t("ffmpeg.downloading").replace("{pct}", String(Math.round(fm.pct || 0))));
           }
         } else if (fm.ok) {
-          showFfmpegSpinner();
+          showFfmpegProgress();
+          setFfmpegProgress(100);
           updateFfmpegStatus(t("ffmpeg.ready"));
           setTimeout(function() {
             ffmpegOverlay.classList.add("ffmpeg-hidden");
@@ -568,8 +603,8 @@ HTML = r"""<!DOCTYPE html>
             ffmpegFetching = false;
           }, 500);
         } else if (fm.error) {
-          showFfmpegSpinner();
-          ffmpegSpinner.classList.add("ffmpeg-hidden");
+          showFfmpegProgress();
+          document.getElementById("ffmpeg-progress").classList.add("ffmpeg-hidden");
           ffmpegDlBtn.classList.remove("ffmpeg-hidden", "active");
           ffmpegDlBtn.querySelector("canvas").getContext("2d").clearRect(0, 0, 2000, 2000);
           updateFfmpegStatus(fm.error);
@@ -606,7 +641,7 @@ HTML = r"""<!DOCTYPE html>
     buildQualOptions();
     buildTranscodeOptions();
     applyI18n();
-    document.getElementById("theme").value = initData.settings.theme || "scary_forest";
+    document.getElementById("theme").value = initData.settings.theme || "scarred_mind";
     document.getElementById("subs").value = initData.settings.subtitles || "en";
     document.getElementById("qual").value = initData.settings.quality || "lossless";
     document.getElementById("transcode").value = initData.settings.transcode || "none";
@@ -667,7 +702,8 @@ HTML = r"""<!DOCTYPE html>
       ffmpegDlBtn.classList.remove("ffmpeg-hidden");
       ffmpegFetching = true;
       ffmpegDlBtn.classList.add("active");
-      showFfmpegSpinner();
+      setFfmpegProgress(0);
+      showFfmpegProgress();
       doFfmpegDownload();
     });
     document.getElementById("clicker").addEventListener("click", function() {

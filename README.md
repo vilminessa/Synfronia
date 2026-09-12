@@ -37,7 +37,7 @@ EdgeChromium) на основе [yt-dlp](https://github.com/yt-dlp/yt-dlp).
   а также палитры Scarred Mind, Audrey Main Colours, Basic Night Sky и Vilmy~
   ([color-hex.com](https://www.color-hex.com/)).
 - **Ход загрузки и отмена** — прогресс-бар из логов yt-dlp, кнопка «Стоп».
-- **Настройки сохраняются** в `settings.json` рядом с приложением.
+- **Настройки сохраняются** в `%LOCALAPPDATA%\Synfronia\settings.json`.
 
 ## Требования
 
