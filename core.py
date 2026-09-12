@@ -827,12 +827,30 @@ class _StopDownload(Exception):
 
 
 class TranscodePP(FFmpegPostProcessor):
-    """Перекодирует видео выбранным кодировщиком (x265/NVENC/AMF/QSV)."""
+    """Перекодирует видео выбранным кодировщиком (x265/NVENC/AMF/QSV)
+    в отдельный файл с суффиксом качества и «HEVC», не трогая оригинал."""
 
     def __init__(self, downloader=None, encoder: str = "libx265", lang: str = "ru"):
         super().__init__(downloader)
         self._config = TRANSCODERS.get(encoder) or TRANSCODERS["libx265"]
         self._lang = lang
+
+    def _output_name(self, filename: str, info: dict) -> str:
+        """Формирует имя выходного файла: base [<качество> HEVC].mp4"""
+        stem = os.path.splitext(filename)[0]
+        height = info.get("height") or info.get("resolution_height")
+        if not height:
+            for tag in ("resolution", "format_note"):
+                note = str(info.get(tag) or "")
+                if note and note[0].isdigit():
+                    height = note.split()[0]
+                    break
+        parts = []
+        if height:
+            h = str(height).strip()
+            parts.append(h if h.endswith(("p", "i")) else f"{h}p")
+        parts.append("HEVC")
+        return f"{stem} [{' '.join(parts)}].mp4"
 
     @FFmpegPostProcessor._restrict_to(images=False)
     def run(self, info):
@@ -841,16 +859,27 @@ class TranscodePP(FFmpegPostProcessor):
             self.to_screen(tr(self._lang, "p.skip_not_mp4"))
             return [], info
         cfg = self._config
-        temp = f"{filename}.tmp.mp4"
+        out_path = self._output_name(filename, info)
+        if os.path.abspath(out_path) == os.path.abspath(filename):
+            self.to_screen(tr(self._lang, "p.skip_not_mp4"))
+            return [], info
+        temp = f"{out_path}.tmp.mp4"
         self.to_screen(tr(self._lang, "p.transcode_run", vcodec=cfg["vcodec"]))
-        self.run_ffmpeg(
-            filename,
-            temp,
-            ["-map", "0", "-c:v", cfg["vcodec"], "-tag:v", cfg["tag"]]
-            + cfg["args"]
-            + ["-c:a", "copy"],
-        )
-        os.replace(temp, filename)
+        try:
+            self.run_ffmpeg(
+                filename,
+                temp,
+                ["-map", "0", "-c:v", cfg["vcodec"], "-tag:v", cfg["tag"]]
+                + cfg["args"]
+                + ["-c:a", "copy"],
+            )
+            if os.path.exists(temp):
+                os.replace(temp, out_path)
+        finally:
+            if os.path.exists(temp):
+                os.remove(temp)
+        info["filepath"] = out_path
+        info["_filename"] = out_path
         return [], info
 
 

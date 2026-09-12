@@ -502,6 +502,8 @@ HTML = r"""<!DOCTYPE html>
       note.textContent = t("trans.note.noffmpeg");
     } else if (missing.length) {
       note.textContent = t("trans.note.missing") + missing.join(", ") + ".";
+    } else {
+      note.textContent = "";
     }
   }
   function buildLangOptions() { fillSelect("lang", LANGS.map(function(k) { return [k, "lang." + k]; })); }
