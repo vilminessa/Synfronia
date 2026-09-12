@@ -640,8 +640,6 @@ SUBTITLE_OPTIONS = {
 
 QUALITY_FORMATS = {
     "lossless": "bv*+ba/b",
-    "8k": "bv*[height<=4320]+ba/b[height<=4320]",
-    "4k": "bv*[height<=2160]+ba/b[height<=2160]",
     "2k": "bv*[height<=1440]+ba/b[height<=1440]",
     "1080": "bv*[height<=1080]+ba/b[height<=1080]",
     "720": "bv*[height<=720]+ba/b[height<=720]",

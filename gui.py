@@ -324,7 +324,7 @@ HTML = r"""<!DOCTYPE html>
   var LANGS = ["ru", "en", "ja", "zh-CN", "es", "de"];
   var TRANS_KEYS = ["none", "libx265", "nvenc", "amf", "qsv"];
   var QUAL_OPTIONS = [
-    ["lossless", "qual.lossless"], ["8k", "8K"], ["4k", "4K"], ["2k", "2K (1440p)"],
+    ["lossless", "qual.lossless"], ["2k", "2K (1440p)"],
     ["1080", "1080p"], ["720", "720p"], ["480", "480p"], ["240", "240p"]
   ];
   var SUB_OPTIONS = [["off", "subs.off"], ["ru", "subs.ru"], ["en", "subs.en"], ["all", "subs.all"]];
