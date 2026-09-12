@@ -7,6 +7,8 @@ import shutil
 import subprocess
 import sys
 import threading
+import urllib.request
+import zipfile
 from pathlib import Path
 
 from yt_dlp import YoutubeDL
@@ -97,6 +99,13 @@ I18N = {
         "url.playlist.label": "Ссылка на плейлист:",
         "group.label": "Сгруппировать: плейлист в подпапку с его названием",
         "warn.ffmpeg": "ffmpeg не найден — слияние, субтитры, метаданные и перекодировка будут недоступны.",
+        "ffmpeg.overlay_title": "Установить FFmpeg",
+        "ffmpeg.overlay_hint": "Для слияния видео и аудио, субтитров, метаданных и перекодировки нужен ffmpeg.",
+        "ffmpeg.download": "Загрузить FFmpeg",
+        "ffmpeg.downloading": "Загружаю ffmpeg… {pct}%",
+        "ffmpeg.extracting": "Распаковываю ffmpeg…",
+        "ffmpeg.ready": "ffmpeg установлен.",
+        "ffmpeg.error": "Не удалось скачать ffmpeg: {exc}",
         "btn.download": "Скачать",
         "btn.stop": "Отмена",
         "status.ready": "Готов.",
@@ -175,6 +184,13 @@ I18N = {
         "url.playlist.label": "Playlist link:",
         "group.label": "Group: save playlist into a subfolder named after it",
         "warn.ffmpeg": "ffmpeg not found — merging, subtitles, metadata and transcoding will be unavailable.",
+        "ffmpeg.overlay_title": "Install FFmpeg",
+        "ffmpeg.overlay_hint": "ffmpeg is required for merging video+audio, subtitles, metadata and transcoding.",
+        "ffmpeg.download": "Download FFmpeg",
+        "ffmpeg.downloading": "Downloading ffmpeg… {pct}%",
+        "ffmpeg.extracting": "Extracting ffmpeg…",
+        "ffmpeg.ready": "ffmpeg installed.",
+        "ffmpeg.error": "Failed to download ffmpeg: {exc}",
         "btn.download": "Download",
         "btn.stop": "Cancel",
         "status.ready": "Ready.",
@@ -253,6 +269,13 @@ I18N = {
         "url.playlist.label": "プレイリストのURL:",
         "group.label": "グループ化: プレイリストを名前の付いたサブフォルダーに保存",
         "warn.ffmpeg": "ffmpegが見つかりません — 結合・字幕・メタデータ・再エンコードは利用できません。",
+        "ffmpeg.overlay_title": "FFmpegをインストール",
+        "ffmpeg.overlay_hint": "動画と音声の結合、字幕、メタデータ、再エンコードにはffmpegが必要です。",
+        "ffmpeg.download": "FFmpegをダウンロード",
+        "ffmpeg.downloading": "ffmpegをダウンロード中… {pct}%",
+        "ffmpeg.extracting": "ffmpegを展開中…",
+        "ffmpeg.ready": "ffmpegをインストールしました。",
+        "ffmpeg.error": "ffmpegのダウンロードに失敗: {exc}",
         "btn.download": "ダウンロード",
         "btn.stop": "キャンセル",
         "status.ready": "準備完了。",
@@ -331,6 +354,13 @@ I18N = {
         "url.playlist.label": "播放列表链接：",
         "group.label": "分组：将播放列表保存到以其命名的子文件夹",
         "warn.ffmpeg": "未找到 ffmpeg — 合并、字幕、元数据和转码将不可用。",
+        "ffmpeg.overlay_title": "安装 FFmpeg",
+        "ffmpeg.overlay_hint": "合并视频和音频、字幕、元数据和转码需要 ffmpeg。",
+        "ffmpeg.download": "下载 FFmpeg",
+        "ffmpeg.downloading": "正在下载 ffmpeg… {pct}%",
+        "ffmpeg.extracting": "正在解压 ffmpeg…",
+        "ffmpeg.ready": "ffmpeg 已安装。",
+        "ffmpeg.error": "下载 ffmpeg 失败：{exc}",
         "btn.download": "下载",
         "btn.stop": "取消",
         "status.ready": "就绪。",
@@ -409,6 +439,13 @@ I18N = {
         "url.playlist.label": "Enlace de la lista:",
         "group.label": "Agrupar: guardar la lista en una subcarpeta con su nombre",
         "warn.ffmpeg": "No se encontró ffmpeg: la combinación, los subtítulos, los metadatos y la transcodificación no estarán disponibles.",
+        "ffmpeg.overlay_title": "Instalar FFmpeg",
+        "ffmpeg.overlay_hint": "ffmpeg es necesario para combinar vídeo y audio, subtítulos, metadatos y transcodificar.",
+        "ffmpeg.download": "Descargar FFmpeg",
+        "ffmpeg.downloading": "Descargando ffmpeg… {pct}%",
+        "ffmpeg.extracting": "Extrayendo ffmpeg…",
+        "ffmpeg.ready": "ffmpeg instalado.",
+        "ffmpeg.error": "No se pudo descargar ffmpeg: {exc}",
         "btn.download": "Descargar",
         "btn.stop": "Cancelar",
         "status.ready": "Listo.",
@@ -487,6 +524,13 @@ I18N = {
         "url.playlist.label": "Wiedergabelisten-Link:",
         "group.label": "Gruppieren: Wiedergabeliste in einen Unterordner mit ihrem Namen speichern",
         "warn.ffmpeg": "ffmpeg wurde nicht gefunden — Zusammenführen, Untertitel, Metadaten und Transkodierung sind nicht verfügbar.",
+        "ffmpeg.overlay_title": "FFmpeg installieren",
+        "ffmpeg.overlay_hint": "ffmpeg wird benötigt zum Zusammenführen von Video+Audio, Untertiteln, Metadaten und Transkodierung.",
+        "ffmpeg.download": "FFmpeg herunterladen",
+        "ffmpeg.downloading": "ffmpeg wird heruntergeladen… {pct}%",
+        "ffmpeg.extracting": "ffmpeg wird entpackt…",
+        "ffmpeg.ready": "ffmpeg installiert.",
+        "ffmpeg.error": "ffmpeg-Download fehlgeschlagen: {exc}",
         "btn.download": "Herunterladen",
         "btn.stop": "Abbrechen",
         "status.ready": "Bereit.",
@@ -627,6 +671,62 @@ def base_dir() -> Path:
     return Path(__file__).resolve().parent
 
 
+def ffmpeg_local_dir() -> Path:
+    r"""Каталог, куда приложение скачивает ffmpeg: %LOCALAPPDATA%\Synfronia\bin."""
+    return Path(os.environ.get("LOCALAPPDATA", str(base_dir()))) / "Synfronia" / "bin"
+
+
+FFMPEG_DOWNLOAD_URL = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+
+
+def download_ffmpeg(on_progress=None, on_log=None) -> str | None:
+    """Скачивает ffmpeg-release-essentials.zip и распаковывает ffmpeg.exe/ffprobe.exe
+    в ffmpeg_local_dir(). Возвращает путь к ffmpeg.exe или None при ошибке.
+    on_progress(percent: float) вызывается по мере скачивания (0..100)."""
+    dest = ffmpeg_local_dir()
+    exe_path = dest / "ffmpeg.exe"
+    if exe_path.is_file():
+        return str(exe_path)
+
+    dest.mkdir(parents=True, exist_ok=True)
+    zip_path = dest / "ffmpeg.zip"
+    try:
+        if on_log:
+            on_log("info", "Скачиваю ffmpeg…")
+        req = urllib.request.Request(
+            FFMPEG_DOWNLOAD_URL,
+            headers={"User-Agent": "Synfronia/1.3 (auto-installer)"},
+        )
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            total = int(resp.headers.get("Content-Length") or 0)
+            received = 0
+            with open(zip_path, "wb") as fh:
+                while True:
+                    chunk = resp.read(1 << 16)
+                    if not chunk:
+                        break
+                    fh.write(chunk)
+                    received += len(chunk)
+                    if on_progress and total:
+                        on_progress(received / total * 100.0)
+
+        with zipfile.ZipFile(zip_path) as zf:
+            for name in zf.namelist():
+                base = Path(name).name
+                if base in ("ffmpeg.exe", "ffprobe.exe"):
+                    target = dest / base
+                    with zf.open(name) as src, open(target, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+
+        zip_path.unlink(missing_ok=True)
+        return str(exe_path) if exe_path.is_file() else None
+    except Exception as exc:  # noqa: BLE001
+        if on_log:
+            on_log("error", f"ffmpeg download failed: {exc}")
+        zip_path.unlink(missing_ok=True)
+        return None
+
+
 def default_download_dir() -> Path:
     """Базовая папка скачивания — downloads рядом с приложением."""
     return base_dir() / "downloads"
@@ -656,7 +756,10 @@ def save_settings(settings: dict) -> None:
 
 
 def find_ffmpeg() -> str | None:
-    """Ищет ffmpeg в PATH и типовых местах установки (например, winget)."""
+    """Ищет ffmpeg в локальной папке (LocaAppData), PATH и типовых местах (winget)."""
+    local = ffmpeg_local_dir() / "ffmpeg.exe"
+    if local.is_file():
+        return str(local)
     found = shutil.which("ffmpeg")
     if found:
         return found

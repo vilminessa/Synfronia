@@ -13,6 +13,7 @@ from core import (
     available_transcoders,
     base_dir,
     default_download_dir,
+    download_ffmpeg,
     find_ffmpeg,
     is_playlist,
     load_settings,
@@ -125,6 +126,88 @@ HTML = r"""<!DOCTYPE html>
     display: none; margin-top: 10px; padding: 8px 12px; border-radius: 6px;
     background: rgba(255, 180, 84, .15); border: 1px solid var(--warn); color: var(--warn); font-size: 13px;
   }
+
+  /* ---- ffmpeg bloom-оверлей: поверхность океана ---- */
+  #ffmpeg-overlay {
+    position: fixed; inset: 0; z-index: 999; overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+    background:
+      radial-gradient(120% 90% at 50% 0%, #0e5f8a 0%, #0a3c5e 42%, #062438 70%, #04101c 100%);
+    font-family: "Segoe UI", system-ui, sans-serif;
+  }
+  #ffmpeg-overlay::before {   /* световая волна bloom сверху */
+    content: ""; position: absolute; left: -40%; right: -30%; top: -220px;
+    height: 520px; opacity: .55; filter: blur(26px); pointer-events: none;
+    background: radial-gradient(ellipse at 50% 0%, rgba(120, 215, 255, .55), rgba(60, 140, 190, .12) 60%, transparent 75%);
+    animation: bloom-drift 9s ease-in-out infinite alternate;
+  }
+  #ffmpeg-overlay::after {    /* блики-блики на воде */
+    content: ""; position: absolute; left: -15%; right: -15%; bottom: -18%;
+    height: 46%; pointer-events: none; opacity: .38;
+    background:
+      radial-gradient(40% 60% at 20% 20%, rgba(180,230,255,.5), transparent 60%),
+      radial-gradient(50% 70% at 70% 40%, rgba(90,190,240,.4), transparent 65%),
+      radial-gradient(60% 55% at 45% 80%, rgba(255,255,255,.18), transparent 70%);
+    background-size: 340px 260px, 420px 300px, 480px 320px;
+    animation: bloom-float 13s ease-in-out infinite alternate;
+  }
+  @keyframes bloom-drift { from { transform: translateX(-6%) scale(1); } to { transform: translateX(6%) scale(1.15); } }
+  @keyframes bloom-float { from { transform: translateY(6px) rotate(-.4deg); } to { transform: translateY(-10px) rotate(.5deg); } }
+
+  #ffmpeg-box {
+    position: relative; z-index: 2; text-align: center; color: #eaf6ff;
+    max-width: 560px; padding: 24px; text-shadow: 0 2px 18px rgba(0,10,20,.65);
+  }
+  #ffmpeg-title {
+    margin: 0 0 6px; font-size: 46px; font-weight: 700; letter-spacing: .04em;
+    color: #fff; animation: ff-title-bloom 3.6s ease-in-out infinite;
+  }
+  @keyframes ff-title-bloom {
+    0%, 100% { text-shadow: 0 0 14px rgba(130, 225, 255, .65), 0 0 34px rgba(90, 190, 240, .35); }
+    50% { text-shadow: 0 0 22px rgba(130, 225, 255, .95), 0 0 60px rgba(90, 190, 240, .6); }
+  }
+  #ffmpeg-sub { font-size: 15px; opacity: .92; margin: 0 auto 30px; line-height: 1.5; max-width: 440px; }
+
+  /* кнопка в стиле hyperspace (codepen mephysto/poKNxoY) */
+  #ffmpeg-dl {
+    background: #fff; position: relative; border: 1px solid transparent;
+    cursor: pointer; padding: 14px 52px; border-radius: 100px; overflow: hidden;
+    font-size: 19px; width: 320px; height: 74px; color: #000;
+  }
+  #ffmpeg-dl.active {
+    background: #03101f; border: 1px solid rgba(255,255,255,.9);
+  }
+  #ffmpeg-dl span {
+    position: relative; z-index: 20; font-size: 1.05em; text-transform: uppercase;
+    font-weight: 700; letter-spacing: .06em; color: #000;
+  }
+  #ffmpeg-dl.active span { color: #fff; }
+  #ffmpeg-dl canvas {
+    z-index: 10; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+  }
+
+  /* спиннер в стиле hakimel/kWOKbK */
+  #ffmpeg-spinner { position: absolute; top: 50%; left: 50%; perspective: 240px; }
+  #ffmpeg-spinner i { display: block; position: absolute; opacity: 1; }
+  #ffmpeg-spinner i b {
+    display: block; width: 7px; height: 7px; border-radius: 7px;
+    background: rgba(255,255,255,1); box-shadow: 0 0 16px rgba(255,255,255,.95);
+    animation: ff-spin-pt 3.2s ease-in-out infinite;
+  }
+  @keyframes ff-spin-pt {
+    0% { transform: scale(1); }
+    15% { transform: translate(-3.5px,-3.5px) scale(3); }
+    50% { transform: scale(1); }
+  }
+  #ffmpeg-status { margin-top: 34px; font-size: 15px; min-height: 20px; color: #dff3ff; }
+  #ffmpeg-retry {
+    margin-top: 12px; display: none;
+    background: transparent; border: 1px solid rgba(255,255,255,.55); color: #fff;
+    padding: 8px 26px; border-radius: 40px; cursor: pointer; font-size: 14px;
+  }
+  #ffmpeg-retry:hover { background: rgba(255,255,255,.12); }
+
+  .ffmpeg-hidden { display: none !important; }
 </style>
 </head>
 <body>
@@ -153,6 +236,22 @@ HTML = r"""<!DOCTYPE html>
   </div>
 
   <div id="warn" data-i18n="warn.ffmpeg">ffmpeg не найден — слияние, субтитры, метаданные и перекодировка будут недоступны.</div>
+
+  <div id="ffmpeg-overlay" class="ffmpeg-hidden">
+    <div id="ffmpeg-box">
+      <div id="ffmpeg-title">Synfronia</div>
+      <div id="ffmpeg-sub" data-i18n="ffmpeg.overlay_hint">Для слияния видео и аудио, субтитров, метаданных и перекодировки нужен ffmpeg.</div>
+      <div style="position:relative;display:inline-block">
+        <button type="button" id="ffmpeg-dl">
+          <span data-i18n="ffmpeg.download">Загрузить FFmpeg</span>
+          <canvas width="640" height="148"></canvas>
+        </button>
+        <div id="ffmpeg-spinner" class="ffmpeg-hidden"></div>
+      </div>
+      <div id="ffmpeg-status"></div>
+      <button type="button" id="ffmpeg-retry" data-i18n="ffmpeg.download">Загрузить FFmpeg</button>
+    </div>
+  </div>
 
   <div class="actions">
     <button id="download" data-i18n="btn.download">Скачать</button>
@@ -218,6 +317,107 @@ HTML = r"""<!DOCTYPE html>
   var clicks = 0;
   var vilmyUnlocked = false;
   var transAvailability = { ffmpeg: true, avail: [] };
+  var ffmpegOverlay = document.getElementById("ffmpeg-overlay");
+  var ffmpegDlBtn = document.getElementById("ffmpeg-dl");
+  var ffmpegSpinner = document.getElementById("ffmpeg-spinner");
+  var ffmpegStatus = document.getElementById("ffmpeg-status");
+  var ffmpegRetry = document.getElementById("ffmpeg-retry");
+  var ffmpegFetching = false;
+
+  /* ---- кнопка-гиперпространство (mephysto/poKNxoY) ---- */
+  (function hyperspaceButton() {
+    var canvas = ffmpegDlBtn.querySelector("canvas");
+    var ctx = canvas.getContext("2d");
+    var PARTICLES = [];
+    var isGoing = false;
+    var W = 0, H = 0, XO = 0, YO = 0;
+    var MAX_Z = 2, MAX_R = 2, Z_SPD = 2;
+
+    function Particle() {
+      this.x = Math.random() * W;
+      this.y = Math.random() * H;
+      this.z = Math.random() * MAX_Z;
+      this.vel = 0.01 * Z_SPD;
+    }
+    Particle.prototype.update = function() { this.z -= this.vel; };
+    Particle.prototype.render = function() {
+      var z = Math.max(this.z, 0.0001);
+      var px = (this.x - XO) / z * 6 + XO;
+      var py = (this.y - YO) / z * 6 + YO;
+      var r = ((MAX_Z - this.z) / MAX_Z) * MAX_R;
+      if (px < 0 || px > W || py < 0 || py > H) this.z = MAX_Z;
+      this.update();
+      ctx.beginPath();
+      ctx.arc(px, py, Math.max(r, 0.4), 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255,255,255,0.55)";
+      ctx.strokeStyle = "rgba(255,255,255,0.55)";
+      ctx.fill();
+      ctx.stroke();
+    };
+
+    function size() {
+      canvas.width = W = ffmpegDlBtn.offsetWidth;
+      canvas.height = H = ffmpegDlBtn.offsetHeight;
+      XO = W / 2; YO = H / 2;
+      if (W < 10 || H < 10) { canvas.width = W = 640; canvas.height = H = 148; XO = W / 2; YO = H / 2; }
+    }
+    function loop() {
+      requestAnimationFrame(loop);
+      if (!isGoing) { ctx.clearRect(0, 0, W, H); return; }
+      ctx.fillStyle = "rgba(0,0,0,0.28)";
+      ctx.fillRect(0, 0, W, H);
+      for (var i = 0; i < PARTICLES.length; i++) PARTICLES[i].render();
+    }
+    function init() {
+      size();
+      PARTICLES = [];
+      var num = 60;
+      for (var i = 0; i < num; i++) PARTICLES.push(new Particle());
+      loop();
+      window.addEventListener("resize", size);
+    }
+    ffmpegDlBtn.addEventListener("click", function() {
+      if (ffmpegFetching) return;
+      ffmpegFetching = true;
+      isGoing = true;
+      ffmpegDlBtn.classList.add("active");
+      ffmpegDlBtn.querySelector("span").style.display = "block";
+      showFfmpegSpinner();
+      doFfmpegDownload();
+    });
+    setTimeout(init, 50);
+  })();
+
+  /* ---- спиннер hakimel/kWOKbK (100 частиц) ---- */
+  (function buildSpinner() {
+    var lapping = 3.2, radius = 112, particles = 100;
+    var frag = document.createDocumentFragment();
+    for (var i = 0; i < particles; i++) {
+      var ii = document.createElement("i");
+      var bb = document.createElement("b");
+      var angle = (i / particles) * 360;
+      ii.style.transform = "rotate(" + angle + "deg) translate3d(" + radius + "px, 0, 0)";
+      bb.style.animationDelay = (i * (lapping / (particles - 2))).toFixed(3) + "s";
+      ii.appendChild(bb);
+      frag.appendChild(ii);
+    }
+    ffmpegSpinner.appendChild(frag);
+  })();
+
+  function showFfmpegSpinner() {
+    ffmpegDlBtn.classList.add("ffmpeg-hidden");
+    ffmpegSpinner.classList.remove("ffmpeg-hidden");
+  }
+  function updateFfmpegStatus(text) {
+    ffmpegStatus.classList.remove("ffmpeg-hidden");
+    ffmpegStatus.textContent = text;
+  }
+
+  async function doFfmpegDownload() {
+    try {
+      await pywebview.api.start_ffmpeg_download();
+    } catch (e) {}
+  }
 
   function t(key) {
     var d = I18N[curLang] || I18N.ru;
@@ -345,6 +545,38 @@ HTML = r"""<!DOCTYPE html>
       if (p.mode === "indeterminate") { bar.classList.add("indeterminate"); bar.style.width = "30%"; }
       else { bar.classList.remove("indeterminate"); bar.style.width = (p.value || 0) + "%"; }
       document.getElementById("status").textContent = st.status || "";
+      if (ffmpegFetching && st.ffmpeg) {
+        var fm = st.ffmpeg;
+        if (fm.downloading || fm.extracting) {
+          showFfmpegSpinner();
+          if (fm.extracting) {
+            updateFfmpegStatus(t("ffmpeg.extracting"));
+          } else {
+            updateFfmpegStatus(t("ffmpeg.downloading").replace("{pct}", String(Math.round(fm.pct || 0))));
+          }
+        } else if (fm.ok) {
+          showFfmpegSpinner();
+          updateFfmpegStatus(t("ffmpeg.ready"));
+          setTimeout(function() {
+            ffmpegOverlay.classList.add("ffmpeg-hidden");
+            pywebview.api.get_initial().then(function(id) {
+              transAvailability = { ffmpeg: !!id.ffmpeg, avail: id.transcoders || [] };
+              buildTranscodeOptions();
+            });
+            document.getElementById("warn").style.display = "none";
+            document.getElementById("status").textContent = t("status.ready");
+            ffmpegFetching = false;
+          }, 500);
+        } else if (fm.error) {
+          showFfmpegSpinner();
+          ffmpegSpinner.classList.add("ffmpeg-hidden");
+          ffmpegDlBtn.classList.remove("ffmpeg-hidden", "active");
+          ffmpegDlBtn.querySelector("canvas").getContext("2d").clearRect(0, 0, 2000, 2000);
+          updateFfmpegStatus(fm.error);
+          ffmpegRetry.style.display = "inline-block";
+          ffmpegFetching = false;
+        }
+      }
     } catch (e) {}
     setTimeout(tick, 200);
   }
@@ -383,7 +615,11 @@ HTML = r"""<!DOCTYPE html>
     document.getElementById("dest").value = initData.default_dir;
     document.getElementById("group").checked = initData.settings.group_playlist !== false;
     document.getElementById("status").textContent = t("status.ready");
-    if (!initData.ffmpeg) document.getElementById("warn").style.display = "block";
+    if (!initData.ffmpeg) {
+      document.getElementById("warn").style.display = "block";
+      ffmpegOverlay.classList.remove("ffmpeg-hidden");
+      ffmpegStatus.classList.add("ffmpeg-hidden");
+    }
     document.getElementById("theme").addEventListener("change", function() {
       applyTheme(this.value); pywebview.api.save_setting("theme", this.value);
     });
@@ -424,6 +660,15 @@ HTML = r"""<!DOCTYPE html>
     document.getElementById("browse").addEventListener("click", async function() {
       var p = await pywebview.api.browse_folder();
       if (p) document.getElementById("dest").value = p;
+    });
+    ffmpegRetry.addEventListener("click", function() {
+      ffmpegRetry.style.display = "none";
+      ffmpegStatus.classList.add("ffmpeg-hidden");
+      ffmpegDlBtn.classList.remove("ffmpeg-hidden");
+      ffmpegFetching = true;
+      ffmpegDlBtn.classList.add("active");
+      showFfmpegSpinner();
+      doFfmpegDownload();
     });
     document.getElementById("clicker").addEventListener("click", function() {
       var btn = document.getElementById("clicker");
@@ -489,6 +734,7 @@ class Api:
         self._status = tr(self._lang, "p.ready")
         self._busy = False
         self._progress = {"mode": "determinate", "value": 0.0}
+        self._ffmpeg = {"downloading": False, "extracting": False, "pct": 0.0, "ok": False, "error": None}
 
     # -- состояние (poll из JS) ----------------------------------------------
     def poll(self, since: int = 0) -> dict:
@@ -498,6 +744,7 @@ class Api:
                 "status": self._status,
                 "progress": dict(self._progress),
                 "logs": list(self._logs[since:]),
+                "ffmpeg": dict(self._ffmpeg),
             }
 
     def get_initial(self) -> dict:
@@ -509,6 +756,46 @@ class Api:
             "default_dir": str(default_download_dir()),
             "transcoders": list(self._transcoders),
         }
+
+    # -- автоустановка ffmpeg -------------------------------------------------
+    def start_ffmpeg_download(self) -> str:
+        with self._lock:
+            if self._ffmpeg["downloading"] or self._ffmpeg["extracting"]:
+                return "busy"
+            if find_ffmpeg():
+                self._ffmpeg["ok"] = True
+                return "already"
+            self._ffmpeg["downloading"] = True
+            self._ffmpeg["pct"] = 0.0
+            self._ffmpeg["error"] = None
+        self._log("info", tr(self._lang, "ffmpeg.download", pct="0"))
+        threading.Thread(target=self._ffmpeg_worker, daemon=True, name="ffmpeg-dl").start()
+        return "started"
+
+    def _ffmpeg_worker(self) -> None:
+        def on_progress(pct: float) -> None:
+            with self._lock:
+                self._ffmpeg["pct"] = pct
+
+        def on_log(level: str, msg: str) -> None:
+            with self._lock:
+                self._logs.append(f"[{level}] {msg}")
+
+        try:
+            path = download_ffmpeg(on_progress=on_progress, on_log=on_log)
+        except Exception as exc:  # noqa: BLE001
+            path = None
+            on_log("error", str(exc))
+        if path:
+            self._transcoders = available_transcoders()
+        with self._lock:
+            self._ffmpeg["downloading"] = False
+            if path:
+                self._ffmpeg["ok"] = True
+                self._ffmpeg["extracting"] = False
+            else:
+                self._ffmpeg["ok"] = False
+                self._ffmpeg["error"] = tr(self._lang, "ffmpeg.error", exc="")
 
     # -- настройки -----------------------------------------------------------
     def save_setting(self, key: str, value) -> str:

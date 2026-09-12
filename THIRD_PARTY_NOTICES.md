@@ -253,12 +253,14 @@ licensed under the GPL:
 
 Full text: https://github.com/pyinstaller/pyinstaller/blob/develop/COPYING.txt
 
-## ffmpeg — external tool, NOT distributed
+## ffmpeg — downloaded at first run, NOT bundled
 
 The built executable uses the `ffmpeg` executable for merging streams,
 embedding metadata/subtitles and HEVC conversion. ffmpeg is **not
-bundled** with this project and must be installed separately (the app
-will locate it automatically). ffmpeg is distributed under the GNU
+bundled** with this project. On first launch, the app offers to download
+and install ffmpeg automatically into `%LOCALAPPDATA%\Synfronia\bin`
+(from https://www.gyan.dev/ffmpeg/builds/); it can also be installed
+manually (PATH / winget). ffmpeg is distributed under the GNU
 GPL (or LGPL depending on the specific build). The build used for
 testing was the GPL build from https://www.gyan.dev/ffmpeg/builds/.
 Full text: https://www.gnu.org/licenses/gpl-3.0.html
