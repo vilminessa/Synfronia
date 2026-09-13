@@ -694,6 +694,14 @@ QUALITY_FORMATS = {
     "240": "bv*[height<=240]+ba/b[height<=240]",
 }
 
+QUALITY_LIMITS = {
+    "2k": 1440,
+    "1080": 1080,
+    "720": 720,
+    "480": 480,
+    "240": 240,
+}
+
 TRANSCODERS = {
     "libx265": {
         "label": "HEVC (x265, программный)",
@@ -711,7 +719,7 @@ TRANSCODERS = {
         "label": "AMD AMF (H.265)",
         "vcodec": "hevc_amf",
         "tag": "hvc1",
-        "args": ["-quality", "quality", "-qp", "23"],
+        "args": ["-quality", "quality", "-rc", "cqp", "-qp_i", "23", "-qp_p", "23"],
     },
     "qsv": {
         "label": "Intel Quick Sync (QSV) (H.265)",
@@ -873,29 +881,20 @@ class _StopDownload(Exception):
 
 class TranscodePP(FFmpegPostProcessor):
     """Перекодирует видео выбранным кодировщиком (x265/NVENC/AMF/QSV)
-    в отдельный файл с суффиксом качества и «HEVC», не трогая оригинал."""
+    в отдельный файл с суффиксом «HEVC», удаляя оригинал — чтобы в папке
+    оставался только перекодированный файл."""
 
-    def __init__(self, downloader=None, encoder: str = "libx265", lang: str = "ru"):
+    def __init__(self, downloader=None, encoder: str = "libx265", lang: str = "ru",
+                 copy_subtitles: bool = False):
         super().__init__(downloader)
         self._config = TRANSCODERS.get(encoder) or TRANSCODERS["libx265"]
         self._lang = lang
+        self._copy_subtitles = copy_subtitles
 
-    def _output_name(self, filename: str, info: dict) -> str:
-        """Формирует имя выходного файла: base [<качество> HEVC].mp4"""
+    def _output_name(self, filename: str) -> str:
+        """Формирует имя выходного файла: base [HEVC].mp4"""
         stem = os.path.splitext(filename)[0]
-        height = info.get("height") or info.get("resolution_height")
-        if not height:
-            for tag in ("resolution", "format_note"):
-                note = str(info.get(tag) or "")
-                if note and note[0].isdigit():
-                    height = note.split()[0]
-                    break
-        parts = []
-        if height:
-            h = str(height).strip()
-            parts.append(h if h.endswith(("p", "i")) else f"{h}p")
-        parts.append("HEVC")
-        return f"{stem} [{' '.join(parts)}].mp4"
+        return f"{stem} [HEVC].mp4"
 
     @FFmpegPostProcessor._restrict_to(images=False)
     def run(self, info):
@@ -904,7 +903,7 @@ class TranscodePP(FFmpegPostProcessor):
             self.to_screen(tr(self._lang, "p.skip_not_mp4"))
             return [], info
         cfg = self._config
-        out_path = self._output_name(filename, info)
+        out_path = self._output_name(filename)
         if os.path.abspath(out_path) == os.path.abspath(filename):
             self.to_screen(tr(self._lang, "p.skip_not_mp4"))
             return [], info
@@ -935,6 +934,12 @@ class TranscodePP(FFmpegPostProcessor):
                 )
                 if os.path.exists(temp):
                     os.replace(temp, out_path)
+                    # Оригинал больше не нужен: в папке остаётся только
+                    # перекодированный файл, иначе было бы два видео.
+                    try:
+                        os.remove(filename)
+                    except OSError:
+                        pass
                 last_err = None
                 break
             except FFmpegPostProcessorError as e:
@@ -951,6 +956,61 @@ class TranscodePP(FFmpegPostProcessor):
             return [], info
         info["filepath"] = out_path
         info["_filename"] = out_path
+        return [], info
+
+
+def _quality_suffix_name(filename: str, limit: int) -> str:
+    """Добавляет к имени файла суффикс лимита качества ([<limit>p]),
+    объединяя его с уже имеющимся суффиксом [HEVC], если такой есть."""
+    stem, ext = os.path.splitext(filename)
+    m = re.search(r" \[\d+(?:\.\d+)?p(?: HEVC)?\]$", stem)
+    if m:
+        tag = m.group(0)
+        if " HEVC" in tag:
+            stem = stem[: m.start()] + f" [{limit}p HEVC]"
+        else:
+            stem = stem[: m.start()] + f" [{limit}p]"
+    elif stem.endswith(" [HEVC]"):
+        stem = stem[: -len(" [HEVC]")] + f" [{limit}p HEVC]"
+    else:
+        stem = f"{stem} [{limit}p]"
+    return stem + ext
+
+
+class QualitySuffixPP(FFmpegPostProcessor):
+    """Добавляет суффикс лимита качества (например [240p]) к готовому файлу,
+    если исходное разрешение видео выше установленного ограничения."""
+
+    def __init__(self, downloader=None, quality: str = "lossless", lang: str = "ru"):
+        super().__init__(downloader)
+        self._limit = QUALITY_LIMITS.get(quality)
+        self._lang = lang
+
+    def _source_height(self, info: dict) -> int | None:
+        best = None
+        for fmt in info.get("formats") or []:
+            h = fmt.get("height")
+            if h:
+                best = max(best or 0, int(h))
+        return best
+
+    @FFmpegPostProcessor._restrict_to(images=False)
+    def run(self, info):
+        filename = info.get("filepath")
+        if not filename or not self._limit:
+            return [], info
+        source = self._source_height(info)
+        if not source or source <= self._limit:
+            return [], info
+        target = _quality_suffix_name(filename, self._limit)
+        if os.path.abspath(target) == os.path.abspath(filename):
+            return [], info
+        try:
+            os.replace(filename, target)
+        except OSError:
+            return [], info
+        info["filepath"] = target
+        info["_filename"] = target
         return [], info
 
 
@@ -1025,9 +1085,9 @@ class Downloader:
         quality: str,
     ) -> dict:
         if playlist and group:
-            outtmpl = os.path.join(dest, "%(playlist_title)s", "%(title)s [%(id)s].%(ext)s")
+            outtmpl = os.path.join(dest, "%(playlist_title)s", "%(title)s.%(ext)s")
         else:
-            outtmpl = os.path.join(dest, "%(title)s [%(id)s].%(ext)s")
+            outtmpl = os.path.join(dest, "%(title)s.%(ext)s")
 
         subs_langs = SUBTITLE_OPTIONS.get(subtitles)
         opts = {
@@ -1057,13 +1117,14 @@ class Downloader:
             self._log("warning", self._t("p.ffmpeg_missing"))
         return opts
 
-    def _register_pps(self, ydl: YoutubeDL, subs_on: bool, transcode: str) -> None:
+    def _register_pps(self, ydl: YoutubeDL, subs_on: bool, transcode: str, quality: str) -> None:
         if transcode and transcode != "none":
-            ydl.add_post_processor(TranscodePP(ydl, transcode, self._lang))
+            ydl.add_post_processor(TranscodePP(ydl, transcode, self._lang, subs_on))
         if subs_on:
             ydl.add_post_processor(FFmpegEmbedSubtitlePP(ydl))
         ydl.add_post_processor(FFmpegMetadataPP(ydl))
         ydl.add_post_processor(EmbedThumbnailPP(ydl))
+        ydl.add_post_processor(QualitySuffixPP(ydl, quality, self._lang))
 
     # -- запуск ---------------------------------------------------------------
     def download(
@@ -1088,7 +1149,7 @@ class Downloader:
             self._log("info", self._t("p.transcoding", label=label))
         try:
             with YoutubeDL(self._add_ffmpeg(opts)) as ydl:
-                self._register_pps(ydl, subs_on, transcode)
+                self._register_pps(ydl, subs_on, transcode, quality)
                 info = ydl.extract_info(url, download=True)
                 short = None
                 if info and info.get("_type") == "playlist":
