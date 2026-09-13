@@ -114,6 +114,17 @@ def based_settings() -> dict:
 
 LANGUAGES = ("ru", "en", "ja", "zh-CN", "es", "de")
 
+# Самоназвания языков (не переводим — это «название языка на самом языке»);
+# используются как thisLang при генерации базовых файлов переводов.
+SELF_NAMES: dict[str, str] = {
+    "ru": "Русский",
+    "en": "English",
+    "ja": "日本語",
+    "zh-CN": "简体中文",
+    "es": "Español",
+    "de": "Deutsch",
+}
+
 I18N = {
     "ru": {
         "ui.sub": "Скачивание видео и плейлистов YouTube (yt-dlp)",
@@ -165,12 +176,6 @@ I18N = {
         "theme_audrey_main": "Audrey Main Colours (светлая)",
         "theme_night_sky": "Basic Night Sky (тёмная)",
         "theme_vilmy": "Vilmy~",
-        "lang.ru": "Русский",
-        "lang.en": "English",
-        "lang.ja": "日本語",
-        "lang.zh": "简体中文",
-        "lang.es": "Español",
-        "lang.de": "Deutsch",
         "clicker.title": "…",
         "clicker.hint": "Кликни меня~",
         "clicker.msg1000": "Закликай меня до смерти~~~",
@@ -250,12 +255,6 @@ I18N = {
         "theme_audrey_main": "Audrey Main Colours (light)",
         "theme_night_sky": "Basic Night Sky (dark)",
         "theme_vilmy": "Vilmy~",
-        "lang.ru": "Русский",
-        "lang.en": "English",
-        "lang.ja": "日本語",
-        "lang.zh": "简体中文",
-        "lang.es": "Español",
-        "lang.de": "Deutsch",
         "clicker.title": "…",
         "clicker.hint": "Click me~",
         "clicker.msg1000": "Click me to death~~~",
@@ -335,12 +334,6 @@ I18N = {
         "theme_audrey_main": "オードリー・メイン・カラーズ（ライト）",
         "theme_night_sky": "夜空（ダーク）",
         "theme_vilmy": "Vilmy~",
-        "lang.ru": "Русский",
-        "lang.en": "English",
-        "lang.ja": "日本語",
-        "lang.zh": "简体中文",
-        "lang.es": "Español",
-        "lang.de": "Deutsch",
         "clicker.title": "…",
         "clicker.hint": "クリックしてね~",
         "clicker.msg1000": "死ぬまでクリックして~~~",
@@ -420,12 +413,6 @@ I18N = {
         "theme_audrey_main": "奥黛丽主色（浅色）",
         "theme_night_sky": "夜空（深色）",
         "theme_vilmy": "Vilmy~",
-        "lang.ru": "Русский",
-        "lang.en": "English",
-        "lang.ja": "日本語",
-        "lang.zh": "简体中文",
-        "lang.es": "Español",
-        "lang.de": "Deutsch",
         "clicker.title": "…",
         "clicker.hint": "点我呀~",
         "clicker.msg1000": "把我点到死~~~",
@@ -505,12 +492,6 @@ I18N = {
         "theme_audrey_main": "Colores de Audrey (claro)",
         "theme_night_sky": "Cielo Nocturno (oscuro)",
         "theme_vilmy": "Vilmy~",
-        "lang.ru": "Русский",
-        "lang.en": "English",
-        "lang.ja": "日本語",
-        "lang.zh": "简体中文",
-        "lang.es": "Español",
-        "lang.de": "Deutsch",
         "clicker.title": "…",
         "clicker.hint": "¡Haz clic en mí~",
         "clicker.msg1000": "¡Haz clic en mí hasta morir~~~",
@@ -590,12 +571,6 @@ I18N = {
         "theme_audrey_main": "Audrey-Farben (hell)",
         "theme_night_sky": "Nachthimmel (dunkel)",
         "theme_vilmy": "Vilmy~",
-        "lang.ru": "Русский",
-        "lang.en": "English",
-        "lang.ja": "日本語",
-        "lang.zh": "简体中文",
-        "lang.es": "Español",
-        "lang.de": "Deutsch",
         "clicker.title": "…",
         "clicker.hint": "Klick mich~",
         "clicker.msg1000": "Klick mich zu Tode~~~",
@@ -635,6 +610,73 @@ def tr(lang: str, key: str, **kwargs) -> str:
     if text is None:
         text = I18N["ru"].get(key) or key
     return text.format(**kwargs) if kwargs else text
+
+
+# -- внешние переводы (JSON-файлы в %LOCALAPPDATA%\Synfronia\language) -------
+_LANG_EXTS = {".json"}
+
+
+def _lang_root() -> Path:
+    r"""Папка переводов: %LOCALAPPDATA%\Synfronia\language."""
+    base = os.environ.get("LOCALAPPDATA") or str(base_dir())
+    return Path(base) / "Synfronia" / "language"
+
+
+_LOADED_LANGS: tuple[str, ...] | None = None
+
+
+def load_languages() -> tuple[str, ...]:
+    """Сканирует папку переводов и подмешивает её файлы во встроенные переводы.
+
+    • при первом запуске (папка пуста/нет файлов) записывает базовый
+      «{lang}.json» для каждого встроенного языка — файлы можно править;
+    • при каждом запуске читается каждый «*.json»: имя файла = код языка
+      (например uk.json), содержимое = словарь ключей перевода, приоритет
+      у файла. Новый язык автоматически попадает в список, возвращаемый
+      этой функцией.
+    """
+    global _LOADED_LANGS
+    root = _lang_root()
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return LANGUAGES
+    # 1) базовые файлы — создаём, только если их ещё нет
+    for lang in LANGUAGES:
+        payload = dict(I18N.get(lang, {}))
+        payload.setdefault("thisLang", SELF_NAMES.get(lang) or lang)
+        I18N[lang] = payload
+        f = root / f"{lang}.json"
+        if f.exists():
+            continue
+        try:
+            f.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+        except OSError:
+            pass
+    # 2) сканируем папку: каждый «*.json» — язык (имя файла = код языка)
+    found = []
+    for f in sorted(root.glob("*.json")):
+        lang = f.stem
+        if not lang or not re.fullmatch(r"[A-Za-z]{2,8}(?:-[A-Za-z]{2,8})?", lang):
+            continue
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        merged = dict(I18N.get(lang, {}))
+        merged.update(data)
+        merged.setdefault("thisLang", SELF_NAMES.get(lang) or lang)
+        I18N[lang] = merged
+        found.append(lang)
+    # базовые сначала (стабильный порядок), затем новые из папки
+    order = list(LANGUAGES) + [l for l in found if l not in LANGUAGES]
+    _LOADED_LANGS = tuple(dict.fromkeys(order))
+    return _LOADED_LANGS
 
 SUBTITLE_OPTIONS = {
     "off": None,

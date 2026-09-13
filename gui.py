@@ -17,6 +17,7 @@ from core import (
     find_ffmpeg,
     is_playlist,
     load_settings,
+    load_languages,
     save_settings,
     tr,
 )
@@ -321,7 +322,7 @@ HTML = r"""<!DOCTYPE html>
     vilmy: { bg: "#F5F0E6", surface: "#EFE9DC", widget: "#EDE5D3", text: "#1F3A2E", accent: "#B89968" }
   };
   var I18N = __I18N__;
-  var LANGS = ["ru", "en", "ja", "zh-CN", "es", "de"];
+  var LANGS = Object.keys(I18N).filter(function(k) { return I18N[k] && I18N[k].thisLang; });
   var TRANS_KEYS = ["none", "libx265", "nvenc", "amf", "qsv"];
   var QUAL_OPTIONS = [
     ["lossless", "qual.lossless"], ["2k", "2K (1440p)"],
@@ -506,7 +507,13 @@ HTML = r"""<!DOCTYPE html>
       note.textContent = "";
     }
   }
-  function buildLangOptions() { fillSelect("lang", LANGS.map(function(k) { return [k, "lang." + k]; })); }
+  function buildLangOptions() {
+    fillSelect("lang", LANGS.filter(function(k) {
+      return I18N[k] && I18N[k]["thisLang"];
+    }).map(function(k) {
+      return [k, I18N[k]["thisLang"]];
+    }));
+  }
 
   function renderClicker() {
     var btn = document.getElementById("clicker");
@@ -758,7 +765,9 @@ HTML = r"""<!DOCTYPE html>
 </html>
 """
 
+LANGS = load_languages()
 HTML = HTML.replace("__I18N__", json.dumps(I18N, ensure_ascii=False))
+HTML = HTML.replace("__LANGS__", json.dumps(list(LANGS), ensure_ascii=False))
 
 
 class Api:
