@@ -1,5 +1,6 @@
 """Библиотека загрузки: обвязка над yt-dlp с логом, прогрессом и остановкой."""
 
+import base64
 import json
 import os
 import re
@@ -24,6 +25,18 @@ from yt_dlp.postprocessor.ffmpeg import (
 _PLAYLIST_RE = re.compile(r"[?&]list=")
 
 # -- темы --------------------------------------------------------------------
+# Поля темы: label (название), цвета палитры bg/surface/widget/text/accent/warn,
+# opacity (общая прозрачность интерфейса 0..1), радиусы скругления
+# radius_s / radius_m / radius_l (px), hidden (скрыть из списка).
+# Значения — дефолты; пользователь правит копии в
+# %LOCALAPPDATA%\Synfronia\themes\{имя_темы}\theme.json.
+_THEME_DEFAULTS = {
+    "warn": "#ffb454",
+    "opacity": 1.0,
+    "radius_s": 6,
+    "radius_m": 8,
+    "radius_l": 12,
+}
 THEMES = {
     "scary_forest": {
         "label": "Scary Forest (тёмная)",
@@ -32,6 +45,7 @@ THEMES = {
         "widget": "#23444b",
         "text": "#dcdedd",
         "accent": "#628d7c",
+        **_THEME_DEFAULTS,
     },
     "technology_day": {
         "label": "Technology day (тёмно-бирюзовая)",
@@ -40,6 +54,7 @@ THEMES = {
         "widget": "#003638",
         "text": "#dcdedd",
         "accent": "#00989b",
+        **_THEME_DEFAULTS,
     },
     "technology_pinks": {
         "label": "Technology Pinks (светлая)",
@@ -48,6 +63,7 @@ THEMES = {
         "widget": "#ffffff",
         "text": "#5d2547",
         "accent": "#c15f9b",
+        **_THEME_DEFAULTS,
     },
     "scarred_mind": {
         "label": "Scarred Mind (тёмная)",
@@ -56,6 +72,7 @@ THEMES = {
         "widget": "#1e2542",
         "text": "#b9c2d6",
         "accent": "#f1b970",
+        **_THEME_DEFAULTS,
     },
     "audrey_main": {
         "label": "Audrey Main Colours (светлая)",
@@ -64,6 +81,7 @@ THEMES = {
         "widget": "#ededed",
         "text": "#5d5d5d",
         "accent": "#96af9b",
+        **_THEME_DEFAULTS,
     },
     "night_sky": {
         "label": "Basic Night Sky (тёмная)",
@@ -72,6 +90,7 @@ THEMES = {
         "widget": "#323756",
         "text": "#fffedd",
         "accent": "#fff2c9",
+        **_THEME_DEFAULTS,
     },
     "vilmy": {
         "label": "Vilmy~",
@@ -80,6 +99,7 @@ THEMES = {
         "widget": "#EDE5D3",
         "text": "#1F3A2E",
         "accent": "#B89968",
+        **{**_THEME_DEFAULTS, "hidden": True},
     },
 }
 
@@ -710,6 +730,191 @@ def load_languages() -> tuple[str, ...]:
     order = list(LANGUAGES) + [l for l in found if l not in LANGUAGES]
     _LOADED_LANGS = tuple(dict.fromkeys(order))
     return _LOADED_LANGS
+
+
+# -- внешние темы (папки в %LOCALAPPDATA%\Synfronia\themes) ------------------
+# Каждая тема — отдельная подпапка {theme_id}/ с файлами:
+#   theme.json   — палитра/прозрачность/скругление (поля см. THEMES выше);
+#   custom.css   — дополнительный CSS темы (можно менять фон элементов,
+#                  подставлять картинки: url("bg.png"), url("anim.gif") и т.д.);
+#   любые файлы  — ресурсы темы, на них ссылаются относительными url(...).
+# Имя файла CSS можно переопределить полем "css" в theme.json.
+_THEME_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
+
+_THEME_MIME = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".svg": "image/svg+xml",
+    ".ico": "image/x-icon",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+    ".ttf": "font/ttf",
+    ".otf": "font/otf",
+}
+
+_BASE_CSS = (
+    "/* Дополнительный CSS темы. Ресурсы темы кладите рядом и подключайте "
+    "относительно: url(\"bg.png\"), url(\"anim.gif\"). */\n"
+)
+
+_URLEX = re.compile(r"""url\(\s*(?:"([^"]*)"|'([^']*)'|([^)"'\s][^)"']*))\s*\)""")
+
+
+def _themes_root() -> Path:
+    r"""Папка тем: %LOCALAPPDATA%\Synfronia\themes."""
+    base = os.environ.get("LOCALAPPDATA") or str(base_dir())
+    return Path(base) / "Synfronia" / "themes"
+
+
+_LOADED_THEMES: dict[str, dict] | None = None
+
+
+def _asset_data_uri(path: Path) -> str | None:
+    """Превращает локальный файл темы (png/gif/jpg/…) в data:URI."""
+    mime = _THEME_MIME.get(path.suffix.lower())
+    if mime is None:
+        return None
+    try:
+        return f"data:{mime};base64," + base64.b64encode(path.read_bytes()).decode("ascii")
+    except OSError:
+        return None
+
+
+def _process_theme_css(css: str, folder: Path) -> str:
+    """Подставляет локальные файлы темы в url(...) как data:URI.
+
+    Относительные url(имя.расширение) резолвятся внутри папки темы и
+    встраиваются в CSS; абсолютные (http/https/data://, пути с диском)
+    остаются как есть.
+    """
+    folder = folder.resolve()
+
+    def repl(m):
+        rel = m.group(1) or m.group(2) or m.group(3)
+        if not rel:
+            return m.group(0)
+        low = rel.lower()
+        if (low.startswith("data:") or low.startswith("http://")
+                or low.startswith("https://") or low.startswith("//")
+                or low.startswith("file:") or low.startswith("/")
+                or re.match(r"^[A-Za-z]:[\\/]", low) or low.startswith("\\\\")):
+            return m.group(0)
+        candidate = (folder / rel).resolve()
+        if not candidate.is_relative_to(folder):
+            return m.group(0)
+        uri = _asset_data_uri(candidate)
+        return f"url(\"{uri}\")" if uri else m.group(0)
+
+    return _URLEX.sub(repl, css)
+
+
+def _seed_theme(root: Path, key: str, payload: dict) -> None:
+    """Раскладывает встроенную тему в папку (theme.json + custom.css),
+    только если их ещё нет — правки пользователя сохраняются."""
+    folder = root / key
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return
+    meta = folder / "theme.json"
+    if not meta.exists():
+        try:
+            meta.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
+                encoding="utf-8-sig",
+            )
+        except OSError:
+            pass
+    css = folder / "custom.css"
+    if not css.exists():
+        try:
+            css.write_text(_BASE_CSS, encoding="utf-8-sig")
+        except OSError:
+            pass
+
+
+def _migrate_flat(root: Path) -> None:
+    """Переносит старые плоские «{theme}.json» (наследие предыдущей версии)
+    в папку темы как theme.json; плоский файл после переноса удаляется."""
+    for f in sorted(root.glob("*.json")):
+        key = f.stem
+        if not key or not _THEME_ID_RE.fullmatch(key):
+            continue
+        if (root / key / "theme.json").exists():
+            continue
+        try:
+            data = json.loads(f.read_text(encoding="utf-8-sig"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        try:
+            (root / key).mkdir(parents=True, exist_ok=True)
+            (root / key / "theme.json").write_text(
+                json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True),
+                encoding="utf-8-sig",
+            )
+            f.unlink()
+        except OSError:
+            pass
+
+
+def load_themes() -> dict[str, dict]:
+    """Сканирует папку тем: каждая подпапка = тема (theme.json + custom.css).
+
+    • при первом запуске (папка пуста/нет файлов) раскладывает базовые темы
+      по папкам — файлы можно править, добавлять CSS и картинки;
+    • при каждом запуске читается каждая «*/theme.json»: имя папки = id темы,
+      содержимое = словарь полей палитры/прозрачности/скругления; рядом
+      custom.css с ресурсами темы. Новая тема (новая подпапка) автоматически
+      попадает в возвращаемый словарь (базовые идут первыми, затем новые).
+    """
+    global _LOADED_THEMES
+    root = _themes_root()
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return dict(THEMES)
+    _migrate_flat(root)
+    # 1) базовые темы — раскладываем по папкам, только если их ещё нет
+    for key, payload in THEMES.items():
+        _seed_theme(root, key, payload)
+    # 2) сканируем папку: каждая подпапка с theme.json — тема
+    merged = dict(THEMES)
+    order = list(THEMES)
+    for folder in sorted(root.iterdir()):
+        if not folder.is_dir() or not _THEME_ID_RE.fullmatch(folder.name):
+            continue
+        key = folder.name
+        meta = folder / "theme.json"
+        if not meta.exists():
+            continue
+        try:
+            data = json.loads(meta.read_text(encoding="utf-8-sig"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        css_name = str(data.get("css") or "custom.css")
+        css = ""
+        css_path = folder / css_name
+        if css_path.exists():
+            try:
+                css = _process_theme_css(css_path.read_text(encoding="utf-8-sig"), folder)
+            except (OSError, UnicodeDecodeError):
+                css = ""
+        base = dict(merged.get(key, {}))
+        base.update(data)
+        base.setdefault("label", key)
+        base["css"] = css
+        merged[key] = base
+        if key not in order:
+            order.append(key)
+    _LOADED_THEMES = {k: merged[k] for k in order}
+    return _LOADED_THEMES
 
 SUBTITLE_OPTIONS = {
     "off": None,
