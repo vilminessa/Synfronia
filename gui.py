@@ -292,22 +292,34 @@ HTML = r"""<!DOCTYPE html>
       <button type="button" id="settings-close" class="icon-btn" data-i18n-title="ui.close" title="Закрыть">&#x2715;&#xFE0E;</button>
     </div>
     <div class="sheet-body">
-      <label for="lang" data-i18n="sheet.lang.label">Язык:</label>
-      <select id="lang"></select>
-      <label for="dest" data-i18n="sheet.dest.label">Папка скачивания:</label>
-      <div class="row">
-        <input type="text" id="dest">
-        <button type="button" id="browse" data-i18n="sheet.browse">Обзор…</button>
+      <div class="tabs">
+        <button type="button" class="tab active" id="tab-ui" data-i18n="sheet.tab.ui">Интерфейс</button>
+        <button type="button" class="tab" id="tab-dl" data-i18n="sheet.tab.dl">Загрузчик</button>
       </div>
-      <label for="theme" data-i18n="sheet.theme.label">Тема:</label>
-      <select id="theme"></select>
-      <label for="subs" data-i18n="sheet.subs.label">Субтитры:</label>
-      <select id="subs"></select>
-      <label for="qual" data-i18n="sheet.qual.label">Ограничение качества:</label>
-      <select id="qual"></select>
-      <label for="transcode" data-i18n="sheet.transcode.label">Перекодировка:</label>
-      <select id="transcode"></select>
-      <div id="transcode-note" class="note"></div>
+      <div id="panel-ui">
+        <label for="lang" data-i18n="sheet.lang.label">Язык:</label>
+        <select id="lang"></select>
+        <label for="theme" data-i18n="sheet.theme.label">Тема:</label>
+        <select id="theme"></select>
+        <label for="dest" data-i18n="sheet.dest.label">Папка скачивания:</label>
+        <div class="row">
+          <input type="text" id="dest">
+          <button type="button" id="browse" data-i18n="sheet.browse">Обзор…</button>
+        </div>
+      </div>
+      <div id="panel-dl" hidden>
+        <label for="subs" data-i18n="sheet.subs.label">Субтитры:</label>
+        <select id="subs"></select>
+        <label for="qual" data-i18n="sheet.qual.label">Ограничение качества:</label>
+        <select id="qual"></select>
+        <label for="transcode" data-i18n="sheet.transcode.label">Перекодировка:</label>
+        <select id="transcode"></select>
+        <div id="transcode-note" class="note"></div>
+        <label for="retries" data-i18n="sheet.retries.label">Повторы:</label>
+        <input type="number" id="retries" min="1" max="50" step="1">
+        <label for="socket_timeout" data-i18n="sheet.timeout.label">Таймаут (сек.):</label>
+        <input type="number" id="socket_timeout" min="1" max="120" step="1">
+      </div>
     </div>
   </div>
 
@@ -634,6 +646,8 @@ HTML = r"""<!DOCTYPE html>
       subtitles: document.getElementById("subs").value,
       quality: document.getElementById("qual").value,
       transcode: document.getElementById("transcode").value,
+      retries: parseInt(document.getElementById("retries").value, 10) || 10,
+      socket_timeout: parseInt(document.getElementById("socket_timeout").value, 10) || 20,
     };
   }
 
@@ -654,6 +668,8 @@ HTML = r"""<!DOCTYPE html>
     document.getElementById("subs").value = initData.settings.subtitles || "en";
     document.getElementById("qual").value = initData.settings.quality || "lossless";
     document.getElementById("transcode").value = initData.settings.transcode || "none";
+    document.getElementById("retries").value = initData.settings.retries || 10;
+    document.getElementById("socket_timeout").value = initData.settings.socket_timeout || 20;
     document.getElementById("lang").value = curLang;
     applyTheme(document.getElementById("theme").value);
     document.getElementById("dest").value = initData.default_dir;
@@ -675,6 +691,12 @@ HTML = r"""<!DOCTYPE html>
     });
     document.getElementById("transcode").addEventListener("change", function() {
       pywebview.api.save_setting("transcode", this.value);
+    });
+    document.getElementById("retries").addEventListener("change", function() {
+      pywebview.api.save_setting("retries", this.value);
+    });
+    document.getElementById("socket_timeout").addEventListener("change", function() {
+      pywebview.api.save_setting("socket_timeout", this.value);
     });
     document.getElementById("group").addEventListener("change", function() {
       pywebview.api.save_setting("group_playlist", this.checked);
@@ -742,9 +764,18 @@ HTML = r"""<!DOCTYPE html>
       document.getElementById("settings-overlay").hidden = true;
       document.getElementById("settings-sheet").hidden = true;
     }
+    function switchSettingsTab(tab) {
+      var isUi = tab === "ui";
+      document.getElementById("panel-ui").hidden = !isUi;
+      document.getElementById("panel-dl").hidden = isUi;
+      document.getElementById("tab-ui").classList.toggle("active", isUi);
+      document.getElementById("tab-dl").classList.toggle("active", !isUi);
+    }
     document.getElementById("settings-btn").addEventListener("click", openSettings);
     document.getElementById("settings-close").addEventListener("click", closeSettings);
     document.getElementById("settings-overlay").addEventListener("click", closeSettings);
+    document.getElementById("tab-ui").addEventListener("click", function() { switchSettingsTab("ui"); });
+    document.getElementById("tab-dl").addEventListener("click", function() { switchSettingsTab("dl"); });
     document.addEventListener("keydown", function(ev) {
       if (ev.key === "Escape") closeSettings();
     });
