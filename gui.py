@@ -21,6 +21,7 @@ from core import (
     save_settings,
     tr,
 )
+from core import _file_log as file_log
 
 HTML = r"""<!DOCTYPE html>
 <html lang="ru">
@@ -896,6 +897,7 @@ class Api:
                 self._ffmpeg["pct"] = pct
 
         def on_log(level: str, msg: str) -> None:
+            file_log(level, msg)
             with self._lock:
                 self._logs.append(f"[{level}] {msg}")
 
@@ -989,6 +991,7 @@ class Api:
 
     # -- коллбеки от core ----------------------------------------------------
     def _log(self, level: str, msg: str) -> None:
+        file_log(level, msg)
         with self._lock:
             self._logs.append(f"[{level}] {msg}")
 

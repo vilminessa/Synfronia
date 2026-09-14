@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -782,6 +783,31 @@ def ffmpeg_local_dir() -> Path:
     return Path(os.environ.get("LOCALAPPDATA", str(base_dir()))) / "Synfronia" / "bin"
 
 
+def logs_dir() -> Path:
+    r"""Каталог логов: %LOCALAPPDATA%\Synfronia\logs."""
+    return Path(os.environ.get("LOCALAPPDATA", str(base_dir()))) / "Synfronia" / "logs"
+
+
+_LOG_LOCK = threading.Lock()
+
+
+def _file_log(level: str, msg: str) -> None:
+    r"""Дописывает строку в дневной лог-файл: %LOCALAPPDATA%\Synfronia\logs\app_YYYY-MM-DD.log."""
+    try:
+        logs_dir().mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return
+    stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    day = time.strftime("%Y-%m-%d")
+    path = logs_dir() / f"app_{day}.log"
+    try:
+        with _LOG_LOCK:
+            with open(path, "a", encoding="utf-8") as fh:
+                fh.write(f"[{stamp}] [{level}] {msg}\n")
+    except OSError:
+        pass
+
+
 FFMPEG_DOWNLOAD_URL = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
 
 
@@ -1139,6 +1165,8 @@ class Downloader:
             "retries": _retries,
             "fragment_retries": _retries,
             "socket_timeout": _timeout,
+            "hls_prefer_ffmpeg": True,
+            "js_runtimes": {"node": {}},
         }
         if subs_langs:
             opts["writesubtitles"] = True
