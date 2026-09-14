@@ -1080,6 +1080,7 @@ class Downloader:
         self._on_progress = on_progress or (lambda *_: None)
         self._lang = lang if lang in LANGUAGES else "ru"
         self._stop = threading.Event()
+        self._wd_done = threading.Event()
 
     def _t(self, key: str, **kwargs) -> str:
         return tr(self._lang, key, **kwargs)
@@ -1094,6 +1095,25 @@ class Downloader:
     # -- колбэки в yt-dlp -----------------------------------------------------
     def _log(self, level: str, msg: str) -> None:
         self._on_log(level, msg)
+
+    def _retry_hook(self, n: int = 0) -> float:
+        """Вызывается yt-dlp перед каждой ретраей (http/fragment).
+        Если запрошена остановка — бросает _StopDownload, мгновенно обрывая цикл."""
+        if self._stop.is_set():
+            raise _StopDownload()
+        return 0.0
+
+    def _watchdog(self, ydl) -> None:
+        """Фоновый сторож: при запросе остановки закрывает все активные
+        HTTP-соединения yt-dlp, чтобы прервать блокирующий read и retry-цикл."""
+        while not self._stop.wait(0.05):
+            if self._wd_done.is_set():
+                return
+        try:
+            director = ydl._request_director
+            director.close()
+        except Exception:  # noqa: BLE001
+            pass
 
     class _Logger:
         def __init__(self, owner: "Downloader"):
@@ -1167,6 +1187,7 @@ class Downloader:
             "socket_timeout": _timeout,
             "hls_prefer_ffmpeg": True,
             "js_runtimes": {"node": {}},
+            "retry_sleep_functions": {"http": self._retry_hook, "fragment": self._retry_hook},
         }
         if subs_langs:
             opts["writesubtitles"] = True
@@ -1213,7 +1234,11 @@ class Downloader:
             label = self._t("trans." + transcode) if "trans." + transcode in I18N["ru"] else (encoder["label"] if encoder else transcode)
             self._log("info", self._t("p.transcoding", label=label))
         try:
+            self._wd_done.clear()
             with YoutubeDL(self._add_ffmpeg(opts)) as ydl:
+                threading.Thread(
+                    target=self._watchdog, args=(ydl,), daemon=True, name="synfronia-watchdog"
+                ).start()
                 self._register_pps(ydl, subs_on, transcode, quality)
                 info = ydl.extract_info(url, download=True)
                 short = None
@@ -1229,6 +1254,7 @@ class Downloader:
         except Exception as exc:  # noqa: BLE001
             self._log("error", self._t("p.error", exc=exc))
         finally:
+            self._wd_done.set()
             self._stop.clear()
             self._on_progress({"status": "done"})
 
