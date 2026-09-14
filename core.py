@@ -214,6 +214,7 @@ I18N = {
             "Ты что, хочешь докликать меня до… ну ты понял~",
             "Слышишь, как я щёлкаю от удовольствия~",
         ],
+        "p.done_errors": "Готово с ошибками — часть файлов не скачалась.",
         "p.ready": "Готов.",
         "p.start": "Запуск…",
         "p.enter_url": "Введите ссылку на видео или плейлист.",
@@ -304,6 +305,7 @@ I18N = {
             "You're gonna click me into… well, you know~",
             "Hear how I click with pleasure~",
         ],
+        "p.done_errors": "Done with errors - some files were not downloaded.",
         "p.ready": "Ready.",
         "p.start": "Starting…",
         "p.enter_url": "Enter a video or playlist link.",
@@ -394,6 +396,7 @@ I18N = {
             "クリックしすぎて…もう、わかってるでしょ~",
             "聞こえる？気持ちよく弾けてる音~",
         ],
+        "p.done_errors": "エラーありで終了 — 一部のファイルはダウンロードされませんでした。",
         "p.ready": "準備完了。",
         "p.start": "開始中…",
         "p.enter_url": "動画またはプレイリストのURLを入力してください。",
@@ -484,6 +487,7 @@ I18N = {
             "你再点下去…我就要…你懂的~",
             "听到没有，我舒服得直响~",
         ],
+        "p.done_errors": "已完成但有错误 — 部分文件未下载。",
         "p.ready": "就绪。",
         "p.start": "正在启动…",
         "p.enter_url": "请输入视频或播放列表链接。",
@@ -574,6 +578,7 @@ I18N = {
             "Me vas a clicar hasta… ya sabes~",
             "¿Oyes cómo chasqueo de placer~",
         ],
+        "p.done_errors": "Finalizado con errores: algunos archivos no se descargaron.",
         "p.ready": "Listo.",
         "p.start": "Iniciando…",
         "p.enter_url": "Introduce un enlace de vídeo o lista de reproducción.",
@@ -664,6 +669,7 @@ I18N = {
             "Willst du mich klicken bis… du weißt schon~",
             "Hörst du, wie ich vor Vergnügen klicke~",
         ],
+        "p.done_errors": "Mit Fehlern fertig - einige Dateien wurden nicht heruntergeladen.",
         "p.ready": "Bereit.",
         "p.start": "Starte…",
         "p.enter_url": "Bitte einen Video- oder Listen-Link eingeben.",
@@ -1322,6 +1328,8 @@ class Downloader:
         self._lang = lang if lang in LANGUAGES else "ru"
         self._stop = threading.Event()
         self._wd_done = threading.Event()
+        self._errors = False
+        self._finished = []
 
     def _t(self, key: str, **kwargs) -> str:
         return tr(self._lang, key, **kwargs)
@@ -1332,6 +1340,10 @@ class Downloader:
     @property
     def stopped(self) -> bool:
         return self._stop.is_set()
+
+    @property
+    def failed(self) -> bool:
+        return self._errors
 
     # -- колбэки в yt-dlp -----------------------------------------------------
     def _log(self, level: str, msg: str) -> None:
@@ -1363,12 +1375,16 @@ class Downloader:
         def debug(self, msg): self._owner._log("debug", msg)
         def info(self, msg): self._owner._log("info", msg)
         def warning(self, msg): self._owner._log("warning", msg)
-        def error(self, msg): self._owner._log("error", msg)
+        def error(self, msg):
+            self._owner._errors = True
+            self._owner._log("error", msg)
 
     def _hook(self, d: dict) -> None:
         if self._stop.is_set():
             raise _StopDownload()
         status = d.get("status")
+        if status == "finished" and d.get("filename"):
+            self._finished.append(os.path.abspath(d["filename"]))
         if status in ("downloading", "finished"):
             total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
             recvd = d.get("downloaded_bytes") or 0
@@ -1393,6 +1409,30 @@ class Downloader:
                     "msg": self._t("p.postprocess"),
                 }
             )
+
+    def _cleanup_orphans(self) -> None:
+        bases = set()
+        for path in map(os.path.abspath, self._finished):
+            parent, name = os.path.split(path)
+            m = re.search(r"(?i)\.f\d+\.", name)
+            bases.add(os.path.join(parent, name[: m.start()]) if m else path)
+        for base in bases:
+            parent, name = os.path.split(base)
+            if not os.path.isdir(parent):
+                continue
+            try:
+                entries = os.listdir(parent)
+            except OSError:
+                continue
+            for entry in entries:
+                if not entry.startswith(name + "."):
+                    continue
+                rest = entry[len(name):]
+                if rest.startswith(".f") or rest in (".part", ".webp", ".jpg", ".jpeg", ".png"):
+                    try:
+                        os.remove(os.path.join(parent, entry))
+                    except OSError:
+                        pass
 
     # -- опции yt-dlp ---------------------------------------------------------
     def _build_opts(
@@ -1426,7 +1466,6 @@ class Downloader:
             "retries": _retries,
             "fragment_retries": _retries,
             "socket_timeout": _timeout,
-            "hls_prefer_ffmpeg": True,
             "js_runtimes": {"node": {}},
             "retry_sleep_functions": {"http": self._retry_hook, "fragment": self._retry_hook},
         }
@@ -1440,7 +1479,9 @@ class Downloader:
         ffmpeg = find_ffmpeg()
         if ffmpeg:
             opts["ffmpeg_location"] = ffmpeg
+            opts["hls_prefer_native"] = False
         else:
+            opts["hls_prefer_native"] = True
             self._log("warning", self._t("p.ffmpeg_missing"))
         return opts
 
@@ -1465,6 +1506,8 @@ class Downloader:
         transcode: str = "none",
     ) -> None:
         os.makedirs(dest, exist_ok=True)
+        self._errors = False
+        self._finished = []
         opts = self._build_opts(dest, playlist, group, subtitles, quality)
         subs_on = bool(SUBTITLE_OPTIONS.get(subtitles))
         mode = self._t("p.mode.playlist" if playlist else "p.mode.video")
@@ -1488,6 +1531,11 @@ class Downloader:
                     short = self._t("p.done.playlist", n=len(done), dest=os.path.basename(dest))
                 elif info:
                     short = self._t("p.done.single", title=info.get("title", "?"))
+                if self._errors:
+                    self._cleanup_orphans()
+                    self._log("warning", self._t("p.done_errors"))
+                    if not (info and info.get("_type") == "playlist"):
+                        short = None
                 if short:
                     self._log("info", short)
         except _StopDownload:

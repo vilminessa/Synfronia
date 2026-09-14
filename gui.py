@@ -1001,7 +1001,11 @@ class Api:
         finally:
             with self._lock:
                 self._busy = False
-                self._status = tr(self._lang, "p.ready")
+                self._status = (
+                    tr(self._lang, "p.done_errors")
+                    if self.dl and self.dl.failed
+                    else tr(self._lang, "p.ready")
+                )
                 self._progress = {"mode": "determinate", "value": 100.0}
 
     def stop_download(self) -> None:
