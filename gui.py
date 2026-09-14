@@ -370,7 +370,6 @@ HTML = r"""<!DOCTYPE html>
   var activeTab = "video";
   var curLang = "ru";
   var clicks = 0;
-  var vilmyUnlocked = false;
   var transAvailability = { ffmpeg: true, avail: [] };
   var ffmpegOverlay = document.getElementById("ffmpeg-overlay");
   var ffmpegDlBtn = document.getElementById("ffmpeg-dl");
@@ -514,7 +513,7 @@ HTML = r"""<!DOCTYPE html>
     sel.innerHTML = "";
     Object.keys(THEMES).forEach(function(k) {
       var th = THEMES[k] || {};
-      if (th.hidden === true || (k === "vilmy" && !vilmyUnlocked)) return;
+      if (th.hidden === true) return;
       var opt = document.createElement("option");
       opt.value = k;
       var label = (I18N[curLang] || I18N.ru || {})["theme_" + k];
@@ -569,11 +568,19 @@ HTML = r"""<!DOCTYPE html>
     var btn = document.getElementById("clicker");
     btn.textContent = clicks === 0 ? t("clicker.hint") : clicks;
   }
+  function clickerMessages() {
+    var d = I18N[curLang] || I18N.ru || {};
+    var arr = d["clicker.messages"];
+    if (!Array.isArray(arr) && I18N.ru) arr = I18N.ru["clicker.messages"];
+    return Array.isArray(arr) ? arr : [];
+  }
   function flashClickerMsg() {
+    var arr = clickerMessages();
+    if (!arr.length) return;
     var el = document.getElementById("clicker-msg");
-    el.textContent = t("clicker.msg1000");
+    el.textContent = arr[Math.floor(Math.random() * arr.length)];
     el.classList.add("show");
-    setTimeout(function() { el.classList.remove("show"); }, 1100);
+    setTimeout(function() { el.classList.remove("show"); }, 1400);
   }
 
   function applyI18n() {
@@ -711,7 +718,6 @@ HTML = r"""<!DOCTYPE html>
     curLang = initData.settings.language || "ru";
     if (LANGS.indexOf(curLang) === -1) curLang = "ru";
     transAvailability = { ffmpeg: !!initData.ffmpeg, avail: initData.transcoders || [] };
-    if (initData.settings.theme === "vilmy") vilmyUnlocked = true;
     buildThemeOptions();
     buildSubsOptions();
     buildQualOptions();
@@ -807,18 +813,7 @@ HTML = r"""<!DOCTYPE html>
       clicks++;
       btn.classList.add("pressed");
       setTimeout(function() { btn.classList.remove("pressed"); }, 120);
-      if (clicks === 1000) flashClickerMsg();
-      if (clicks >= 2000) {
-        btn.style.display = "none";
-        vilmyUnlocked = true;
-        buildThemeOptions();
-        var themeSel = document.getElementById("theme");
-        themeSel.value = "vilmy";
-        applyTheme("vilmy");
-        pywebview.api.save_setting("theme", "vilmy");
-        document.getElementById("status").textContent = t("clicker.unlocked");
-        return;
-      }
+      if (clicks % 500 === 0) flashClickerMsg();
       renderClicker();
     });
     function openSettings() {
