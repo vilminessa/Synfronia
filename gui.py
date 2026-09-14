@@ -113,6 +113,25 @@ HTML = r"""<!DOCTYPE html>
   .sheet-title { font-size: 16px; font-weight: 600; }
   .sheet-body label { margin-top: 14px; }
   .note { margin-top: 6px; font-size: 12px; opacity: .7; }
+  input[type=number] {
+    box-sizing: border-box; width: 64px; flex: 0 0 64px;
+    padding: 6px 8px; border-radius: 6px; border: 1px solid var(--surface);
+    background: var(--widget); color: var(--text); font-size: 13px; outline: none; text-align: center;
+  }
+  input[type=number]:focus { border-color: var(--accent); }
+  input[type=range] {
+    flex: 1 1 0; min-width: 0; accent-color: var(--accent); height: 4px;
+  }
+  .settings-box {
+    margin-top: 12px; padding: 10px 12px; border: 1px solid var(--widget);
+    border-radius: 8px; background: var(--widget);
+  }
+  .settings-box-title {
+    font-size: 11px; font-weight: 600; opacity: .65;
+    text-transform: uppercase; letter-spacing: .4px; margin-bottom: 8px;
+  }
+  .range-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+  .range-row label { display: inline-block; margin: 0; min-width: 0; font-size: 13px; white-space: nowrap; }
   .pb-wrap { margin-top: 14px; height: 10px; border-radius: 5px; background: var(--surface); overflow: hidden; }
   #pb { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
   #pb.indeterminate { width: 30%; animation: slide 1.2s infinite; }
@@ -315,10 +334,19 @@ HTML = r"""<!DOCTYPE html>
         <label for="transcode" data-i18n="sheet.transcode.label">Перекодировка:</label>
         <select id="transcode"></select>
         <div id="transcode-note" class="note"></div>
-        <label for="retries" data-i18n="sheet.retries.label">Повторы:</label>
-        <input type="number" id="retries" min="1" max="50" step="1">
-        <label for="socket_timeout" data-i18n="sheet.timeout.label">Таймаут (сек.):</label>
-        <input type="number" id="socket_timeout" min="1" max="120" step="1">
+        <div class="settings-box">
+          <div class="settings-box-title" data-i18n="sheet.network.label">Сеть</div>
+          <div class="range-row">
+            <label for="retries" data-i18n="sheet.retries.label">Повторы:</label>
+            <input type="range" id="retries-range" min="1" max="50" step="1">
+            <input type="number" id="retries" min="1" max="50" step="1">
+          </div>
+          <div class="range-row">
+            <label for="socket_timeout" data-i18n="sheet.timeout.label">Таймаут (сек.):</label>
+            <input type="range" id="socket_timeout-range" min="1" max="120" step="1">
+            <input type="number" id="socket_timeout" min="1" max="120" step="1">
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -669,7 +697,9 @@ HTML = r"""<!DOCTYPE html>
     document.getElementById("qual").value = initData.settings.quality || "lossless";
     document.getElementById("transcode").value = initData.settings.transcode || "none";
     document.getElementById("retries").value = initData.settings.retries || 10;
+    document.getElementById("retries-range").value = initData.settings.retries || 10;
     document.getElementById("socket_timeout").value = initData.settings.socket_timeout || 20;
+    document.getElementById("socket_timeout-range").value = initData.settings.socket_timeout || 20;
     document.getElementById("lang").value = curLang;
     applyTheme(document.getElementById("theme").value);
     document.getElementById("dest").value = initData.default_dir;
@@ -693,9 +723,19 @@ HTML = r"""<!DOCTYPE html>
       pywebview.api.save_setting("transcode", this.value);
     });
     document.getElementById("retries").addEventListener("change", function() {
+      document.getElementById("retries-range").value = this.value;
+      pywebview.api.save_setting("retries", this.value);
+    });
+    document.getElementById("retries-range").addEventListener("input", function() {
+      document.getElementById("retries").value = this.value;
       pywebview.api.save_setting("retries", this.value);
     });
     document.getElementById("socket_timeout").addEventListener("change", function() {
+      document.getElementById("socket_timeout-range").value = this.value;
+      pywebview.api.save_setting("socket_timeout", this.value);
+    });
+    document.getElementById("socket_timeout-range").addEventListener("input", function() {
+      document.getElementById("socket_timeout").value = this.value;
       pywebview.api.save_setting("socket_timeout", this.value);
     });
     document.getElementById("group").addEventListener("change", function() {
