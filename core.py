@@ -214,6 +214,7 @@ I18N = {
             "Ты что, хочешь докликать меня до… ну ты понял~",
             "Слышишь, как я щёлкаю от удовольствия~",
         ],
+        "p.retry_hls": "Не удалось: пробую HLS-поток ({n})…",
         "p.done_errors": "Готово с ошибками — часть файлов не скачалась.",
         "p.ready": "Готов.",
         "p.start": "Запуск…",
@@ -305,6 +306,7 @@ I18N = {
             "You're gonna click me into… well, you know~",
             "Hear how I click with pleasure~",
         ],
+        "p.retry_hls": "Failed: trying HLS stream ({n})…",
         "p.done_errors": "Done with errors - some files were not downloaded.",
         "p.ready": "Ready.",
         "p.start": "Starting…",
@@ -396,6 +398,7 @@ I18N = {
             "クリックしすぎて…もう、わかってるでしょ~",
             "聞こえる？気持ちよく弾けてる音~",
         ],
+        "p.retry_hls": "失敗: HLSストリームを試します ({n})…",
         "p.done_errors": "エラーありで終了 — 一部のファイルはダウンロードされませんでした。",
         "p.ready": "準備完了。",
         "p.start": "開始中…",
@@ -487,6 +490,7 @@ I18N = {
             "你再点下去…我就要…你懂的~",
             "听到没有，我舒服得直响~",
         ],
+        "p.retry_hls": "失败：尝试 HLS 流媒体 ({n})…",
         "p.done_errors": "已完成但有错误 — 部分文件未下载。",
         "p.ready": "就绪。",
         "p.start": "正在启动…",
@@ -578,6 +582,7 @@ I18N = {
             "Me vas a clicar hasta… ya sabes~",
             "¿Oyes cómo chasqueo de placer~",
         ],
+        "p.retry_hls": "Error: probando flujo HLS ({n})…",
         "p.done_errors": "Finalizado con errores: algunos archivos no se descargaron.",
         "p.ready": "Listo.",
         "p.start": "Iniciando…",
@@ -669,6 +674,7 @@ I18N = {
             "Willst du mich klicken bis… du weißt schon~",
             "Hörst du, wie ich vor Vergnügen klicke~",
         ],
+        "p.retry_hls": "Fehlgeschlagen: versuche HLS-Stream ({n})…",
         "p.done_errors": "Mit Fehlern fertig - einige Dateien wurden nicht heruntergeladen.",
         "p.ready": "Bereit.",
         "p.start": "Starte…",
@@ -1494,6 +1500,18 @@ class Downloader:
         ydl.add_post_processor(EmbedThumbnailPP(ydl))
         ydl.add_post_processor(QualitySuffixPP(ydl, quality, self._lang))
 
+    def _format_candidates(self, quality: str) -> list:
+        base = QUALITY_FORMATS.get(quality, QUALITY_FORMATS["lossless"])
+        limit = QUALITY_LIMITS.get(quality)
+        if limit:
+            hls = (
+                f"bv*[height<={limit}][protocol^=m3u8]+ba/"
+                f"bv*[height<={limit}]+ba/b[height<={limit}]"
+            )
+        else:
+            hls = "bv*[protocol^=m3u8]+ba/bv*+ba/b"
+        return [base, hls] if hls != base else [base]
+
     # -- запуск ---------------------------------------------------------------
     def download(
         self,
@@ -1517,35 +1535,51 @@ class Downloader:
             encoder = TRANSCODERS.get(transcode)
             label = self._t("trans." + transcode) if "trans." + transcode in I18N["ru"] else (encoder["label"] if encoder else transcode)
             self._log("info", self._t("p.transcoding", label=label))
-        try:
-            self._wd_done.clear()
-            with YoutubeDL(self._add_ffmpeg(opts)) as ydl:
-                threading.Thread(
-                    target=self._watchdog, args=(ydl,), daemon=True, name="synfronia-watchdog"
-                ).start()
-                self._register_pps(ydl, subs_on, transcode, quality)
-                info = ydl.extract_info(url, download=True)
-                short = None
-                if info and info.get("_type") == "playlist":
-                    done = [e for e in info.get("entries", []) if e]
-                    short = self._t("p.done.playlist", n=len(done), dest=os.path.basename(dest))
-                elif info:
-                    short = self._t("p.done.single", title=info.get("title", "?"))
-                if self._errors:
-                    self._cleanup_orphans()
-                    self._log("warning", self._t("p.done_errors"))
-                    if not (info and info.get("_type") == "playlist"):
-                        short = None
+        candidates = self._format_candidates(quality)
+        for i, fmt in enumerate(candidates):
+            self._errors = False
+            self._finished = []
+            if i:
+                self._log("warning", self._t("p.retry_hls", n=i + 1))
+            opts = self._build_opts(dest, playlist, group, subtitles, quality)
+            opts["format"] = fmt
+            info = None
+            short = None
+            try:
+                self._wd_done.clear()
+                with YoutubeDL(self._add_ffmpeg(opts)) as ydl:
+                    threading.Thread(
+                        target=self._watchdog, args=(ydl,), daemon=True, name="synfronia-watchdog"
+                    ).start()
+                    self._register_pps(ydl, subs_on, transcode, quality)
+                    info = ydl.extract_info(url, download=True)
+                    if info and info.get("_type") == "playlist":
+                        done = [e for e in info.get("entries", []) if e]
+                        short = self._t("p.done.playlist", n=len(done), dest=os.path.basename(dest))
+                    elif info:
+                        short = self._t("p.done.single", title=info.get("title", "?"))
+            except _StopDownload:
+                self._log("warning", self._t("p.cancelled"))
+                return
+            except Exception as exc:  # noqa: BLE001
+                self._log("error", self._t("p.error", exc=exc))
+                break
+            finally:
+                self._wd_done.set()
+                self._stop.clear()
+                self._on_progress({"status": "done"})
+            if not self._errors:
                 if short:
                     self._log("info", short)
-        except _StopDownload:
-            self._log("warning", self._t("p.cancelled"))
-        except Exception as exc:  # noqa: BLE001
-            self._log("error", self._t("p.error", exc=exc))
-        finally:
-            self._wd_done.set()
-            self._stop.clear()
-            self._on_progress({"status": "done"})
+                return
+            self._cleanup_orphans()
+            if info and info.get("_type") == "playlist":
+                break
+        if not self._errors:
+            return
+        self._log("warning", self._t("p.done_errors"))
+        if short and info and info.get("_type") == "playlist":
+            self._log("info", short)
 
 
 if __name__ == "__main__":
