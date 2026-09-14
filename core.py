@@ -215,6 +215,7 @@ I18N = {
             "Слышишь, как я щёлкаю от удовольствия~",
         ],
         "p.retry_hls": "Не удалось: пробую HLS-поток ({n})…",
+        "p.attempt": "Формат: {fmt}…",
         "p.done_errors": "Готово с ошибками — часть файлов не скачалась.",
         "p.ready": "Готов.",
         "p.start": "Запуск…",
@@ -307,6 +308,7 @@ I18N = {
             "Hear how I click with pleasure~",
         ],
         "p.retry_hls": "Failed: trying HLS stream ({n})…",
+        "p.attempt": "Format: {fmt}…",
         "p.done_errors": "Done with errors - some files were not downloaded.",
         "p.ready": "Ready.",
         "p.start": "Starting…",
@@ -399,6 +401,7 @@ I18N = {
             "聞こえる？気持ちよく弾けてる音~",
         ],
         "p.retry_hls": "失敗: HLSストリームを試します ({n})…",
+        "p.attempt": "フォーマット: {fmt}…",
         "p.done_errors": "エラーありで終了 — 一部のファイルはダウンロードされませんでした。",
         "p.ready": "準備完了。",
         "p.start": "開始中…",
@@ -491,6 +494,7 @@ I18N = {
             "听到没有，我舒服得直响~",
         ],
         "p.retry_hls": "失败：尝试 HLS 流媒体 ({n})…",
+        "p.attempt": "格式: {fmt}…",
         "p.done_errors": "已完成但有错误 — 部分文件未下载。",
         "p.ready": "就绪。",
         "p.start": "正在启动…",
@@ -583,6 +587,7 @@ I18N = {
             "¿Oyes cómo chasqueo de placer~",
         ],
         "p.retry_hls": "Error: probando flujo HLS ({n})…",
+        "p.attempt": "Formato: {fmt}…",
         "p.done_errors": "Finalizado con errores: algunos archivos no se descargaron.",
         "p.ready": "Listo.",
         "p.start": "Iniciando…",
@@ -675,6 +680,7 @@ I18N = {
             "Hörst du, wie ich vor Vergnügen klicke~",
         ],
         "p.retry_hls": "Fehlgeschlagen: versuche HLS-Stream ({n})…",
+        "p.attempt": "Format: {fmt}…",
         "p.done_errors": "Mit Fehlern fertig - einige Dateien wurden nicht heruntergeladen.",
         "p.ready": "Bereit.",
         "p.start": "Starte…",
@@ -1485,9 +1491,8 @@ class Downloader:
         ffmpeg = find_ffmpeg()
         if ffmpeg:
             opts["ffmpeg_location"] = ffmpeg
-            opts["hls_prefer_native"] = False
         else:
-            opts["hls_prefer_native"] = True
+            opts["hls_use_mpegts"] = True
             self._log("warning", self._t("p.ffmpeg_missing"))
         return opts
 
@@ -1543,6 +1548,7 @@ class Downloader:
                 self._log("warning", self._t("p.retry_hls", n=i + 1))
             opts = self._build_opts(dest, playlist, group, subtitles, quality)
             opts["format"] = fmt
+            self._log("debug", self._t("p.attempt", n=i + 1, fmt=opts["format"]))
             info = None
             short = None
             try:
