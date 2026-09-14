@@ -18,9 +18,11 @@ from core import (
     is_playlist,
     load_settings,
     load_languages,
+    load_themes,
     save_settings,
     tr,
 )
+from core import _file_log as file_log
 
 HTML = r"""<!DOCTYPE html>
 <html lang="ru">
@@ -31,11 +33,13 @@ HTML = r"""<!DOCTYPE html>
   :root {
     --bg: #0c1622; --surface: #1f2b29; --widget: #23444b;
     --text: #dcdedd; --accent: #628d7c; --warn: #ffb454;
+    --radius-s: 6px; --radius-m: 8px; --radius-l: 12px; --opacity: 1;
   }
   * { box-sizing: border-box; }
   body {
     margin: 0; padding: 16px; font-family: "Segoe UI", system-ui, sans-serif;
     background: var(--bg); color: var(--text); font-size: 14px;
+    opacity: var(--opacity);
   }
   h1 { font-size: 22px; margin: 0 0 8px; }
   .sub { opacity: .65; font-size: 12px; }
@@ -47,7 +51,7 @@ HTML = r"""<!DOCTYPE html>
   }
   .clicker-msg.show { opacity: 1; }
   .clicker {
-    min-width: 120px; height: 42px; padding: 0 18px; border-radius: 12px;
+    min-width: 120px; height: 42px; padding: 0 18px; border-radius: var(--radius-l);
     background: var(--surface); border: 1px solid var(--widget); color: var(--text);
     font-size: 15px; line-height: 1; cursor: pointer; vertical-align: middle;
     transition: transform .08s, background .15s, border-color .15s;
@@ -76,14 +80,14 @@ HTML = r"""<!DOCTYPE html>
   }
   .tabs { display: flex; gap: 8px; margin-bottom: 14px; }
   .tab {
-    padding: 8px 22px; border: 1px solid var(--surface); border-radius: 8px;
+    padding: 8px 22px; border: 1px solid var(--surface); border-radius: var(--radius-m);
     background: var(--surface); color: var(--text); font-size: 14px; cursor: pointer;
   }
   .tab.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
   .panel { margin-bottom: 4px; }
   label { display: block; margin: 10px 0 4px; font-size: 13px; opacity: .9; }
   input[type=text], select {
-    width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--surface);
+    width: 100%; padding: 8px 10px; border-radius: var(--radius-s); border: 1px solid var(--surface);
     background: var(--widget); color: var(--text); font-size: 14px; outline: none;
   }
   input[type=text]:focus, select:focus { border-color: var(--accent); }
@@ -94,7 +98,7 @@ HTML = r"""<!DOCTYPE html>
   .check { display: flex; align-items: center; gap: 6px; margin: 10px 0 4px; font-size: 13px; }
   .check input { width: 15px; height: 15px; accent-color: var(--accent); }
   button {
-    padding: 8px 18px; border: none; border-radius: 6px; cursor: pointer;
+    padding: 8px 18px; border: none; border-radius: var(--radius-s); cursor: pointer;
     background: var(--surface); color: var(--text); font-size: 14px;
   }
   button:hover { background: var(--accent); color: var(--bg); }
@@ -113,7 +117,26 @@ HTML = r"""<!DOCTYPE html>
   .sheet-title { font-size: 16px; font-weight: 600; }
   .sheet-body label { margin-top: 14px; }
   .note { margin-top: 6px; font-size: 12px; opacity: .7; }
-  .pb-wrap { margin-top: 14px; height: 10px; border-radius: 5px; background: var(--surface); overflow: hidden; }
+  input[type=number] {
+    box-sizing: border-box; width: 64px; flex: 0 0 64px;
+    padding: 6px 8px; border-radius: var(--radius-s); border: 1px solid var(--surface);
+    background: var(--widget); color: var(--text); font-size: 13px; outline: none; text-align: center;
+  }
+  input[type=number]:focus { border-color: var(--accent); }
+  input[type=range] {
+    flex: 1 1 0; min-width: 0; accent-color: var(--accent); height: 4px;
+  }
+  .settings-box {
+    margin-top: 12px; padding: 10px 12px; border: 1px solid var(--widget);
+    border-radius: var(--radius-m); background: var(--widget);
+  }
+  .settings-box-title {
+    font-size: 11px; font-weight: 600; opacity: .65;
+    text-transform: uppercase; letter-spacing: .4px; margin-bottom: 8px;
+  }
+  .range-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+  .range-row label { display: inline-block; margin: 0; min-width: 0; font-size: 13px; white-space: nowrap; }
+  .pb-wrap { margin-top: 14px; height: 10px; border-radius: var(--radius-s); background: var(--surface); overflow: hidden; }
   #pb { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
   #pb.indeterminate { width: 30%; animation: slide 1.2s infinite; }
   @keyframes slide { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
@@ -121,10 +144,10 @@ HTML = r"""<!DOCTYPE html>
   #log {
     width: 100%; min-height: 150px; margin-top: 6px; resize: vertical;
     background: var(--widget); color: var(--text); border: 1px solid var(--surface);
-    border-radius: 6px; padding: 8px; font-family: Consolas, monospace; font-size: 12px;
+    border-radius: var(--radius-s); padding: 8px; font-family: Consolas, monospace; font-size: 12px;
   }
   #warn {
-    display: none; margin-top: 10px; padding: 8px 12px; border-radius: 6px;
+    display: none; margin-top: 10px; padding: 8px 12px; border-radius: var(--radius-s);
     background: rgba(255, 180, 84, .15); border: 1px solid var(--warn); color: var(--warn); font-size: 13px;
   }
 
@@ -292,35 +315,48 @@ HTML = r"""<!DOCTYPE html>
       <button type="button" id="settings-close" class="icon-btn" data-i18n-title="ui.close" title="Закрыть">&#x2715;&#xFE0E;</button>
     </div>
     <div class="sheet-body">
-      <label for="lang" data-i18n="sheet.lang.label">Язык:</label>
-      <select id="lang"></select>
-      <label for="dest" data-i18n="sheet.dest.label">Папка скачивания:</label>
-      <div class="row">
-        <input type="text" id="dest">
-        <button type="button" id="browse" data-i18n="sheet.browse">Обзор…</button>
+      <div class="tabs">
+        <button type="button" class="tab active" id="tab-ui" data-i18n="sheet.tab.ui">Интерфейс</button>
+        <button type="button" class="tab" id="tab-dl" data-i18n="sheet.tab.dl">Загрузчик</button>
       </div>
-      <label for="theme" data-i18n="sheet.theme.label">Тема:</label>
-      <select id="theme"></select>
-      <label for="subs" data-i18n="sheet.subs.label">Субтитры:</label>
-      <select id="subs"></select>
-      <label for="qual" data-i18n="sheet.qual.label">Ограничение качества:</label>
-      <select id="qual"></select>
-      <label for="transcode" data-i18n="sheet.transcode.label">Перекодировка:</label>
-      <select id="transcode"></select>
-      <div id="transcode-note" class="note"></div>
+      <div id="panel-ui">
+        <label for="lang" data-i18n="sheet.lang.label">Язык:</label>
+        <select id="lang"></select>
+        <label for="theme" data-i18n="sheet.theme.label">Тема:</label>
+        <select id="theme"></select>
+        <label for="dest" data-i18n="sheet.dest.label">Папка скачивания:</label>
+        <div class="row">
+          <input type="text" id="dest">
+          <button type="button" id="browse" data-i18n="sheet.browse">Обзор…</button>
+        </div>
+      </div>
+      <div id="panel-dl" hidden>
+        <label for="subs" data-i18n="sheet.subs.label">Субтитры:</label>
+        <select id="subs"></select>
+        <label for="qual" data-i18n="sheet.qual.label">Ограничение качества:</label>
+        <select id="qual"></select>
+        <label for="transcode" data-i18n="sheet.transcode.label">Перекодировка:</label>
+        <select id="transcode"></select>
+        <div id="transcode-note" class="note"></div>
+        <div class="settings-box">
+          <div class="settings-box-title" data-i18n="sheet.network.label">Сеть</div>
+          <div class="range-row">
+            <label for="retries" data-i18n="sheet.retries.label">Повторы:</label>
+            <input type="range" id="retries-range" min="1" max="50" step="1">
+            <input type="number" id="retries" min="1" max="50" step="1">
+          </div>
+          <div class="range-row">
+            <label for="socket_timeout" data-i18n="sheet.timeout.label">Таймаут (сек.):</label>
+            <input type="range" id="socket_timeout-range" min="1" max="120" step="1">
+            <input type="number" id="socket_timeout" min="1" max="120" step="1">
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
 <script>
-  var THEMES = {
-    scary_forest:   { bg: "#0c1622", surface: "#1f2b29", widget: "#23444b", text: "#dcdedd", accent: "#628d7c" },
-    technology_day: { bg: "#00181a", surface: "#00585a", widget: "#003638", text: "#dcdedd", accent: "#00989b" },
-    technology_pinks: { bg: "#ffebec", surface: "#ffcbe2", widget: "#ffffff", text: "#5d2547", accent: "#c15f9b" },
-    scarred_mind: { bg: "#252b47", surface: "#2f3b65", widget: "#1e2542", text: "#b9c2d6", accent: "#f1b970" },
-    audrey_main: { bg: "#fff5f0", surface: "#f9f9f9", widget: "#ededed", text: "#5d5d5d", accent: "#96af9b" },
-    night_sky: { bg: "#373051", surface: "#3b2f4d", widget: "#323756", text: "#fffedd", accent: "#fff2c9" },
-    vilmy: { bg: "#F5F0E6", surface: "#EFE9DC", widget: "#EDE5D3", text: "#1F3A2E", accent: "#B89968" }
-  };
+  var THEMES = __THEMES__;
   var I18N = __I18N__;
   var LANGS = Object.keys(I18N).filter(function(k) { return I18N[k] && I18N[k].thisLang; });
   var TRANS_KEYS = ["none", "libx265", "nvenc", "amf", "qsv"];
@@ -334,7 +370,6 @@ HTML = r"""<!DOCTYPE html>
   var activeTab = "video";
   var curLang = "ru";
   var clicks = 0;
-  var vilmyUnlocked = false;
   var transAvailability = { ffmpeg: true, avail: [] };
   var ffmpegOverlay = document.getElementById("ffmpeg-overlay");
   var ffmpegDlBtn = document.getElementById("ffmpeg-dl");
@@ -473,9 +508,23 @@ HTML = r"""<!DOCTYPE html>
   }
 
   function buildThemeOptions() {
-    fillSelect("theme", Object.keys(THEMES).filter(function(k) {
-      return k !== "vilmy" || vilmyUnlocked;
-    }).map(function(k) { return [k, "theme_" + k]; }));
+    var sel = document.getElementById("theme");
+    var keep = sel.value;
+    sel.innerHTML = "";
+    Object.keys(THEMES).forEach(function(k) {
+      var th = THEMES[k] || {};
+      if (th.hidden === true) return;
+      var opt = document.createElement("option");
+      opt.value = k;
+      var label = (I18N[curLang] || I18N.ru || {})["theme_" + k];
+      if (label === undefined && (I18N.ru || {})["theme_" + k] !== undefined) {
+        label = I18N.ru["theme_" + k];
+      }
+      if (label === undefined) label = th.label || k;
+      opt.textContent = label;
+      sel.appendChild(opt);
+    });
+    sel.value = keep;
   }
   function buildSubsOptions() { fillSelect("subs", SUB_OPTIONS); }
   function buildQualOptions() { fillSelect("qual", QUAL_OPTIONS); }
@@ -519,11 +568,19 @@ HTML = r"""<!DOCTYPE html>
     var btn = document.getElementById("clicker");
     btn.textContent = clicks === 0 ? t("clicker.hint") : clicks;
   }
+  function clickerMessages() {
+    var d = I18N[curLang] || I18N.ru || {};
+    var arr = d["clicker.messages"];
+    if (!Array.isArray(arr) && I18N.ru) arr = I18N.ru["clicker.messages"];
+    return Array.isArray(arr) ? arr : [];
+  }
   function flashClickerMsg() {
+    var arr = clickerMessages();
+    if (!arr.length) return;
     var el = document.getElementById("clicker-msg");
-    el.textContent = t("clicker.msg1000");
+    el.textContent = arr[Math.floor(Math.random() * arr.length)];
     el.classList.add("show");
-    setTimeout(function() { el.classList.remove("show"); }, 1100);
+    setTimeout(function() { el.classList.remove("show"); }, 1400);
   }
 
   function applyI18n() {
@@ -545,11 +602,26 @@ HTML = r"""<!DOCTYPE html>
   }
 
   function applyTheme(key) {
-    var c = THEMES[key] || THEMES.scarred_mind;
+    var c = THEMES[key] || THEMES.scarred_mind || {};
+    function pick(v, d) { return v !== undefined && v !== null ? v : d; }
     var root = document.documentElement.style;
-    root.setProperty("--bg", c.bg); root.setProperty("--surface", c.surface);
-    root.setProperty("--widget", c.widget); root.setProperty("--text", c.text);
-    root.setProperty("--accent", c.accent);
+    root.setProperty("--bg", pick(c.bg, "#0c1622"));
+    root.setProperty("--surface", pick(c.surface, "#1f2b29"));
+    root.setProperty("--widget", pick(c.widget, "#23444b"));
+    root.setProperty("--text", pick(c.text, "#dcdedd"));
+    root.setProperty("--accent", pick(c.accent, "#628d7c"));
+    root.setProperty("--warn", pick(c.warn, "#ffb454"));
+    root.setProperty("--radius-s", pick(c.radius_s, 6) + "px");
+    root.setProperty("--radius-m", pick(c.radius_m, 8) + "px");
+    root.setProperty("--radius-l", pick(c.radius_l, 12) + "px");
+    root.setProperty("--opacity", pick(c.opacity, 1));
+    var cssEl = document.getElementById("theme-style");
+    if (!cssEl) {
+      cssEl = document.createElement("style");
+      cssEl.id = "theme-style";
+      document.head.appendChild(cssEl);
+    }
+    cssEl.textContent = c.css || "";
   }
 
   function setBusy(b) {
@@ -634,6 +706,8 @@ HTML = r"""<!DOCTYPE html>
       subtitles: document.getElementById("subs").value,
       quality: document.getElementById("qual").value,
       transcode: document.getElementById("transcode").value,
+      retries: parseInt(document.getElementById("retries").value, 10) || 10,
+      socket_timeout: parseInt(document.getElementById("socket_timeout").value, 10) || 20,
     };
   }
 
@@ -644,7 +718,6 @@ HTML = r"""<!DOCTYPE html>
     curLang = initData.settings.language || "ru";
     if (LANGS.indexOf(curLang) === -1) curLang = "ru";
     transAvailability = { ffmpeg: !!initData.ffmpeg, avail: initData.transcoders || [] };
-    if (initData.settings.theme === "vilmy") vilmyUnlocked = true;
     buildThemeOptions();
     buildSubsOptions();
     buildQualOptions();
@@ -654,6 +727,10 @@ HTML = r"""<!DOCTYPE html>
     document.getElementById("subs").value = initData.settings.subtitles || "en";
     document.getElementById("qual").value = initData.settings.quality || "lossless";
     document.getElementById("transcode").value = initData.settings.transcode || "none";
+    document.getElementById("retries").value = initData.settings.retries || 10;
+    document.getElementById("retries-range").value = initData.settings.retries || 10;
+    document.getElementById("socket_timeout").value = initData.settings.socket_timeout || 20;
+    document.getElementById("socket_timeout-range").value = initData.settings.socket_timeout || 20;
     document.getElementById("lang").value = curLang;
     applyTheme(document.getElementById("theme").value);
     document.getElementById("dest").value = initData.default_dir;
@@ -675,6 +752,22 @@ HTML = r"""<!DOCTYPE html>
     });
     document.getElementById("transcode").addEventListener("change", function() {
       pywebview.api.save_setting("transcode", this.value);
+    });
+    document.getElementById("retries").addEventListener("change", function() {
+      document.getElementById("retries-range").value = this.value;
+      pywebview.api.save_setting("retries", this.value);
+    });
+    document.getElementById("retries-range").addEventListener("input", function() {
+      document.getElementById("retries").value = this.value;
+      pywebview.api.save_setting("retries", this.value);
+    });
+    document.getElementById("socket_timeout").addEventListener("change", function() {
+      document.getElementById("socket_timeout-range").value = this.value;
+      pywebview.api.save_setting("socket_timeout", this.value);
+    });
+    document.getElementById("socket_timeout-range").addEventListener("input", function() {
+      document.getElementById("socket_timeout").value = this.value;
+      pywebview.api.save_setting("socket_timeout", this.value);
     });
     document.getElementById("group").addEventListener("change", function() {
       pywebview.api.save_setting("group_playlist", this.checked);
@@ -720,18 +813,7 @@ HTML = r"""<!DOCTYPE html>
       clicks++;
       btn.classList.add("pressed");
       setTimeout(function() { btn.classList.remove("pressed"); }, 120);
-      if (clicks === 1000) flashClickerMsg();
-      if (clicks >= 2000) {
-        btn.style.display = "none";
-        vilmyUnlocked = true;
-        buildThemeOptions();
-        var themeSel = document.getElementById("theme");
-        themeSel.value = "vilmy";
-        applyTheme("vilmy");
-        pywebview.api.save_setting("theme", "vilmy");
-        document.getElementById("status").textContent = t("clicker.unlocked");
-        return;
-      }
+      if (clicks % 500 === 0) flashClickerMsg();
       renderClicker();
     });
     function openSettings() {
@@ -742,9 +824,18 @@ HTML = r"""<!DOCTYPE html>
       document.getElementById("settings-overlay").hidden = true;
       document.getElementById("settings-sheet").hidden = true;
     }
+    function switchSettingsTab(tab) {
+      var isUi = tab === "ui";
+      document.getElementById("panel-ui").hidden = !isUi;
+      document.getElementById("panel-dl").hidden = isUi;
+      document.getElementById("tab-ui").classList.toggle("active", isUi);
+      document.getElementById("tab-dl").classList.toggle("active", !isUi);
+    }
     document.getElementById("settings-btn").addEventListener("click", openSettings);
     document.getElementById("settings-close").addEventListener("click", closeSettings);
     document.getElementById("settings-overlay").addEventListener("click", closeSettings);
+    document.getElementById("tab-ui").addEventListener("click", function() { switchSettingsTab("ui"); });
+    document.getElementById("tab-dl").addEventListener("click", function() { switchSettingsTab("dl"); });
     document.addEventListener("keydown", function(ev) {
       if (ev.key === "Escape") closeSettings();
     });
@@ -766,8 +857,9 @@ HTML = r"""<!DOCTYPE html>
 """
 
 LANGS = load_languages()
+THEMES = load_themes()
 HTML = HTML.replace("__I18N__", json.dumps(I18N, ensure_ascii=False))
-HTML = HTML.replace("__LANGS__", json.dumps(list(LANGS), ensure_ascii=False))
+HTML = HTML.replace("__THEMES__", json.dumps(THEMES, ensure_ascii=False))
 
 
 class Api:
@@ -825,6 +917,7 @@ class Api:
                 self._ffmpeg["pct"] = pct
 
         def on_log(level: str, msg: str) -> None:
+            file_log(level, msg)
             with self._lock:
                 self._logs.append(f"[{level}] {msg}")
 
@@ -908,7 +1001,11 @@ class Api:
         finally:
             with self._lock:
                 self._busy = False
-                self._status = tr(self._lang, "p.ready")
+                self._status = (
+                    tr(self._lang, "p.done_errors")
+                    if self.dl and self.dl.failed
+                    else tr(self._lang, "p.ready")
+                )
                 self._progress = {"mode": "determinate", "value": 100.0}
 
     def stop_download(self) -> None:
@@ -918,6 +1015,7 @@ class Api:
 
     # -- коллбеки от core ----------------------------------------------------
     def _log(self, level: str, msg: str) -> None:
+        file_log(level, msg)
         with self._lock:
             self._logs.append(f"[{level}] {msg}")
 

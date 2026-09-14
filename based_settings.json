@@ -2,6 +2,8 @@
   "theme": "scarred_mind",
   "subtitles": "en",
   "quality": "lossless",
+  "retries": 10,
+  "socket_timeout": 20,
   "transcode": "none",
   "group_playlist": true,
   "language": "en"
