@@ -17,6 +17,7 @@ from core import (
     download_ffmpeg,
     find_ffmpeg,
     is_playlist,
+    load_languages,
     load_settings,
     load_themes,
     save_settings,
@@ -26,6 +27,7 @@ from core import (
 from core import _file_log as file_log
 from core import _themes_root as themes_root
 
+load_languages()
 load_themes()
 _settings = load_settings()
 HTML = build_page(_settings.get("theme", "scarred_mind"))
