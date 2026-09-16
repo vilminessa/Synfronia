@@ -24,7 +24,7 @@ def main() -> int:
     parser.add_argument("--quality", choices=QUALITY_FORMATS, default="lossless")
     parser.add_argument("--transcode", choices=TRANSCODERS, default="none",
                         help="перекодировка: none (нет), libx265, nvenc, amf, qsv")
-    parser.add_argument("--lang", choices=LANGUAGES, default="ru")
+    parser.add_argument("--lang", choices=LANGUAGES, default="en")
     args = parser.parse_args()
 
     playlist = args.playlist or is_playlist(args.url)

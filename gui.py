@@ -40,7 +40,7 @@ class Api:
         self._transcoders: list[str] | None = None
         self._lock = threading.Lock()
         self._logs: list[str] = []
-        self._lang = self.settings.get("language", "ru")
+        self._lang = self.settings.get("language", "en")
         self._status = tr(self._lang, "p.ready")
         self._busy = False
         self._progress = {"mode": "determinate", "value": 0.0}

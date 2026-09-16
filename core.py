@@ -113,7 +113,7 @@ DEFAULT_SETTINGS = {
     "socket_timeout": 20,    # таймаут сокета в секундах (yt-dlp)
     "transcode": "none",     # none / libx265 / nvenc / amf / qsv
     "group_playlist": True,
-    "language": "ru",
+    "language": "en",
 }
 
 
@@ -1488,7 +1488,7 @@ class TranscodePP(FFmpegPostProcessor):
     в отдельный файл с суффиксом «HEVC», удаляя оригинал — чтобы в папке
     оставался только перекодированный файл."""
 
-    def __init__(self, downloader=None, encoder: str = "libx265", lang: str = "ru",
+    def __init__(self, downloader=None, encoder: str = "libx265", lang: str = "en",
                  copy_subtitles: bool = False):
         super().__init__(downloader)
         self._config = TRANSCODERS.get(encoder) or TRANSCODERS["libx265"]
@@ -1585,7 +1585,7 @@ class QualitySuffixPP(FFmpegPostProcessor):
     """Добавляет суффикс лимита качества (например [240p]) к готовому файлу,
     если исходное разрешение видео выше установленного ограничения."""
 
-    def __init__(self, downloader=None, quality: str = "lossless", lang: str = "ru"):
+    def __init__(self, downloader=None, quality: str = "lossless", lang: str = "en"):
         super().__init__(downloader)
         self._limit = QUALITY_LIMITS.get(quality)
         self._lang = lang
@@ -1621,10 +1621,10 @@ class QualitySuffixPP(FFmpegPostProcessor):
 class Downloader:
     """Запускает yt-dlp в рабочем потоке и стучится в UI через колбэки."""
 
-    def __init__(self, on_log=None, on_progress=None, lang: str = "ru"):
+    def __init__(self, on_log=None, on_progress=None, lang: str = "en"):
         self._on_log = on_log or (lambda *_: None)
         self._on_progress = on_progress or (lambda *_: None)
-        self._lang = lang if lang in LANGUAGES else "ru"
+        self._lang = lang if lang in LANGUAGES else "en"
         self._stop = threading.Event()
         self._wd_done = threading.Event()
         self._errors = False
@@ -1886,7 +1886,7 @@ if __name__ == "__main__":
     parser.add_argument("--subtitles", choices=list(SUBTITLE_OPTIONS), default="en")
     parser.add_argument("--quality", choices=list(QUALITY_FORMATS), default="lossless")
     parser.add_argument("--transcode", choices=list(TRANSCODERS), default="none")
-    parser.add_argument("--lang", choices=list(LANGUAGES), default="ru")
+    parser.add_argument("--lang", choices=list(LANGUAGES), default="en")
     args = parser.parse_args()
 
     def _log(level, msg):
