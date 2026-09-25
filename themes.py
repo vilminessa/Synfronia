@@ -16,7 +16,7 @@ from pathlib import Path
 import ui as _ui
 
 from i18n import I18N
-from paths import base_dir
+from paths import _file_log, base_dir
 
 
 # -- темы --------------------------------------------------------------------
@@ -140,6 +140,161 @@ _PALETTE_FIELDS = (
 _THEME_META_FIELDS = (
     "label", "extends", "entry", "css", "author", "version", "hidden",
 )
+
+
+# -- валидация theme.json ----------------------------------------------------
+# Значения из theme.json попадают прямо в <style> собранной страницы, поэтому
+# проверяем их строго: невалидное значение отбрасывается (theme наследует
+# значение родителя или значение по умолчанию), а тема помечается
+# предупреждением — оно попадает в лог и в список тем в UI (значок ⚠).
+_HEX_COLOR_RE = re.compile(r"#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})\Z")
+_FUNC_COLOR_RE = re.compile(r"(?:rgb|rgba|hsl|hsla)\([0-9a-z.,%/\s-]{1,64}\)\Z")
+_COLOR_WORDS = frozenset((
+    "transparent", "currentcolor", "inherit", "initial", "unset", "none",
+    "black", "white", "red", "green", "blue", "yellow", "orange", "purple",
+    "gray", "grey", "silver", "maroon", "olive", "lime", "aqua", "teal",
+    "navy", "fuchsia", "pink", "brown", "beige", "gold", "cyan", "magenta",
+))
+_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
+_MAX_RADIUS = 64.0
+_MAX_TEXT = 80
+
+
+def _clean_text(value, limit: int = _MAX_TEXT) -> str:
+    """Строка без управляющих символов, обрезанная до limit."""
+    return _CONTROL_RE.sub(" ", str(value)).strip()[:limit]
+
+
+def _clean_color(value) -> str | None:
+    """Цвет для CSS-переменной: #hex, rgb()/hsl() или имя из списка."""
+    text = _clean_text(value, 80).replace(" ", "")
+    if not text:
+        return None
+    low = text.lower()
+    if _HEX_COLOR_RE.match(text) or _FUNC_COLOR_RE.match(low) or low in _COLOR_WORDS:
+        return text
+    return None
+
+
+def _clean_number(value, lo: float, hi: float, digits: int = 3) -> float | None:
+    """Число в диапазоне [lo, hi] с клампингом; None для мусора/NaN/inf."""
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return None
+    if num != num or num in (float("inf"), float("-inf")):
+        return None
+    return round(min(max(num, lo), hi), digits)
+
+
+def _clean_relpath(value, suffix: str) -> str | None:
+    """Относительный путь внутри папки темы (без .., диска и ведущих /)."""
+    text = _clean_text(value, 120).replace("\\", "/")
+    if not text or text.startswith("/") or re.match(r"^[A-Za-z]:", text):
+        return None
+    parts = [p for p in text.split("/") if p not in ("", ".")]
+    if not parts or ".." in parts:
+        return None
+    rel = "/".join(parts)
+    return rel if rel.lower().endswith(suffix) else None
+
+
+def _palette_defaults() -> dict:
+    """Значения палитры по умолчанию (встроенная тема + _THEME_DEFAULTS)."""
+    base = dict(_THEME_DEFAULTS)
+    base.update({f: v for f, v in THEMES["scarred_mind"].items() if f in _PALETTE_FIELDS})
+    return base
+
+
+def validate_theme(data: dict) -> tuple[dict, list[str]]:
+    """Проверяет содержимое theme.json.
+
+    Возвращает (безопасная спецификация, список предупреждений). Невалидные
+    значения не копируются — тема наследует их от родителя или от дефолтов.
+    """
+    spec: dict = {}
+    warn: list[str] = []
+
+    for field in _PALETTE_FIELDS:
+        value = data.get(field)
+        if value is None:
+            continue
+        if field == "opacity":
+            num = _clean_number(value, 0.0, 1.0)
+            if num is None:
+                warn.append(f"{field}: не число ({value!r})")
+                continue
+            if not 0.0 <= float(value) <= 1.0:
+                warn.append(f"{field}: {value} → {num}")
+            spec[field] = num
+        elif field.startswith("radius"):
+            num = _clean_number(value, 0.0, _MAX_RADIUS, digits=2)
+            if num is None:
+                warn.append(f"{field}: не число ({value!r})")
+                continue
+            if not 0.0 <= float(value) <= _MAX_RADIUS:
+                warn.append(f"{field}: {value} → {num}")
+            spec[field] = num
+        else:
+            color = _clean_color(value)
+            if color is None:
+                warn.append(f"{field}: некорректный цвет ({value!r})")
+                continue
+            if color.lower() != str(value).strip().lower():
+                warn.append(f"{field}: {value!r} → {color}")
+            spec[field] = color
+
+    for field in ("label", "author", "version"):
+        text = _clean_text(data.get(field) or "")
+        if text:
+            spec[field] = text
+        elif field in data and data[field] is not None:
+            warn.append(f"{field}: пустое значение")
+
+    parent = data.get("extends")
+    if parent:
+        text = _clean_text(parent, 40)
+        if _THEME_ID_RE.fullmatch(text):
+            spec["extends"] = text
+        else:
+            warn.append(f"extends: некорректный id ({parent!r})")
+
+    entry = data.get("entry")
+    if entry:
+        rel = _clean_relpath(entry, ".html")
+        if rel:
+            spec["entry"] = rel
+        else:
+            warn.append(f"entry: недопустимый путь ({entry!r})")
+
+    css = data.get("css")
+    if css:
+        files = [css] if isinstance(css, str) else list(css) if isinstance(css, (list, tuple)) else []
+        cleaned: list[str] = []
+        for item in files:
+            rel = _clean_relpath(item, ".css")
+            if rel:
+                cleaned.append(rel)
+            else:
+                warn.append(f"css: недопустимый путь ({item!r})")
+        if cleaned:
+            spec["css"] = cleaned
+
+    hidden = data.get("hidden")
+    if hidden is not None:
+        spec["hidden"] = hidden if isinstance(hidden, bool) else _clean_text(hidden, 8).lower() in (
+            "1", "true", "yes", "on",
+        )
+
+    return spec, warn
+
+
+def _fill_palette(theme: dict) -> dict:
+    """Добирает отсутствующие поля палитры значениями по умолчанию."""
+    for field, value in _palette_defaults().items():
+        if theme.get(field) is None:
+            theme[field] = value
+    return theme
 
 
 def _themes_root() -> Path:
@@ -329,6 +484,8 @@ def load_themes() -> dict[str, dict]:
         "entry": "index.html"      — свой полный HTML-шаблон страницы;
         "css": ["custom.css", ...] — файлы CSS (по умолчанию ["custom.css"]);
         "author", "version"        — метаданные (необязательно).
+    Значения проверяются (validate_theme): невалидные отбрасываются, тема
+    наследует значение родителя, а в лог пишется предупреждение.
     """
     global _LOADED_THEMES
     root = _themes_root()
@@ -359,7 +516,11 @@ def load_themes() -> dict[str, dict]:
         if not isinstance(data, dict):
             continue
         spec = dict(raw.get(key, {}))
-        spec.update(data)
+        clean, warn = validate_theme(data)
+        spec.update(clean)
+        if warn:
+            spec["_warnings"] = warn
+            _file_log("warning", f"theme {key}: " + "; ".join(warn))
         spec.setdefault("label", key)
         spec["_folder"] = folder
         raw[key] = spec
@@ -409,6 +570,7 @@ def _resolve_theme(key: str, raw: dict[str, dict]) -> dict:
         chain = [dict(raw.get(key, dict(THEMES.get(key, {}))))]
     out: dict = {}
     css_parts: list[str] = []
+    warnings: list[str] = []
     entry = None
     entry_folder: Path | None = None
     for spec in chain:
@@ -418,6 +580,9 @@ def _resolve_theme(key: str, raw: dict[str, dict]) -> dict:
         for f in _THEME_META_FIELDS:
             if f in spec and f != "extends" and spec[f] is not None:
                 out[f] = spec[f]
+        for w in spec.get("_warnings") or []:
+            if w not in warnings:
+                warnings.append(w)
         folder = spec.get("_folder")
         for fname in _css_files_for(spec):
             if not folder:
@@ -435,6 +600,8 @@ def _resolve_theme(key: str, raw: dict[str, dict]) -> dict:
             entry_folder = folder
     out.setdefault("label", key)
     out["css"] = "\n".join(p for p in css_parts if p.strip())
+    if warnings:
+        out["_warnings"] = warnings
     if entry and entry_folder is not None:
         out["entry"] = entry
         out["_entry_folder"] = entry_folder
@@ -443,22 +610,42 @@ def _resolve_theme(key: str, raw: dict[str, dict]) -> dict:
     # Папки для поиска слотов и ассетов: глубина -> корень.
     slot_folders = [spec.get("_folder") for spec in reversed(chain) if spec.get("_folder")]
     out["_slot_folders"] = slot_folders
-    return out
+    return _fill_palette(out)
 
 
 def _palette_root_vars(theme: dict) -> str:
-    """CSS-переменные палитры темы как строка для :root{...}."""
+    """CSS-переменные палитры темы как строка для :root{...}.
+
+    Значения прогоняются через валидаторы ещё раз: страница собирается и для
+    тем, спецификация которых создана в памяти, а не прошла validate_theme.
+    """
     parts = []
     for f in _PALETTE_FIELDS:
-        if f in theme and theme[f] is not None:
-            v = theme[f]
-            if f.startswith("radius"):
-                parts.append(f"--{f}: {v}px")
-            elif f == "opacity":
-                parts.append(f"--opacity: {v}")
-            else:
-                parts.append(f"--{f}: {v}")
+        v = theme.get(f)
+        if v is None:
+            continue
+        if f.startswith("radius"):
+            num = _clean_number(v, 0.0, _MAX_RADIUS, digits=2)
+            if num is not None:
+                parts.append(f"--{f}: {num}px")
+        elif f == "opacity":
+            num = _clean_number(v, 0.0, 1.0)
+            if num is not None:
+                parts.append(f"--opacity: {num}")
+        else:
+            color = _clean_color(v)
+            if color is not None:
+                parts.append(f"--{f}: {color}")
     return " ".join(parts)
+
+
+def _js_json(data) -> str:
+    """JSON для вставки прямо в <script>.
+
+    «</» экранируется («<\\/»), иначе значение вида «</script>» из
+    theme.json или language\\*.json закрыло бы тег и выполнилось как разметка.
+    """
+    return json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
 
 
 def _asset_uri_for_page(rel: str, folders: list[Path]) -> str | None:
@@ -514,9 +701,12 @@ def build_page(theme_key: str, lang: str | None = None) -> str:
     • плейсхолдеры (__THEME_ROOT__, __THEME_CSS__, __APP_CSS__, __APPJS__,
       __I18N__, __THEMES__) подставляются простой заменой.
     """
-    if theme_key not in _LOADED_THEMES:
-        theme_key = "scarred_mind"
-    theme = _LOADED_THEMES[theme_key] or dict(THEMES.get(theme_key, {}))
+    if not _LOADED_THEMES:
+        load_themes()
+    available = _LOADED_THEMES or {}
+    if theme_key not in available:
+        theme_key = "scarred_mind" if "scarred_mind" in available else next(iter(available), theme_key)
+    theme = _fill_palette(dict(available.get(theme_key) or THEMES.get(theme_key) or {}))
     folders = theme.get("_slot_folders") or []
 
     # 1) выбор шаблона: свой index.html либо базовый
@@ -538,8 +728,8 @@ def build_page(theme_key: str, lang: str | None = None) -> str:
     page = page.replace("__THEME_CSS__", theme.get("css") or "")
     page = page.replace("__APP_CSS__", _ui.APP_CSS)
     page = page.replace("__APPJS__", _ui.APP_JS)
-    page = page.replace("__I18N__", json.dumps(I18N, ensure_ascii=False))
-    page = page.replace("__THEMES__", json.dumps(themes_embed(), ensure_ascii=False))
+    page = page.replace("__I18N__", _js_json(I18N))
+    page = page.replace("__THEMES__", _js_json(themes_embed()))
     return page
 
 
@@ -553,5 +743,7 @@ def themes_embed() -> dict:
         item["hidden"] = bool(spec.get("hidden", False))
         if spec.get("entry"):
             item["entry"] = spec["entry"]
+        if spec.get("_warnings"):
+            item["warnings"] = list(spec["_warnings"])
         embed[k] = item
     return embed

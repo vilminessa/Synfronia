@@ -84,6 +84,9 @@ I18N = {
         "theme_audrey_main": "Audrey Main Colours",
         "theme_night_sky": "Basic Night Sky",
         "theme_vilmy": "Vilmy~",
+        "theme.meta.author": "автор: {name}",
+        "theme.meta.version": "версия {v}",
+        "theme.meta.broken": "В theme.json есть некорректные значения — применены значения по умолчанию.",
         "clicker.title": "…",
         "clicker.hint": "Кликни меня~",
         "clicker.messages": [
@@ -182,6 +185,9 @@ I18N = {
         "theme_audrey_main": "Audrey Main Colours",
         "theme_night_sky": "Basic Night Sky",
         "theme_vilmy": "Vilmy~",
+        "theme.meta.author": "author: {name}",
+        "theme.meta.version": "version {v}",
+        "theme.meta.broken": "theme.json has invalid values - defaults were applied.",
         "clicker.title": "…",
         "clicker.hint": "Click me~",
         "clicker.messages": [
@@ -280,6 +286,9 @@ I18N = {
         "theme_audrey_main": "オードリー・メイン・カラーズ",
         "theme_night_sky": "夜空",
         "theme_vilmy": "Vilmy~",
+        "theme.meta.author": "作者: {name}",
+        "theme.meta.version": "バージョン {v}",
+        "theme.meta.broken": "theme.json に不正な値があります — 既定値を使用しました。",
         "clicker.title": "…",
         "clicker.hint": "クリックしてね~",
         "clicker.messages": [
@@ -378,6 +387,9 @@ I18N = {
         "theme_audrey_main": "奥黛丽主色",
         "theme_night_sky": "夜空",
         "theme_vilmy": "Vilmy~",
+        "theme.meta.author": "作者：{name}",
+        "theme.meta.version": "版本 {v}",
+        "theme.meta.broken": "theme.json 中有无效值 — 已使用默认值。",
         "clicker.title": "…",
         "clicker.hint": "点我呀~",
         "clicker.messages": [
@@ -476,6 +488,9 @@ I18N = {
         "theme_audrey_main": "Colores de Audrey",
         "theme_night_sky": "Cielo Nocturno",
         "theme_vilmy": "Vilmy~",
+        "theme.meta.author": "autor: {name}",
+        "theme.meta.version": "version {v}",
+        "theme.meta.broken": "theme.json tiene valores invalidos: se usaron los predeterminados.",
         "clicker.title": "…",
         "clicker.hint": "¡Haz clic en mí~",
         "clicker.messages": [
@@ -574,6 +589,9 @@ I18N = {
         "theme_audrey_main": "Audrey-Farben",
         "theme_night_sky": "Nachthimmel",
         "theme_vilmy": "Vilmy~",
+        "theme.meta.author": "Autor: {name}",
+        "theme.meta.version": "Version {v}",
+        "theme.meta.broken": "theme.json hat ungultige Werte - Standardwerte wurden verwendet.",
         "clicker.title": "…",
         "clicker.hint": "Klick mich~",
         "clicker.messages": [

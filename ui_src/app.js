@@ -185,6 +185,10 @@
         label = I18N.ru["theme_" + k];
       }
       if (label === undefined) label = th.label || k;
+      if (th.warnings && th.warnings.length) {
+        label += " \u26A0";
+        opt.title = t("theme.meta.broken") + "\n" + th.warnings.join("\n");
+      }
       opt.textContent = label;
       sel.appendChild(opt);
     });
@@ -193,6 +197,21 @@
       var _f = sel.querySelector("option");
       sel.value = _f ? _f.value : "";
     }
+    updateThemeMeta();
+  }
+
+  // Метаданные темы (автор/версия) и предупреждения валидации theme.json.
+  function updateThemeMeta() {
+    var box = document.getElementById("theme-meta");
+    if (!box) return;
+    var sel = document.getElementById("theme");
+    var th = THEMES[sel.value] || {};
+    var parts = [];
+    if (th.label) parts.push(th.label);
+    if (th.author) parts.push(t("theme.meta.author").replace("{name}", th.author));
+    if (th.version) parts.push(t("theme.meta.version").replace("{v}", th.version));
+    box.textContent = parts.join(" · ");
+    box.hidden = parts.length === 0;
   }
   function buildSubsOptions() { fillSelect("subs", SUB_OPTIONS); }
   function buildQualOptions() { fillSelect("qual", QUAL_OPTIONS); }
@@ -446,6 +465,7 @@
       ffmpegStatus.classList.add("ffmpeg-hidden");
     }
     document.getElementById("theme").addEventListener("change", function() {
+      updateThemeMeta();
       var _t = THEMES[this.value];
       if (_t && _t.entry) {
         pywebview.api.set_theme(this.value);
@@ -484,7 +504,8 @@
     document.getElementById("lang").addEventListener("change", function() {
       curLang = this.value;
       applyI18n();
-      applyTheme(document.getElementById("theme").value);
+    applyTheme(document.getElementById("theme").value);
+    updateThemeMeta();
       pywebview.api.save_setting("language", this.value);
     });
     document.getElementById("download").addEventListener("click", async function() {
