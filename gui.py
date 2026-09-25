@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 import threading
+from collections import deque
 
 import webview
 
@@ -32,6 +33,11 @@ load_themes()
 _settings = load_settings()
 HTML = build_page(_settings.get("theme", "scarred_mind"))
 
+# Сколько строк лога держим в памяти для JS. Буфер кольцевой: при переполнении
+# самые старые строки вытесняются, а курсор log_cursor сообщает фронтенду, с
+# какого места продолжать (см. Api.poll).
+LOG_BUFFER = 2000
+
 
 class Api:
     def __init__(self) -> None:
@@ -39,7 +45,8 @@ class Api:
         self.dl: Downloader | None = None
         self._transcoders: list[str] | None = None
         self._lock = threading.Lock()
-        self._logs: list[str] = []
+        self._logs: deque[str] = deque(maxlen=LOG_BUFFER)
+        self._log_total = 0
         self._lang = self.settings.get("language", "en")
         self._status = tr(self._lang, "p.ready")
         self._busy = False
@@ -49,11 +56,17 @@ class Api:
     # -- состояние (poll из JS) ----------------------------------------------
     def poll(self, since: int = 0) -> dict:
         with self._lock:
+            lines = list(self._logs)
+            # Кольцевой буфер: индексы «поехали», поэтому отдаём хвост от
+            # max(since, oldest) и всегда сообщаем актуальный курсор.
+            oldest = self._log_total - len(lines)
+            start = max(since, oldest)
             return {
                 "busy": self._busy,
                 "status": self._status,
                 "progress": dict(self._progress),
-                "logs": list(self._logs[since:]),
+                "logs": lines[start - oldest:],
+                "log_cursor": self._log_total,
                 "ffmpeg": dict(self._ffmpeg),
             }
 
@@ -87,16 +100,11 @@ class Api:
             with self._lock:
                 self._ffmpeg["pct"] = pct
 
-        def on_log(level: str, msg: str) -> None:
-            file_log(level, msg)
-            with self._lock:
-                self._logs.append(f"[{level}] {msg}")
-
         try:
-            path = download_ffmpeg(on_progress=on_progress, on_log=on_log)
+            path = download_ffmpeg(on_progress=on_progress, on_log=self._log)
         except Exception as exc:  # noqa: BLE001
             path = None
-            on_log("error", str(exc))
+            self._log("error", str(exc))
         if path:
             self._transcoders = available_transcoders()
         with self._lock:
@@ -218,6 +226,7 @@ class Api:
         file_log(level, msg)
         with self._lock:
             self._logs.append(f"[{level}] {msg}")
+            self._log_total += 1
 
     def _on_progress(self, d: dict) -> None:
         status = d.get("status")

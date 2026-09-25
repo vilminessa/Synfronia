@@ -120,6 +120,9 @@ I18N = {
         "p.ffmpeg_missing": "ffmpeg не найден: слияние/субтитры/метаданные будут недоступны.",
         "p.skip_not_mp4": "Пропуск перекодировки: файл не в mp4.",
         "p.transcode_run": "Перекодировка ({vcodec})...",
+        "p.transcode_fallback": "Перекодировка не удалась, переключаюсь на {vcodec} (CPU).",
+        "p.transcode_failed": "Перекодировка не удалась: {detail}",
+        "p.transcode_all_failed": "Не удалось перекодировать ни одним кодировщиком — файл остаётся без HEVC.",
         "p.postprocess": "Постобработка (ffmpeg: слияние/HEVC/метаданные/субтитры/обложка)...",
     },
     "en": {
@@ -215,6 +218,9 @@ I18N = {
         "p.ffmpeg_missing": "ffmpeg not found: merging/subtitles/metadata will be unavailable.",
         "p.skip_not_mp4": "Skipping transcode: file is not mp4.",
         "p.transcode_run": "Transcoding ({vcodec})...",
+        "p.transcode_fallback": "Transcode failed, falling back to {vcodec} (CPU).",
+        "p.transcode_failed": "Transcode failed: {detail}",
+        "p.transcode_all_failed": "All encoders failed - file left without HEVC.",
         "p.postprocess": "Post-processing (ffmpeg: merge/HEVC/metadata/subtitles/thumbnail)...",
     },
     "ja": {
@@ -310,6 +316,9 @@ I18N = {
         "p.ffmpeg_missing": "ffmpegが見つかりません: 結合・字幕・メタデータは利用できません。",
         "p.skip_not_mp4": "再エンコードをスキップ: ファイルがmp4ではありません。",
         "p.transcode_run": "再エンコード中（{vcodec}）...",
+        "p.transcode_fallback": "再エンコードに失敗したので {vcodec}（CPU）に切り替えます。",
+        "p.transcode_failed": "再エンコードに失敗しました: {detail}",
+        "p.transcode_all_failed": "すべてのエンコーダーで失敗しました — HEVC なしで保存します。",
         "p.postprocess": "後処理（ffmpeg: 結合/HEVC/メタデータ/字幕/サムネイル）...",
     },
     "zh-CN": {
@@ -405,6 +414,9 @@ I18N = {
         "p.ffmpeg_missing": "未找到 ffmpeg：合并/字幕/元数据将不可用。",
         "p.skip_not_mp4": "跳过转码：文件不是 mp4。",
         "p.transcode_run": "正在转码（{vcodec}）...",
+        "p.transcode_fallback": "转码失败，回退到 {vcodec}（CPU）。",
+        "p.transcode_failed": "转码失败：{detail}",
+        "p.transcode_all_failed": "所有编码器均失败 — 文件保持未转码状态。",
         "p.postprocess": "后处理（ffmpeg：合并/HEVC/元数据/字幕/缩略图）...",
     },
     "es": {
@@ -500,6 +512,9 @@ I18N = {
         "p.ffmpeg_missing": "No se encontró ffmpeg: combinación/subtítulos/metadatos no estarán disponibles.",
         "p.skip_not_mp4": "Se omite la transcodificación: el archivo no es mp4.",
         "p.transcode_run": "Transcodificando ({vcodec})...",
+        "p.transcode_fallback": "La transcodificacion fallo, se usa {vcodec} (CPU).",
+        "p.transcode_failed": "La transcodificacion fallo: {detail}",
+        "p.transcode_all_failed": "Todos los codificadores fallaron: el archivo se queda sin HEVC.",
         "p.postprocess": "Postprocesado (ffmpeg: combinación/HEVC/metadatos/subtítulos/miniatura)...",
     },
     "de": {
@@ -595,6 +610,9 @@ I18N = {
         "p.ffmpeg_missing": "ffmpeg nicht gefunden: Zusammenführen/Untertitel/Metadaten sind nicht verfügbar.",
         "p.skip_not_mp4": "Transkodierung übersprungen: Datei ist kein mp4.",
         "p.transcode_run": "Transkodierung ({vcodec})...",
+        "p.transcode_fallback": "Transkodierung fehlgeschlagen, wechsle zu {vcodec} (CPU).",
+        "p.transcode_failed": "Transkodierung fehlgeschlagen: {detail}",
+        "p.transcode_all_failed": "Alle Encoder fehlgeschlagen: Datei bleibt ohne HEVC.",
         "p.postprocess": "Nachbearbeitung (ffmpeg: Zusammenführen/HEVC/Metadaten/Untertitel/Thumbnail)...",
     },
 }

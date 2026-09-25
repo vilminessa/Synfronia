@@ -54,19 +54,28 @@ def settings_path() -> Path:
 
 
 def load_settings() -> dict:
+    """Читает settings.json поверх based_settings.json.
+
+    Файл переписывается только когда это нужно: его нет, он битый,
+    в нём не хватает новых ключей или старая опция hevc ещё не переведена
+    в transcode. Обычное чтение файл не трогает.
+    """
     settings = based_settings()
-    path = settings_path()
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(data, dict):
-            if "hevc" in data and "transcode" not in data:
-                settings["transcode"] = "libx265" if data["hevc"] else "none"
-            for key in DEFAULT_SETTINGS:
-                if key in data:
-                    settings[key] = data[key]
+        data = json.loads(settings_path().read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        pass
-    save_settings(settings)
+        data = None
+    if not isinstance(data, dict):
+        save_settings(settings)
+        return settings
+    legacy = "hevc" in data and "transcode" not in data
+    if legacy:
+        settings["transcode"] = "libx265" if data["hevc"] else "none"
+    for key in DEFAULT_SETTINGS:
+        if key in data:
+            settings[key] = data[key]
+    if legacy or any(key not in data for key in DEFAULT_SETTINGS):
+        save_settings(settings)  # миграция: дописываем недостающие ключи
     return settings
 
 

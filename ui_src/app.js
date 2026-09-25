@@ -8,6 +8,8 @@
   ];
   var SUB_OPTIONS = [["off", "subs.off"], ["ru", "subs.ru"], ["en", "subs.en"], ["all", "subs.all"]];
   var since = 0;
+  var LOG_LINES = 2000; // сколько строк лога держим в textarea
+  var LOG_CHARS = 120000; // порог (~2000 строк) для обрезки без split на каждом poll
   var busy = false;
   var activeTab = "video";
   var curLang = "en";
@@ -293,11 +295,15 @@
     if (typeof pywebview === "undefined") { setTimeout(tick, 300); return; }
     try {
       var st = await pywebview.api.poll(since);
+      if (typeof st.log_cursor === "number") since = st.log_cursor;
       if (st.logs && st.logs.length) {
         var box = document.getElementById("log");
         box.value += st.logs.join("\n") + "\n";
+        if (box.value.length > LOG_CHARS) {
+          var all = box.value.split("\n");
+          box.value = all.slice(all.length - LOG_LINES).join("\n");
+        }
         box.scrollTop = box.scrollHeight;
-        since += st.logs.length;
       }
       setBusy(st.busy);
       var p = st.progress || {};
