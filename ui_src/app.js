@@ -10,6 +10,7 @@
   var since = 0;
   var LOG_LINES = 2000; // сколько строк лога держим в textarea
   var LOG_CHARS = 120000; // порог (~2000 строк) для обрезки без split на каждом poll
+  var pollTimer = 0;
   var busy = false;
   var activeTab = "video";
   var curLang = "en";
@@ -26,11 +27,12 @@
   var RING_CIRC = 2 * Math.PI * 52;
 
   /* ---- кнопка-гиперпространство (mephysto/poKNxoY) ---- */
-  (function hyperspaceButton() {
+  var hyperspace = (function hyperspaceButton() {
     var canvas = ffmpegDlBtn.querySelector("canvas");
     var ctx = canvas.getContext("2d");
     var PARTICLES = [];
     var isGoing = false;
+    var rafId = 0;
     var W = 0, H = 0, XO = 0, YO = 0;
     var MAX_Z = 2, MAX_R = 2, Z_SPD = 2;
 
@@ -62,26 +64,42 @@
       XO = W / 2; YO = H / 2;
       if (W < 10 || H < 10) { canvas.width = W = 640; canvas.height = H = 148; XO = W / 2; YO = H / 2; }
     }
-    function loop() {
-      requestAnimationFrame(loop);
-      if (!isGoing) { ctx.clearRect(0, 0, W, H); return; }
+
+    // requestAnimationFrame крутится только пока анимация идёт: в простое
+    // это пустой 60 fps впустую (батарея/CPU), поэтому кадр сам себя
+    // останавливает, а play()/resume() снова его запускают.
+    function frame() {
       ctx.fillStyle = "rgba(0,0,0,0.28)";
       ctx.fillRect(0, 0, W, H);
       for (var i = 0; i < PARTICLES.length; i++) PARTICLES[i].render();
+      rafId = isGoing ? requestAnimationFrame(frame) : 0;
     }
 
-  function init() {
+    function play() {
+      isGoing = true;
+      if (!rafId) rafId = requestAnimationFrame(frame);
+    }
+
+    function stop() {
+      isGoing = false;
+      if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+      ctx.clearRect(0, 0, W, H);
+    }
+
+    function pause() { if (rafId) { cancelAnimationFrame(rafId); rafId = 0; } }
+    function resume() { if (isGoing) play(); }
+
+    function init() {
       size();
       PARTICLES = [];
       var num = 60;
       for (var i = 0; i < num; i++) PARTICLES.push(new Particle());
-      loop();
-      window.addEventListener("resize", size);
+      window.addEventListener("resize", function() { size(); if (isGoing) play(); });
     }
     ffmpegDlBtn.addEventListener("click", function() {
       if (ffmpegFetching) return;
       ffmpegFetching = true;
-      isGoing = true;
+      play();
       ffmpegDlBtn.classList.add("active");
       ffmpegDlBtn.querySelector("span").style.display = "block";
       setFfmpegProgress(0);
@@ -89,6 +107,7 @@
       doFfmpegDownload();
     });
     setTimeout(init, 50);
+    return { play: play, stop: stop, pause: pause, resume: resume };
   })();
 
   /* ---- дождь (по мотивам codepen jh3y/WyNdMG) ---- */
@@ -291,8 +310,14 @@
     if (!busy) document.getElementById(name === "video" ? "url-video" : "url-playlist").focus();
   }
 
+  function scheduleTick(delay) {
+    if (pollTimer) clearTimeout(pollTimer);
+    pollTimer = document.hidden ? 0 : setTimeout(tick, delay);
+  }
+
   async function tick() {
-    if (typeof pywebview === "undefined") { setTimeout(tick, 300); return; }
+    pollTimer = 0;
+    if (typeof pywebview === "undefined") { scheduleTick(300); return; }
     try {
       var st = await pywebview.api.poll(since);
       if (typeof st.log_cursor === "number") since = st.log_cursor;
@@ -327,6 +352,7 @@
           setFfmpegProgress(100);
           updateFfmpegStatus(t("ffmpeg.ready"));
           setTimeout(function() {
+            hyperspace.stop();
             ffmpegOverlay.classList.add("ffmpeg-hidden");
             pywebview.api.get_initial().then(function(id) {
               transAvailability = { ffmpeg: !!id.ffmpeg, avail: id.transcoders || [] };
@@ -338,16 +364,16 @@
           }, 500);
         } else if (fm.error) {
           showFfmpegProgress();
+          hyperspace.stop();
           document.getElementById("ffmpeg-progress").classList.add("ffmpeg-hidden");
           ffmpegDlBtn.classList.remove("ffmpeg-hidden", "active");
-          ffmpegDlBtn.querySelector("canvas").getContext("2d").clearRect(0, 0, 2000, 2000);
           updateFfmpegStatus(fm.error);
           ffmpegRetry.style.display = "inline-block";
           ffmpegFetching = false;
         }
       }
     } catch (e) {}
-    setTimeout(tick, 200);
+    scheduleTick(200);
   }
 
   function collect() {
@@ -535,4 +561,14 @@
   }
   if (window.pywebview !== undefined) { init(); }
   else { window.addEventListener("pywebviewready", init); }
-  setTimeout(tick, 400);
+  // Пока вкладка/окно скрыты, не опрашиваем Python и не крутим анимацию.
+  document.addEventListener("visibilitychange", function() {
+    if (document.hidden) {
+      if (pollTimer) { clearTimeout(pollTimer); pollTimer = 0; }
+      hyperspace.pause();
+    } else {
+      hyperspace.resume();
+      scheduleTick(50);
+    }
+  });
+  scheduleTick(400);
