@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Synfronia</title>
+<style>
+  :root {
+    --bg: #0c1622; --surface: #1f2b29; --widget: #23444b;
+    --text: #dcdedd; --accent: #628d7c; --warn: #ffb454;
+    --radius-s: 6px; --radius-m: 8px; --radius-l: 12px; --opacity: 1;
+  }
+  :root { __THEME_ROOT__ }
+</style>
+<style id="theme-style">__THEME_CSS__</style>
+<style>
+__APP_CSS__
+</style>
+</head>
+<body>
+  
+<!-- SLOT:head -->
+<div class="head">
+    <div class="brand">
+      <h1 class="logo">Synfronia</h1>
+      <div class="sub" data-i18n="ui.sub">Скачивание видео и плейлистов YouTube (yt-dlp)</div>
+    </div>
+    <button type="button" id="settings-btn" class="icon-btn" data-i18n-title="ui.settings" title="Настройки">&#x2699;&#xFE0E;</button>
+  </div>
+<!-- /SLOT:head -->
+
+
+  
+<!-- SLOT:tabs -->
+<div class="tabs">
+    <button type="button" id="tab-video" class="tab active" data-i18n="tab.video">Видео</button>
+    <button type="button" id="tab-playlist" class="tab" data-i18n="tab.playlist">Плейлист</button>
+  </div>
+<!-- /SLOT:tabs -->
+
+
+  
+<!-- SLOT:panel-video -->
+<div id="panel-video" class="panel">
+    <label for="url-video" data-i18n="url.video.label">Ссылка на видео:</label>
+    <input type="text" id="url-video" placeholder="https://www.youtube.com/watch?v=…" autofocus>
+  </div>
+<!-- /SLOT:panel-video -->
+
+
+  
+<!-- SLOT:panel-playlist -->
+<div id="panel-playlist" class="panel" hidden>
+    <label for="url-playlist" data-i18n="url.playlist.label">Ссылка на плейлист:</label>
+    <input type="text" id="url-playlist" placeholder="https://www.youtube.com/playlist?list=…">
+    <div class="check"><input type="checkbox" id="group"><span data-i18n="group.label">Сгруппировать: плейлист в подпапку с его названием</span></div>
+  </div>
+<!-- /SLOT:panel-playlist -->
+
+
+  
+<!-- SLOT:warn -->
+<div id="warn" data-i18n="warn.ffmpeg">ffmpeg не найден — слияние, субтитры, метаданные и перекодировка будут недоступны.</div>
+<!-- /SLOT:warn -->
+
+
+  
+<!-- SLOT:ffmpeg-overlay -->
+<div id="ffmpeg-overlay" class="ffmpeg-hidden">
+    <div id="ffmpeg-rain"></div>
+    <div id="ffmpeg-box">
+      <div id="ffmpeg-head">
+        <div id="ffmpeg-title">Synfronia</div>
+        <div id="ffmpeg-sub" data-i18n="ffmpeg.overlay_hint">Для слияния видео и аудио, субтитров, метаданных и перекодировки нужен ffmpeg.</div>
+      </div>
+      <div style="position:relative;display:inline-block">
+        <button type="button" id="ffmpeg-dl">
+          <span data-i18n="ffmpeg.download">Загрузить FFmpeg</span>
+          <canvas width="640" height="148"></canvas>
+        </button>
+        <div id="ffmpeg-progress" class="ffmpeg-hidden">
+          <svg id="ffmpeg-ring" viewBox="0 0 120 120">
+            <circle class="ring-bg" cx="60" cy="60" r="52"></circle>
+            <circle class="ring-fg" cx="60" cy="60" r="52"></circle>
+          </svg>
+          <div id="ffmpeg-percent">0%</div>
+        </div>
+      </div>
+      <div id="ffmpeg-status"></div>
+      <button type="button" id="ffmpeg-retry" data-i18n="ffmpeg.download">Загрузить FFmpeg</button>
+    </div>
+  </div>
+<!-- /SLOT:ffmpeg-overlay -->
+
+
+  
+<!-- SLOT:actions -->
+<div class="actions">
+    <button id="download" data-i18n="btn.download">Скачать</button>
+    <button id="stop" disabled data-i18n="btn.stop">Отмена</button>
+  </div>
+<!-- /SLOT:actions -->
+
+
+  
+<!-- SLOT:progress -->
+<div class="pb-wrap"><div id="pb"></div></div>
+  <div id="status">Готов.</div>
+  <textarea id="log" readonly></textarea>
+<!-- /SLOT:progress -->
+
+  
+<!-- SLOT:clicker -->
+<div class="clicker-row">
+    <div id="clicker-msg" class="clicker-msg"></div>
+    <button type="button" id="clicker" class="clicker" data-i18n-title="clicker.title" title="…">Кликни меня~</button>
+  </div>
+<!-- /SLOT:clicker -->
+
+
+  
+<!-- SLOT:settings -->
+<div id="settings-overlay" class="overlay" hidden></div>
+  <div id="settings-sheet" class="sheet" hidden>
+    <div class="sheet-head">
+      <span class="sheet-title" data-i18n="ui.settings">Настройки</span>
+      <button type="button" id="settings-close" class="icon-btn" data-i18n-title="ui.close" title="Закрыть">&#x2715;&#xFE0E;</button>
+    </div>
+    <div class="sheet-body">
+      <div class="tabs">
+        <button type="button" class="tab active" id="tab-ui" data-i18n="sheet.tab.ui">Интерфейс</button>
+        <button type="button" class="tab" id="tab-dl" data-i18n="sheet.tab.dl">Загрузчик</button>
+      </div>
+      <div id="panel-ui">
+        <label for="lang" data-i18n="sheet.lang.label">Язык:</label>
+        <select id="lang"></select>
+        <label for="theme" data-i18n="sheet.theme.label">Тема:</label>
+        <select id="theme"></select>
+        <div class="theme-actions">
+          <button type="button" id="reload-themes"><span class="ta-ico">⟳</span><span data-i18n="sheet.theme.reload">Обновить темы</span></button>
+          <button type="button" id="open-themes"><span class="ta-ico">⤢</span><span data-i18n="sheet.theme.open">Папка тем…</span></button>
+        </div>
+        <label for="dest" data-i18n="sheet.dest.label">Папка скачивания:</label>
+        <div class="row">
+          <input type="text" id="dest">
+          <button type="button" id="browse" data-i18n="sheet.browse">Обзор…</button>
+        </div>
+      </div>
+      <div id="panel-dl" hidden>
+        <label for="subs" data-i18n="sheet.subs.label">Субтитры:</label>
+        <select id="subs"></select>
+        <label for="qual" data-i18n="sheet.qual.label">Ограничение качества:</label>
+        <select id="qual"></select>
+        <label for="transcode" data-i18n="sheet.transcode.label">Перекодировка:</label>
+        <select id="transcode"></select>
+        <div id="transcode-note" class="note"></div>
+        <div class="settings-box">
+          <div class="settings-box-title" data-i18n="sheet.network.label">Сеть</div>
+          <div class="range-row">
+            <label for="retries" data-i18n="sheet.retries.label">Повторы:</label>
+            <input type="range" id="retries-range" min="1" max="50" step="1">
+            <input type="number" id="retries" min="1" max="50" step="1">
+          </div>
+          <div class="range-row">
+            <label for="socket_timeout" data-i18n="sheet.timeout.label">Таймаут (сек.):</label>
+            <input type="range" id="socket_timeout-range" min="1" max="120" step="1">
+            <input type="number" id="socket_timeout" min="1" max="120" step="1">
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+<!-- /SLOT:settings -->
+<script>__APPJS__</script>
+</body>
+</html>
