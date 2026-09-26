@@ -25,19 +25,28 @@ EdgeChromium) на основе [yt-dlp](https://github.com/yt-dlp/yt-dlp).
   **Русский / English / 日本語 / 简体中文 / Español / Deutsch**
   (сохраняется в настройках).
 - **Настройки в боковой панели** — кнопка-шестерёнка справа вверху открывает
-  панель: язык, папка скачивания, тема, субтитры, ограничение качества, перекодировка.
-- **Качество** — `lossless` (исходное), `8K`, `4K`, `2K`, `1080`, `720`, `480`, `240`.
+  панель: язык, папка скачивания, тема, шрифты, субтитры, ограничение качества,
+  перекодировка, сеть.
+- **Качество** — `lossless` (исходное), `2K`, `1080`, `720`, `480`, `240`
+  (понижение разрешения применяется постпроцессором).
 - **Субтитры** — вшиваются в файл: `нет / русские / английские / все`.
 - **Перекодировка** — по умолчанию выключена; на выбор `libx265` (программный
   HEVC) и аппаратные `NVIDIA NVENC`, `AMD AMF`, `Intel Quick Sync (QSV)`
   (доступные варианты определяются из установленного ffmpeg).
 - **Метаданные и обложка** — теги (название, автор, дата), превью вшивается
   как вложение (attached picture).
-- **Шесть тем оформления**: Scary Forest, Technology day, Technology Pinks,
-  а также палитры Scarred Mind, Audrey Main Colours, Basic Night Sky и Vilmy~
-  ([color-hex.com](https://www.color-hex.com/)).
+- **Модульные темы** — семь встроенных (Scary Forest, Technology day,
+  Technology Pinks, Scarred Mind, Audrey Main Colours, Basic Night Sky, Vilmy~)
+  и сколько угодно своих: папка в `%LOCALAPPDATA%\Synfronia\themes\<имя>\`
+  с `theme.json` (+ `custom.css`, `index.html`, слоты и ассеты).
+  Тема задаёт палитру, радиусы, прозрачность, свои шрифты и даже свой HTML.
+  Подробнее — [Модульные темы](#модульные-темы).
+- **Модульные шрифты** — встроенных шрифтов нет: положите `.ttf`, `.otf`,
+  `.woff` или `.woff2` в `%LOCALAPPDATA%\Synfronia\fonts` и выберите семейство
+  в настройках (отдельно обычный и моноширинный). Подробнее — [Шрифты](#шрифты).
 - **Ход загрузки и отмена** — прогресс-бар из логов yt-dlp, кнопка «Стоп».
-- **Настройки сохраняются** в `%LOCALAPPDATA%\Synfronia\settings.json`.
+- **Настройки сохраняются** в `%LOCALAPPDATA%\Synfronia\settings.json`,
+  журнал работы — в `%LOCALAPPDATA%\Synfronia\logs`.
 
 ## Требования
 
@@ -72,20 +81,73 @@ python gui.py
 |---|---|
 | Вкладки | «Видео» — одно видео; «Плейлист» — весь плейлист целиком |
 | Ссылка | URL в соответствующей вкладке (видео или плейлист YouTube) |
-| ⚙ Настройки | шестерёнка справа вверху: язык, папка, тема, субтитры, качество, перекодировка |
+| ⚙ Настройки | шестерёнка справа вверху: язык, папка, тема, шрифты, субтитры, качество, перекодировка, сеть |
 | Язык | Русский / English / 日本語 / 简体中文 / Español / Deutsch |
 | Каталог | куда сохранять (по умолчанию `downloads\` рядом с приложением) |
-| Тема | Scary Forest / Technology day / Technology Pinks / Scarred Mind / Audrey Main / Night Sky / Vilmy~ |
-| Качество | `lossless` / 8K / 4K / 2K / 1080 / 720 / 480 / 240 |
+| Тема | Scary Forest / Technology day / Technology Pinks / Scarred Mind / Audrey Main / Night Sky / Vilmy~ + свои папки |
+| Шрифт интерфейса / моноширинный | семейство из папки `fonts` или системный |
+| Качество | `lossless` / 8K / 4K / 2K / 1080p / 720p / 480p / 240p |
 | Субтитры | off / ru / en / all (вшиваются в контейнер) |
 | Перекодировка | none / libx265 / nvenc / amf / qsv (аппаратные — по доступности) |
 | Сгруппировать плейлист | скачать плейлист одним архивом |
 
+### Модульные темы
+
+Тема — это папка `%LOCALAPPDATA%\Synfronia\themes\<имя темы>\`. Кнопки
+«Папка тем…» и «Обновить темы» в настройках открывают её и перечитывают.
+
+```jsonc
+// %LOCALAPPDATA%\Synfronia\themes\my_theme\theme.json
+{
+  "label": "Моя тема",          // имя в списке (обязательное)
+  "author": "Ник", "version": "1.0",   // показываются в настройках
+  "extends": "scarred_mind",    // палитра поверх встроенной темы
+  "bg": "#101418", "surface": "#1b2228", "widget": "#263038",
+  "text": "#e6e9ec", "accent": "#7fd1b9", "warn": "#ffb454",
+  "radius_s": 6, "radius_m": 8, "radius_l": 12,   // px, 0..40
+  "opacity": 0.96,              // 0..1 — прозрачность окна
+  "font": "Inter",              // свой шрифт интерфейса (из папки fonts)
+  "font_mono": "JetBrains Mono",
+  "hidden": false,              // true — не показывать в списке
+  "entry": "index.html",        // свой HTML-шаблон (необязательно)
+  "css": "body { letter-spacing: .2px; }"          // или custom.css в папке
+}
+```
+
+- `entry` — полностью своя страница; в ней доступны плейсхолдеры
+  `__THEME_ROOT__` (палитра в `:root`), `__THEME_CSS__` (CSS темы),
+  `__FONTS_CSS__` (`@font-face`), `__APP_CSS__`, `__APPJS__`, `__I18N__`,
+  `__THEMES__`, а также секции `<!-- SLOT:имя -->` (файл `slots\имя.html`)
+  и `{{asset:путь}}` — ассеты встраиваются как `data:URI`.
+- Значения проверяются: неизвестные и битые поля не ломают интерфейс, а
+  попадают в журнал и помечаются значком `⚠` в списке тем.
+- Поле `css` может быть строкой или списком файлов; если его нет, читается
+  `custom.css` из папки темы.
+- Переключение темы не перезагружает страницу, кроме тем с `entry`
+  или со своими `font` / `font_mono` — им нужен новый `@font-face`.
+
+### Шрифты
+
+Встроенных шрифтов в приложении нет (это лицензии и размер). Свои шрифты
+кладутся в `%LOCALAPPDATA%\Synfronia\fonts` — по одному файлу `.ttf`,
+`.otf`, `.woff` или `.woff2` на начертание. Приложение читает из TTF/OTF
+таблицы `name`, `OS/2`, `head` и `fvar` (семейство, начертание, вес,
+диапазон веса вариативных шрифтов), а из WOFF/WOFF2 — имя файла, и
+встраивает выбранные шрифты прямо в страницу как `@font-face` с `data:URI`.
+
+В настройках выбираются два семейства: для интерфейса и моноширинный
+(для лога). Пустое значение — системный шрифт. Тема может переопределить
+оба своими полями `font` / `font_mono`. Лимиты: 8 МБ на файл и 8 МБ на
+страницу; слишком крупные файлы не встраиваются, о чём пишется в журнал.
+
 ### CLI
 
 ```bat
-python download.py <URL> [--subtitles ru] [--quality 720] [--transcode nvenc] [--lang en] [--dir C:\videos]
+python download.py <URL> [--dest C:\videos] [--subtitles ru] [--quality 720] [--transcode nvenc] [--lang en]
 ```
+
+Те же аргументы принимает `python core.py <URL> ...` — это тот же движок,
+если не нужен web-интерфейс.
 
 ### Самопроверка (для отладки сборки)
 
@@ -107,14 +169,40 @@ spec собирает один файл (`--onefile --windowed`), включая
 ## Состав
 
 ```
-core.py          — движок загрузки (обвязка над yt-dlp)
-gui.py           — web-интерфейс (pywebview) + скрытый режим --selftest
-download.py      — CLI-обёртка
-requirements.txt — yt-dlp, pywebview, pyinstaller
-Synfronia.spec   — конфиг сборки exe
-LICENSE          — лицензия проекта (PolyForm Noncommercial 1.0.0)
+gui.py            — web-интерфейс (pywebview) + скрытый режим --selftest
+core.py           — фасад над модулями и точка входа `python core.py`
+paths.py          — пути приложения и файловый журнал
+settings.py       — настройки (based_settings.json -> settings.json)
+i18n.py           — переводы интерфейса и статусов (6 языков)
+themes.py         — модульные темы, валидация theme.json, сборка страницы
+fonts.py          — модульные шрифты из папки fonts (@font-face, data:URI)
+downloader.py     — загрузка через yt-dlp, постпроцессоры, ffmpeg
+download.py       — CLI-обёртка
+ui_src/           — исходники интерфейса: index.html, app.css, app.js
+ui.py             — сгенерированный из ui_src/ интерфейс (в репозитории)
+tools/build_ui.py — сборщик ui.py из ui_src/ (нужен только разработчикам)
+based_settings.json — настройки по умолчанию (копируются в settings.json
+  при первом запуске; недостающие ключи дописываются при обновлении)
+requirements.txt  — yt-dlp, pywebview, pyinstaller
+Synfronia.spec    — конфиг сборки exe
+LICENSE           — лицензия проекта (PolyForm Noncommercial 1.0.0)
 THIRD_PARTY_NOTICES.md — источники и лицензии всех компонентов
 ```
+
+### Правка интерфейса
+
+`ui.py` не редактируется руками: приложение читает страницу из этого модуля,
+поэтому после правки исходников его нужно пересобрать.
+
+```bat
+python tools/build_ui.py            # ui_src/ -> ui.py
+python tools/build_ui.py --check    # проверить, что ui.py актуален (в CI)
+```
+
+Правки в `ui_src/index.html` попадают в `BASE_TEMPLATE`, `ui_src/app.css` —
+в `APP_CSS`, `ui_src/app.js` — в `APP_JS`; все плейсхолдеры
+(`__THEME_ROOT__`, `__THEME_CSS__`, `__FONTS_CSS__`, `__APP_CSS__`,
+`__APPJS__`, `__I18N__`, `__THEMES__`) подставляются при сборке страницы.
 
 ## Источники компонентов
 
