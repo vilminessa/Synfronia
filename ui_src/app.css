@@ -82,6 +82,23 @@
   }
   .sheet-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
   .sheet-title { font-size: 16px; font-weight: 600; }
+  /* Ручка растягивания: панель прижата к правому краю, тянем за левую кромку.
+     Положение ручки задаёт JS (--sheet-left/--sheet-w) по фактической кромке
+     панели: тема может отступовать её от края окна. */
+  .sheet-resize {
+    position: fixed; top: 0; bottom: 0; left: var(--sheet-left, 0px);
+    width: 10px; margin-left: -5px; z-index: 52;
+    cursor: ew-resize; touch-action: none;
+  }
+  .sheet-resize::after {
+    content: ""; position: absolute; top: 50%; left: 4px; width: 2px; height: 46px;
+    transform: translateY(-50%); border-radius: 2px;
+    background: var(--widget); opacity: .9; transition: background .15s, opacity .15s;
+  }
+  .sheet-resize:hover::after, .sheet-resize:focus-visible::after,
+  .sheet-resize.active::after { background: var(--accent); opacity: 1; }
+  .sheet-resize:focus-visible { outline: none; }
+  body.resizing { user-select: none; cursor: ew-resize; }
   .sheet-body label { margin-top: 14px; }
   .note { margin-top: 6px; font-size: 12px; opacity: .7; }
   input[type=number] {

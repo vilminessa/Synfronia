@@ -1,10 +1,11 @@
-// Headless-проверка блока шрифтов: три кнопки в ряд не вылезают за .sheet,
-// подписи переносятся, кнопка «Докачать шрифты» есть в 6 языках.
+// Headless-проверка блока шрифтов и растягиваемой панели настроек:
+// три кнопки в ряд не вылезают за .sheet, подписи переносятся,
+// кнопка «Докачать шрифты» есть в 6 языках, ручка тянет ширину панели.
 //
 //   python tools\ui_probe_page.py %TEMP%\synf_probe_page.html
 //   node tools\ui_fonts_probe.js %TEMP%\synf_probe_page.html
 //
-// Код возврата: 0 - всё влезает, 1 - есть горизонтальное переполнение.
+// Код возврата: 0 - всё влезает и панель тянется, 1 - есть проблемы.
 
 const { spawn } = require("child_process");
 const fs = require("fs");
@@ -37,6 +38,53 @@ const MEASURE = `(function () {
   });
   sheet.hidden = true;
   document.getElementById("settings-overlay").hidden = true;
+  return out;
+})()`;
+
+// Растягивание панели: тянем левую кромку мышью, потом клавишами, проверяем,
+// что ручка осталась на кромке панели и ширина подчиняется ожиданию.
+const RESIZE = `(function () {
+  var sheet = document.getElementById("settings-sheet");
+  var handle = document.getElementById("sheet-resize");
+  document.getElementById("settings-overlay").hidden = false;
+  sheet.hidden = false;
+  handle.hidden = false;
+  syncSheetEdge();
+  var out = {steps: []};
+  function geom(tag) {
+    var s = sheet.getBoundingClientRect(), h = handle.getBoundingClientRect();
+    out.steps.push({tag: tag, w: Math.round(s.width), left: Math.round(s.left),
+                    center: Math.round(h.left + h.width / 2), hit: Math.round(h.width),
+                    gap: Math.round(Math.abs((h.left + h.width / 2) - s.left))});
+  }
+  function pe(type, x) {
+    handle.dispatchEvent(new PointerEvent(type, {bubbles: true, clientX: x, clientY: 10,
+      button: 0, buttons: 1, pointerId: 1, isPrimary: true, pointerType: "mouse"}));
+  }
+  function key(k) {
+    handle.dispatchEvent(new KeyboardEvent("keydown", {key: k, bubbles: true, cancelable: true}));
+  }
+  geom("открытие");
+  var x0 = Math.round(sheet.getBoundingClientRect().left);
+  pe("pointerdown", x0); pe("pointermove", x0 - 120); pe("pointerup", x0 - 120);
+  geom("перетаскивание-120");
+  pe("pointerdown", x0 - 400); pe("pointermove", 10); pe("pointerup", 10);
+  geom("перетаскивание-к-левому-краю");
+  key("ArrowRight"); key("ArrowRight");
+  geom("стрелка-вправо-x2");
+  key("Home"); geom("Home-максимум");
+  key("End"); geom("End-минимум");
+  handle.dispatchEvent(new MouseEvent("dblclick", {bubbles: true}));
+  geom("двойной-клик-сброс");
+  // тема может отступовать панель от края окна (Liquid Glass: right/bottom 14px) —
+  // ручка обязана остаться на кромке
+  sheet.style.right = "14px"; applySheetW(400); geom("отступ-темы-14px");
+  sheet.style.right = "";
+  applySheetW(330);
+  out.overflowX = sheet.scrollWidth - sheet.clientWidth;
+  out.max = Math.max(260, Math.round(window.innerWidth * 0.92));
+  out.min = 260;
+  out.default = SHEET_DEFAULT;
   return out;
 })()`;
 
@@ -82,7 +130,8 @@ async function waitForPage() {
     const evaluate = async (expr) => {
       const r = await send("Runtime.evaluate", { expression: expr, returnByValue: true, awaitPromise: true });
       if (r.result && r.result.exceptionDetails) {
-        throw new Error(JSON.stringify(r.result.exceptionDetails).slice(0, 300));
+        const d = r.result.exceptionDetails;
+        throw new Error((d.exception && d.exception.description) || d.text || "exception");
       }
       return r.result.result.value;
     };
@@ -113,8 +162,48 @@ async function waitForPage() {
       m.labels.forEach((l) => { if (l.clipped) console.log(`        обрезана: "${l.text}"`); });
     }
     if (errors.length) { console.error("ошибки страницы:", errors); bad++; }
+
+
+    // --- растягивание панели настроек ---
+    const rz = await evaluate(RESIZE);
+    console.log("--- панель настроек ---");
+    let rzBad = 0;
+    const w0 = rz.steps[0].w;
+    // ожидания считаем от фактической стартовой ширины: тема может задать свою
+    const expect = {
+      "перетаскивание-120": w0 + 120,
+      "перетаскивание-к-левому-краю": rz.max,
+      "стрелка-вправо-x2": rz.max - 32,
+      "Home-максимум": rz.max,
+      "End-минимум": rz.min,
+      "двойной-клик-сброс": rz.default,
+      "отступ-темы-14px": 400
+    };
+    for (const s of rz.steps) {
+      const want = expect[s.tag];
+      const okW = want === undefined || Math.abs(s.w - want) <= 1;
+      const okGap = s.gap <= 1 && s.hit >= 8;
+      if (!okW || !okGap) rzBad++;
+      console.log(`  ${s.tag.padEnd(28)} ширина=${s.w}px${want !== undefined ? ` (ожидалось ${want})` : ""} ` +
+        `ручка=${s.hit}px расхождение_с_кромкой=${s.gap}px${okW && okGap ? "" : "  <-- FAIL"}`);
+    }
+    if (rz.overflowX > 0) { console.error(`  панель переполнена на ${rz.overflowX}px при ${rz.default}px`); rzBad++; }
+    // окно сузили до 400px при панели 450px -> ширина должна подрезаться до 368 (92% от 400)
+    await evaluate('applySheetW(450)');
+    await send("Emulation.setDeviceMetricsOverride", { width: 400, height: 700, deviceScaleFactor: 0, mobile: false });
+    await sleep(400);
+    const narrow = await evaluate('(function () { return {w: Math.round(document.getElementById("settings-sheet").getBoundingClientRect().width), vw: window.innerWidth}; })()');
+    const wantNarrow = Math.max(260, Math.round(narrow.vw * 0.92));
+    const okNarrow = Math.abs(narrow.w - wantNarrow) <= 1;
+    console.log(`  окно ${narrow.vw}px -> панель ${narrow.w}px (ожидалось ${wantNarrow})${okNarrow ? "" : "  <-- FAIL"}`);
+    if (!okNarrow) rzBad++;
+    await send("Emulation.clearDeviceMetricsOverride");
+    // прячем панель обратно, чтобы не мешала остальным замерам
+    await evaluate('[document.getElementById("settings-overlay"), document.getElementById("settings-sheet"), document.getElementById("sheet-resize")].forEach(function (el) { el.hidden = true; }); true');
+    bad += rzBad;
     code = bad ? 1 : 0;
-    console.log(code ? "FAIL: есть переполнение/обрезанный текст" : "OK: блок шрифтов влезает во всех языках");
+    console.log(code ? "FAIL: есть переполнение/обрезанный текст/сбой растягивания"
+                     : "OK: блок шрифтов влезает, панель тянется во всех языках");
   } catch (e) {
     console.error("probe error:", e.message);
   } finally {

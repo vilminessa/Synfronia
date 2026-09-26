@@ -130,7 +130,13 @@
       PARTICLES = [];
       var num = 60;
       for (var i = 0; i < num; i++) PARTICLES.push(new Particle());
-      window.addEventListener("resize", function() { size(); if (isGoing) play(); });
+      window.addEventListener("resize", function() {
+  size(); if (isGoing) play();
+  /* окно могло стать уже панели: подрезаем явную ширину, иначе подтягиваем ручку */
+  var sheet = document.getElementById("settings-sheet");
+  if (sheet && sheet.style.width) applySheetW(sheet.getBoundingClientRect().width);
+  else syncSheetEdge();
+});
     }
     ffmpegDlBtn.addEventListener("click", function() {
       if (ffmpegFetching) return;
@@ -382,6 +388,82 @@
       document.head.appendChild(cssEl);
     }
     cssEl.textContent = c.css || "";
+    /* тема могла задать свою ширину панели (Liquid Glass — 340px): ручка обязана совпасть */
+    syncSheetEdge();
+  }
+
+  /* ---- растягиваемая панель настроек ----
+     Панель прижата к правому краю, тянем за левую кромку. Геометрию всегда держит JS:
+     --sheet-w и --sheet-left задают и .sheet, и ручку, иначе кромка разъезжается
+     (тема может отступовать панель от края окна, как Liquid Glass). */
+  var SHEET_MIN = 260, SHEET_DEFAULT = 330, RESIZE_STEP = 16;
+  function sheetMax() {
+    return Math.max(SHEET_MIN, Math.round(window.innerWidth * 0.92));
+  }
+  function applySheetW(w) {
+    w = Math.min(sheetMax(), Math.max(SHEET_MIN, Math.round(w)));
+    document.getElementById("settings-sheet").style.width = w + "px";
+    syncSheetEdge();
+    return w;
+  }
+  /* Привязать ручку к левой кромке панели. Когда панель скрыта, размер и отступ
+     берём из вычисленных стилей — иначе ручка прыгнет в угол при открытии. */
+  function syncSheetEdge() {
+    var sheet = document.getElementById("settings-sheet");
+    if (!sheet) return;
+    var r = sheet.getBoundingClientRect();
+    var w = r.width;
+    if (w <= 0) {
+      var cs = window.getComputedStyle(sheet);
+      w = parseFloat(cs.width) || SHEET_DEFAULT;
+      var right = parseFloat(cs.right);
+      if (isNaN(right)) right = 0;
+      r = {width: w, left: window.innerWidth - right - w};
+    }
+    var root = document.documentElement.style;
+    root.setProperty("--sheet-w", Math.round(w) + "px");
+    root.setProperty("--sheet-left", Math.round(r.left) + "px");
+  }
+  function stopSheetResize() {
+    if (!window.__sheetResizing) return;
+    window.__sheetResizing = false;
+    document.body.classList.remove("resizing");
+    var handle = document.getElementById("sheet-resize");
+    if (handle) handle.classList.remove("active");
+  }
+  function initSheetResize() {
+    var handle = document.getElementById("sheet-resize");
+    if (!handle) return;
+    handle.addEventListener("pointerdown", function(ev) {
+      if (ev.button !== 0) return;
+      ev.preventDefault();
+      window.__sheetResizing = true;
+      document.body.classList.add("resizing");
+      handle.classList.add("active");
+      try { handle.setPointerCapture(ev.pointerId); } catch (e) { /* без захвата */ }
+    });
+    handle.addEventListener("pointermove", function(ev) {
+      if (!window.__sheetResizing) return;
+      ev.preventDefault();
+      applySheetW(window.innerWidth - ev.clientX);
+    });
+    ["pointerup", "pointercancel"].forEach(function(type) {
+      handle.addEventListener(type, stopSheetResize);
+    });
+    /* двойной клик — вернуть ширину по умолчанию */
+    handle.addEventListener("dblclick", function() { applySheetW(SHEET_DEFAULT); });
+    /* клавиатура: стрелки — шаг, Home/End — края, Enter — сброс */
+    handle.addEventListener("keydown", function(ev) {
+      var sheet = document.getElementById("settings-sheet");
+      var w = sheet.getBoundingClientRect().width;
+      var keys = {
+        ArrowLeft: w + RESIZE_STEP, ArrowRight: w - RESIZE_STEP,
+        Home: sheetMax(), End: SHEET_MIN, Enter: SHEET_DEFAULT
+      };
+      if (!(ev.key in keys)) return;
+      ev.preventDefault();
+      applySheetW(keys[ev.key]);
+    });
   }
 
   function setBusy(b) {
@@ -781,10 +863,14 @@
     function openSettings() {
       document.getElementById("settings-overlay").hidden = false;
       document.getElementById("settings-sheet").hidden = false;
+      document.getElementById("sheet-resize").hidden = false;
+      syncSheetEdge();
     }
     function closeSettings() {
       document.getElementById("settings-overlay").hidden = true;
       document.getElementById("settings-sheet").hidden = true;
+      document.getElementById("sheet-resize").hidden = true;
+      stopSheetResize();
     }
     function switchSettingsTab(tab) {
       ["ui", "dl", "ftp"].forEach(function(name) {
@@ -800,6 +886,7 @@
     document.getElementById("download-fonts").addEventListener("click", function() { downloadFonts(); });
     document.getElementById("open-fonts").addEventListener("click", function() { openFontsFolder(); });
     document.getElementById("settings-overlay").addEventListener("click", closeSettings);
+    initSheetResize();
     document.getElementById("tab-ui").addEventListener("click", function() { switchSettingsTab("ui"); });
     document.getElementById("tab-dl").addEventListener("click", function() { switchSettingsTab("dl"); });
     document.getElementById("tab-ftp").addEventListener("click", function() { switchSettingsTab("ftp"); });
