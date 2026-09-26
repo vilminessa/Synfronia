@@ -11,6 +11,7 @@
   }
   :root { __THEME_ROOT__ }
 </style>
+<style id="fonts-style">__FONTS_CSS__</style>
 <style id="theme-style">__THEME_CSS__</style>
 <style>
 __APP_CSS__
@@ -144,6 +145,15 @@ __APP_CSS__
         <div class="row">
           <input type="text" id="dest">
           <button type="button" id="browse" data-i18n="sheet.browse">Обзор…</button>
+        </div>
+        <label for="font-sans" data-i18n="sheet.font.sans">Шрифт интерфейса:</label>
+        <select id="font-sans"></select>
+        <label for="font-mono" data-i18n="sheet.font.mono">Моноширинный шрифт:</label>
+        <select id="font-mono"></select>
+        <div id="font-note" class="note"></div>
+        <div class="theme-actions">
+          <button type="button" id="reload-fonts"><span class="ta-ico">⟳</span><span data-i18n="sheet.font.reload">Обновить шрифты</span></button>
+          <button type="button" id="open-fonts"><span class="ta-ico">⤢</span><span data-i18n="sheet.font.open">Папка шрифтов…</span></button>
         </div>
       </div>
       <div id="panel-dl" hidden>

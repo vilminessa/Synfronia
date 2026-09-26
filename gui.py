@@ -17,7 +17,9 @@ from core import (
     default_download_dir,
     download_ffmpeg,
     find_ffmpeg,
+    fonts_embed,
     is_playlist,
+    load_fonts,
     load_languages,
     load_settings,
     load_themes,
@@ -26,9 +28,11 @@ from core import (
     tr,
 )
 from core import _file_log as file_log
+from core import _fonts_root as fonts_root
 from core import _themes_root as themes_root
 
 load_languages()
+load_fonts()   # раньше load_themes: темы проверяют font/font_mono по списку семейств
 load_themes()
 _settings = load_settings()
 HTML = build_page(_settings.get("theme", "scarred_mind"))
@@ -78,6 +82,7 @@ class Api:
             "ffmpeg": bool(find_ffmpeg()),
             "default_dir": str(default_download_dir()),
             "transcoders": list(self._transcoders),
+            "fonts": fonts_embed(),
         }
 
     # -- автоустановка ffmpeg -------------------------------------------------
@@ -157,6 +162,47 @@ class Api:
         """Открывает папку тем в Проводнике."""
         try:
             subprocess.Popen(["explorer", str(themes_root())])
+        except OSError:
+            pass
+
+    # -- шрифты (модульные, %LOCALAPPDATA%\Synfronia\fonts) --------------------
+    def set_font(self, key: str, value: str) -> str:
+        """Сохраняет выбранный шрифт и перезагружает страницу: @font-face
+        встраивается на стороне Python, поэтому нужен полный rebuild."""
+        if key not in ("font_sans", "font_mono"):
+            return "unknown key"
+        self.settings[key] = str(value or "")
+        try:
+            save_settings(self.settings)
+        except OSError as exc:
+            return f"error: {exc}"
+        win = webview.windows[0] if webview.windows else None
+        if win:
+            win.load_html(build_page(self.settings.get("theme", "scarred_mind"),
+                                     fonts={"sans": self.settings.get("font_sans") or "",
+                                            "mono": self.settings.get("font_mono") or ""}))
+        return "ok"
+
+    def reload_fonts(self) -> dict:
+        """Пересканирует папку шрифтов и пересобирает страницу с новыми @font-face."""
+        load_fonts()
+        info = fonts_embed()
+        win = webview.windows[0] if webview.windows else None
+        if win:
+            win.load_html(build_page(self.settings.get("theme", "scarred_mind"),
+                                     fonts={"sans": self.settings.get("font_sans") or "",
+                                            "mono": self.settings.get("font_mono") or ""}))
+        return info
+
+    def open_fonts_folder(self) -> None:
+        """Создаёт папку шрифтов при необходимости и открывает её в Проводнике."""
+        folder = fonts_root()
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return
+        try:
+            subprocess.Popen(["explorer", str(folder)])
         except OSError:
             pass
 

@@ -5,6 +5,7 @@
   settings.py   — настройки (based_settings.json / settings.json);
   i18n.py       — переводы и языковые файлы;
   themes.py     — модульные темы и сборка страницы;
+  fonts.py      — модульные шрифты из папки fonts (@font-face, data:URI);
   downloader.py — загрузка через yt-dlp, постпроцессоры, ffmpeg.
 
 Этот файл только реэкспортирует имена, чтобы `from core import ...`
@@ -26,6 +27,15 @@ from downloader import (
     download_ffmpeg,
     find_ffmpeg,
     is_playlist,
+)
+from fonts import (
+    FONT_FORMATS,
+    MAX_FONT_BYTES,
+    _fonts_root,
+    font_css,
+    font_vars,
+    fonts_embed,
+    load_fonts,
 )
 from i18n import I18N, LANGUAGES, SELF_NAMES, _lang_root, load_languages, tr
 from paths import _file_log, base_dir, ffmpeg_local_dir, logs_dir

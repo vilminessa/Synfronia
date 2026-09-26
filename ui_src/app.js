@@ -25,6 +25,21 @@
   var ffmpegRetry = document.getElementById("ffmpeg-retry");
   var ffmpegFetching = false;
   var RING_CIRC = 2 * Math.PI * 52;
+  var FONTS = { families: [], count: 0, folder: "" };
+  // Выбор шрифтов из настроек (его уже подставила страница) — нужен, чтобы
+  // при переключении темы вернуть шрифт, если у темы нет своих font/font_mono.
+  var FONT_DEFAULTS = { sans: "", mono: "" };
+
+  function readFontDefaults() {
+    var cs = getComputedStyle(document.documentElement);
+    FONT_DEFAULTS.sans = (cs.getPropertyValue("--font-sans") || "").trim();
+    FONT_DEFAULTS.mono = (cs.getPropertyValue("--font-mono") || "").trim();
+  }
+  function setFontVar(prop, value) {
+    var root = document.documentElement.style;
+    if (value) root.setProperty(prop, value);
+    else root.removeProperty(prop);
+  }
 
   /* ---- кнопка-гиперпространство (mephysto/poKNxoY) ---- */
   var hyperspace = (function hyperspaceButton() {
@@ -251,6 +266,40 @@
     }));
   }
 
+  // Списки шрифтов: "" = системный. Семейства приходят с Python (папка fonts).
+  function buildFontOptions() {
+    var families = (FONTS && FONTS.families) || [];
+    var monoFirst = (FONTS && FONTS.mono) || [];
+    var monoAll = monoFirst.concat(families.filter(function(f) {
+      return monoFirst.indexOf(f) === -1;
+    }));
+    [["font-sans", families], ["font-mono", monoAll]].forEach(function(pair) {
+      var sel = document.getElementById(pair[0]);
+      if (!sel) return;
+      var keep = sel.value;
+      sel.innerHTML = "";
+      var sys = document.createElement("option");
+      sys.value = "";
+      sys.textContent = t("sheet.font.system");
+      sel.appendChild(sys);
+      pair[1].forEach(function(f) {
+        var o = document.createElement("option");
+        o.value = f;
+        o.textContent = f;
+        sel.appendChild(o);
+      });
+      sel.value = keep;
+    });
+    updateFontNote();
+  }
+  function updateFontNote() {
+    var box = document.getElementById("font-note");
+    if (!box) return;
+    if ((FONTS && FONTS.count) > 0) { box.textContent = ""; box.hidden = true; return; }
+    box.textContent = t("sheet.font.hint").replace("{path}", (FONTS && FONTS.folder) || "");
+    box.hidden = false;
+  }
+
   function renderClicker() {
     var btn = document.getElementById("clicker");
     btn.textContent = clicks === 0 ? t("clicker.hint") : clicks;
@@ -282,6 +331,7 @@
     buildQualOptions();
     buildTranscodeOptions();
     buildLangOptions();
+    buildFontOptions();
     document.getElementById("lang").value = curLang;
     document.documentElement.lang = curLang;
     renderClicker();
@@ -302,6 +352,8 @@
     root.setProperty("--radius-m", pick(c.radius_m, 8) + "px");
     root.setProperty("--radius-l", pick(c.radius_l, 12) + "px");
     root.setProperty("--opacity", pick(c.opacity, 1));
+    setFontVar("--font-sans", c.font ? '"' + c.font + '"' : FONT_DEFAULTS.sans);
+    setFontVar("--font-mono", c.font_mono ? '"' + c.font_mono + '"' : FONT_DEFAULTS.mono);
     var cssEl = document.getElementById("theme-style");
     if (!cssEl) {
       cssEl = document.createElement("style");
@@ -316,7 +368,7 @@
     busy = b;
     document.getElementById("download").disabled = b;
     document.getElementById("stop").disabled = !b;
-    ["tab-video", "tab-playlist", "url-video", "url-playlist", "settings-btn", "dest", "browse", "group", "theme", "subs", "qual", "transcode", "lang"]
+    ["tab-video", "tab-playlist", "url-video", "url-playlist", "settings-btn", "dest", "browse", "group", "theme", "subs", "qual", "transcode", "lang", "font-sans", "font-mono"]
       .forEach(function(id) { document.getElementById(id).disabled = b; });
   }
 
@@ -433,6 +485,18 @@
   function openThemesFolder() {
     pywebview.api.open_themes_folder();
   }
+  // Шрифты встроены в страницу на стороне Python, поэтому смена шрифта и
+  // перечитывание папки перезагружают страницу целиком.
+  function setFont(id, value) {
+    pywebview.api.set_font(id === "font-mono" ? "font_mono" : "font_sans", value)
+      .catch(function(e) { console.error("set font:", e); });
+  }
+  function reloadFonts() {
+    pywebview.api.reload_fonts().catch(function(e) { console.error("reload fonts:", e); });
+  }
+  function openFontsFolder() {
+    pywebview.api.open_fonts_folder();
+  }
 
   function init() {
     if (window.__initDone) return;
@@ -441,6 +505,8 @@
     curLang = initData.settings.language || "en";
     if (LANGS.indexOf(curLang) === -1) curLang = "en";
     transAvailability = { ffmpeg: !!initData.ffmpeg, avail: initData.transcoders || [] };
+    FONTS = initData.fonts || FONTS;
+    readFontDefaults();
     buildThemeOptions();
     buildSubsOptions();
     buildQualOptions();
@@ -455,6 +521,8 @@
     document.getElementById("socket_timeout").value = initData.settings.socket_timeout || 20;
     document.getElementById("socket_timeout-range").value = initData.settings.socket_timeout || 20;
     document.getElementById("lang").value = curLang;
+    document.getElementById("font-sans").value = initData.settings.font_sans || "";
+    document.getElementById("font-mono").value = initData.settings.font_mono || "";
     applyTheme(document.getElementById("theme").value);
     document.getElementById("dest").value = initData.default_dir;
     document.getElementById("group").checked = initData.settings.group_playlist !== false;
@@ -467,7 +535,9 @@
     document.getElementById("theme").addEventListener("change", function() {
       updateThemeMeta();
       var _t = THEMES[this.value];
-      if (_t && _t.entry) {
+      // Темы с entry или со своими font/font_mono требуют пересборки страницы:
+      // @font-face встраивается на стороне Python.
+      if (_t && (_t.entry || _t.font || _t.font_mono)) {
         pywebview.api.set_theme(this.value);
       } else {
         applyTheme(this.value); pywebview.api.save_setting("theme", this.value);
@@ -500,6 +570,9 @@
     });
     document.getElementById("group").addEventListener("change", function() {
       pywebview.api.save_setting("group_playlist", this.checked);
+    });
+    ["font-sans", "font-mono"].forEach(function(id) {
+      document.getElementById(id).addEventListener("change", function() { setFont(id, this.value); });
     });
     document.getElementById("lang").addEventListener("change", function() {
       curLang = this.value;
@@ -565,6 +638,8 @@
     document.getElementById("settings-close").addEventListener("click", closeSettings);
     document.getElementById("reload-themes").addEventListener("click", function() { reloadThemes(); });
     document.getElementById("open-themes").addEventListener("click", function() { openThemesFolder(); });
+    document.getElementById("reload-fonts").addEventListener("click", function() { reloadFonts(); });
+    document.getElementById("open-fonts").addEventListener("click", function() { openFontsFolder(); });
     document.getElementById("settings-overlay").addEventListener("click", closeSettings);
     document.getElementById("tab-ui").addEventListener("click", function() { switchSettingsTab("ui"); });
     document.getElementById("tab-dl").addEventListener("click", function() { switchSettingsTab("dl"); });

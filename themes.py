@@ -16,6 +16,7 @@ from pathlib import Path
 import ui as _ui
 
 from i18n import I18N
+from fonts import _clean_family, families as _loaded_families, font_css, font_vars
 from paths import _file_log, base_dir
 
 
@@ -139,6 +140,7 @@ _PALETTE_FIELDS = (
 )
 _THEME_META_FIELDS = (
     "label", "extends", "entry", "css", "author", "version", "hidden",
+    "font", "font_mono",
 )
 
 
@@ -250,6 +252,18 @@ def validate_theme(data: dict) -> tuple[dict, list[str]]:
             spec[field] = text
         elif field in data and data[field] is not None:
             warn.append(f"{field}: пустое значение")
+
+    for field in ("font", "font_mono"):
+        if data.get(field):
+            family = _clean_family(data[field])
+            if family:
+                spec[field] = family
+                known = _loaded_families()
+                # проверяем только если шрифты уже просканированы (иначе молчим)
+                if known and family not in known:
+                    warn.append(f"{field}: семейство «{family}» не найдено в папке fonts")
+            else:
+                warn.append(f"{field}: некорректное имя шрифта ({data[field]!r})")
 
     parent = data.get("extends")
     if parent:
@@ -613,11 +627,12 @@ def _resolve_theme(key: str, raw: dict[str, dict]) -> dict:
     return _fill_palette(out)
 
 
-def _palette_root_vars(theme: dict) -> str:
+def _palette_root_vars(theme: dict, fonts: dict | None = None) -> str:
     """CSS-переменные палитры темы как строка для :root{...}.
 
     Значения прогоняются через валидаторы ещё раз: страница собирается и для
     тем, спецификация которых создана в памяти, а не прошла validate_theme.
+    fonts — выбранные шрифты (--font-sans / --font-mono).
     """
     parts = []
     for f in _PALETTE_FIELDS:
@@ -636,6 +651,10 @@ def _palette_root_vars(theme: dict) -> str:
             color = _clean_color(v)
             if color is not None:
                 parts.append(f"--{f}: {color}")
+    if fonts:
+        vars_css = font_vars(fonts.get("sans") or "", fonts.get("mono") or "")
+        if vars_css:
+            parts.append(vars_css)
     return " ".join(parts)
 
 
@@ -691,15 +710,17 @@ def _apply_assets(html: str, folders: list[Path]) -> str:
     return _ASSET_RE.sub(repl, html)
 
 
-def build_page(theme_key: str, lang: str | None = None) -> str:
+def build_page(theme_key: str, lang: str | None = None, fonts: dict | None = None) -> str:
     """Собирает итоговый HTML страницы для темы theme_key.
 
     • если у темы есть entry (index.html в папке) — сборка из него;
     • иначе — из встроенного базового шаблона (ui.BASE_TEMPLATE), причём
       секции SLOT:... можно переопределить файлами slots/<имя>.html;
     • ассеты {{asset:rel}} и url(...) в CSS встраиваются как data:URI;
-    • плейсхолдеры (__THEME_ROOT__, __THEME_CSS__, __APP_CSS__, __APPJS__,
-      __I18N__, __THEMES__) подставляются простой заменой.
+    • шрифты из папки fonts (font_sans / font_mono, переопределённые полями
+      темы font / font_mono) встраиваются как @font-face с data:URI;
+    • плейсхолдеры (__THEME_ROOT__, __THEME_CSS__, __FONTS_CSS__, __APP_CSS__,
+      __APPJS__, __I18N__, __THEMES__) подставляются простой заменой.
     """
     if not _LOADED_THEMES:
         load_themes()
@@ -708,6 +729,16 @@ def build_page(theme_key: str, lang: str | None = None) -> str:
         theme_key = "scarred_mind" if "scarred_mind" in available else next(iter(available), theme_key)
     theme = _fill_palette(dict(available.get(theme_key) or THEMES.get(theme_key) or {}))
     folders = theme.get("_slot_folders") or []
+
+    # 0) шрифты: выбор из настроек, но тема может его переопределить
+    if fonts is None:
+        from settings import load_settings
+        saved = load_settings()
+        fonts = {"sans": saved.get("font_sans") or "", "mono": saved.get("font_mono") or ""}
+    picked = {
+        "sans": _clean_family(theme.get("font") or fonts.get("sans") or ""),
+        "mono": _clean_family(theme.get("font_mono") or fonts.get("mono") or ""),
+    }
 
     # 1) выбор шаблона: свой index.html либо базовый
     entry = theme.get("entry")
@@ -724,8 +755,13 @@ def build_page(theme_key: str, lang: str | None = None) -> str:
     template = _apply_assets(template, folders)
 
     # 3) плейсхолдеры
-    page = template.replace("__THEME_ROOT__", _palette_root_vars(theme))
+    fonts_css = font_css([picked["sans"], picked["mono"]])
+    page = template.replace("__THEME_ROOT__", _palette_root_vars(theme, picked))
     page = page.replace("__THEME_CSS__", theme.get("css") or "")
+    page = page.replace("__FONTS_CSS__", fonts_css)
+    if "__FONTS_CSS__" not in template:
+        # свой entry-шаблон без плейсхолдера: добавляем стиль шрифтов сами
+        page = page.replace("</head>", f'<style id="fonts-style">{fonts_css}</style></head>', 1)
     page = page.replace("__APP_CSS__", _ui.APP_CSS)
     page = page.replace("__APPJS__", _ui.APP_JS)
     page = page.replace("__I18N__", _js_json(I18N))

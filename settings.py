@@ -17,6 +17,8 @@ DEFAULT_SETTINGS = {
     "transcode": "none",     # none / libx265 / nvenc / amf / qsv
     "group_playlist": True,
     "language": "en",
+    "font_sans": "",          # шрифт интерфейса ("" = системный)
+    "font_mono": "",          # моноширинный шрифт ("" = системный)
 }
 
 
