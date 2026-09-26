@@ -26,19 +26,39 @@
   var ffmpegFetching = false;
   var RING_CIRC = 2 * Math.PI * 52;
   var FONTS = { families: [], count: 0, folder: "" };
-  // Выбор шрифтов из настроек (его уже подставила страница) — нужен, чтобы
-  // при переключении темы вернуть шрифт, если у темы нет своих font/font_mono.
-  var FONT_DEFAULTS = { sans: "", mono: "" };
+  // Выбор шрифтов из настроек (без кавычек) — нужен, чтобы при переключении
+  // темы вернуть шрифт, если у темы нет своих font/font_mono, и чтобы запросить
+  // @font-face именно для этих семейств.
+  var FONT_PICK = { sans: "", mono: "" };
 
-  function readFontDefaults() {
-    var cs = getComputedStyle(document.documentElement);
-    FONT_DEFAULTS.sans = (cs.getPropertyValue("--font-sans") || "").trim();
-    FONT_DEFAULTS.mono = (cs.getPropertyValue("--font-mono") || "").trim();
+  function quoted(family) {
+    return family ? '"' + String(family).replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"' : "";
   }
   function setFontVar(prop, value) {
     var root = document.documentElement.style;
     if (value) root.setProperty(prop, value);
     else root.removeProperty(prop);
+  }
+  // @font-face лежат в <style id="fonts-style"> (подставляет themes.build_page).
+  // Подменяем содержимое целиком — дубликаты не копятся, страница не грузится
+  // заново, поэтому состояние интерфейса (вкладки, поля, лог) сохраняется.
+  function applyFontCss(css) {
+    var el = document.getElementById("fonts-style");
+    if (!el) {
+      el = document.createElement("style");
+      el.id = "fonts-style";
+      document.head.appendChild(el);
+    }
+    el.textContent = css || "";
+  }
+  function loadFontFaces(families) {
+    var list = (families || []).filter(Boolean).filter(function(f, i, arr) {
+      return arr.indexOf(f) === i;
+    });
+    if (!list.length) { applyFontCss(""); return Promise.resolve(); }
+    return pywebview.api.font_face_css(list)
+      .then(function(css) { applyFontCss(css); })
+      .catch(function(e) { console.error("font faces:", e); });
   }
 
   /* ---- кнопка-гиперпространство (mephysto/poKNxoY) ---- */
@@ -352,8 +372,8 @@
     root.setProperty("--radius-m", pick(c.radius_m, 8) + "px");
     root.setProperty("--radius-l", pick(c.radius_l, 12) + "px");
     root.setProperty("--opacity", pick(c.opacity, 1));
-    setFontVar("--font-sans", c.font ? '"' + c.font + '"' : FONT_DEFAULTS.sans);
-    setFontVar("--font-mono", c.font_mono ? '"' + c.font_mono + '"' : FONT_DEFAULTS.mono);
+    setFontVar("--font-sans", c.font ? quoted(c.font) : quoted(FONT_PICK.sans));
+    setFontVar("--font-mono", c.font_mono ? quoted(c.font_mono) : quoted(FONT_PICK.mono));
     var cssEl = document.getElementById("theme-style");
     if (!cssEl) {
       cssEl = document.createElement("style");
@@ -555,14 +575,31 @@
   function openThemesFolder() {
     pywebview.api.open_themes_folder();
   }
-  // Шрифты встроены в страницу на стороне Python, поэтому смена шрифта и
-  // перечитывание папки перезагружают страницу целиком.
+  // @font-face встраиваются на стороне Python, но применяются подменой блока
+  // #fonts-style — без перезагрузки страницы и без потери состояния UI.
   function setFont(id, value) {
+    var slot = id === "font-mono" ? "mono" : "sans";
     pywebview.api.set_font(id === "font-mono" ? "font_mono" : "font_sans", value)
+      .then(function(r) {
+        if (r && r.error) { console.error("set font:", r.error); return; }
+        FONT_PICK[slot] = value || "";
+        if (r && r.css !== undefined) applyFontCss(r.css);
+        var th = THEMES[document.getElementById("theme").value] || {};
+        var thFont = slot === "mono" ? th.font_mono : th.font;
+        setFontVar(slot === "mono" ? "--font-mono" : "--font-sans",
+                   quoted(thFont || FONT_PICK[slot]));
+      })
       .catch(function(e) { console.error("set font:", e); });
   }
   function reloadFonts() {
-    pywebview.api.reload_fonts().catch(function(e) { console.error("reload fonts:", e); });
+    pywebview.api.reload_fonts()
+      .then(function(r) {
+        if (r && r.fonts) FONTS = r.fonts;
+        if (r && r.css !== undefined) applyFontCss(r.css);
+        buildFontOptions();
+        applyI18n();
+      })
+      .catch(function(e) { console.error("reload fonts:", e); });
   }
   function openFontsFolder() {
     pywebview.api.open_fonts_folder();
@@ -576,7 +613,8 @@
     if (LANGS.indexOf(curLang) === -1) curLang = "en";
     transAvailability = { ffmpeg: !!initData.ffmpeg, avail: initData.transcoders || [] };
     FONTS = initData.fonts || FONTS;
-    readFontDefaults();
+    FONT_PICK.sans = initData.settings.font_sans || "";
+    FONT_PICK.mono = initData.settings.font_mono || "";
     buildThemeOptions();
     buildSubsOptions();
     buildQualOptions();
@@ -604,13 +642,18 @@
     }
     document.getElementById("theme").addEventListener("change", function() {
       updateThemeMeta();
-      var _t = THEMES[this.value];
-      // Темы с entry или со своими font/font_mono требуют пересборки страницы:
-      // @font-face встраивается на стороне Python.
-      if (_t && (_t.entry || _t.font || _t.font_mono)) {
+      var _t = THEMES[this.value] || {};
+      // Темы со своим entry собираются в Python: там нужен полный rebuild
+      // страницы (свой HTML). Остальные применяются на лету, @font-face темы
+      // догружаем отдельным запросом.
+      if (_t.entry) {
         pywebview.api.set_theme(this.value);
-      } else {
-        applyTheme(this.value); pywebview.api.save_setting("theme", this.value);
+        return;
+      }
+      applyTheme(this.value);
+      pywebview.api.save_setting("theme", this.value);
+      if (_t.font || _t.font_mono) {
+        loadFontFaces([_t.font, _t.font_mono, FONT_PICK.sans, FONT_PICK.mono]);
       }
     });
     document.getElementById("subs").addEventListener("change", function() {
@@ -647,8 +690,9 @@
     document.getElementById("lang").addEventListener("change", function() {
       curLang = this.value;
       applyI18n();
-    applyTheme(document.getElementById("theme").value);
-    updateThemeMeta();
+      buildFontOptions();   // подпись «системный» в списках шрифтов тоже переводится
+      applyTheme(document.getElementById("theme").value);
+      updateThemeMeta();
       pywebview.api.save_setting("language", this.value);
     });
     initFtp(initData.settings);

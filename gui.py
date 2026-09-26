@@ -19,6 +19,7 @@ from core import (
     default_download_dir,
     download_ffmpeg,
     find_ffmpeg,
+    font_css,
     fonts_embed,
     is_playlist,
     load_fonts,
@@ -191,29 +192,47 @@ class Api:
             pass
 
     # -- шрифты (модульные, %LOCALAPPDATA%\Synfronia\fonts) --------------------
-    def set_font(self, key: str, value: str) -> str:
-        """Сохраняет выбранный шрифт и перезагружает страницу: @font-face
-        встраивается на стороне Python, поэтому нужен полный rebuild."""
+    def _font_css_now(self) -> str:
+        """@font-face для шрифтов, действующих прямо сейчас.
+
+        Тема может переопределить font/font_mono (см. themes.build_page), поэтому
+        встраиваем именно её — иначе после смены шрифта интерфейс молча
+        откатился бы на системный.
+        """
+        theme = (themes_embed() or {}).get(self.settings.get("theme", "scarred_mind")) or {}
+        return font_css([theme.get("font") or self.settings.get("font_sans") or "",
+                         theme.get("font_mono") or self.settings.get("font_mono") or ""])
+
+    def font_face_css(self, families) -> str:
+        """@font-face для произвольных семейств.
+
+        Нужен, когда @font-face применяется без перезагрузки страницы: JS
+        подменяет содержимое <style id="fonts-style">. Лимит на объём
+        встраиваемых данных (fonts.MAX_TOTAL_BYTES) действует и здесь.
+        """
+        if isinstance(families, str):
+            families = [families]
+        return font_css([str(f or "") for f in (families or [])])
+
+    def set_font(self, key: str, value: str) -> dict:
+        """Сохраняет выбранный шрифт и отдаёт @font-face для активной темы.
+
+        Страница не перезагружается: JS подменяет блок #fonts-style, поэтому
+        выбор шрифта не сбрасывает состояние интерфейса.
+        """
         if key not in ("font_sans", "font_mono"):
-            return "unknown key"
+            return {"error": "unknown key"}
         self.settings[key] = str(value or "")
         try:
             save_settings(self.settings)
         except OSError as exc:
-            return f"error: {exc}"
-        self._swap_page(build_page(self.settings.get("theme", "scarred_mind"),
-                                   fonts={"sans": self.settings.get("font_sans") or "",
-                                          "mono": self.settings.get("font_mono") or ""}))
-        return "ok"
+            return {"error": f"error: {exc}"}
+        return {"css": self._font_css_now()}
 
     def reload_fonts(self) -> dict:
-        """Пересканирует папку шрифтов и пересобирает страницу с новыми @font-face."""
+        """Пересканирует папку шрифтов: новый список и @font-face для JS."""
         load_fonts()
-        info = fonts_embed()
-        self._swap_page(build_page(self.settings.get("theme", "scarred_mind"),
-                                   fonts={"sans": self.settings.get("font_sans") or "",
-                                          "mono": self.settings.get("font_mono") or ""}))
-        return info
+        return {"fonts": fonts_embed(), "css": self._font_css_now()}
 
     def open_fonts_folder(self) -> None:
         """Создаёт папку шрифтов при необходимости и открывает её в Проводнике."""
