@@ -33,6 +33,7 @@ from fonts import (
     FONT_FORMATS,
     MAX_FONT_BYTES,
     _fonts_root,
+    download_test_fonts,
     font_css,
     font_vars,
     fonts_embed,

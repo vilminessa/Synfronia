@@ -21,6 +21,7 @@ import base64
 import os
 import re
 import shutil
+import urllib.request
 from pathlib import Path
 
 from paths import _file_log, base_dir
@@ -280,21 +281,27 @@ def _check_font(path: Path) -> str:
     return _clean_family(names.get(16) or names.get(1))
 
 
-def _install_font(src: Path, dest: Path, min_bytes: int = 1024) -> bool:
-    """Копирует шрифт на место через временный файл (атомарно).
+def _font_ok(path: Path, min_bytes: int = 1024) -> bool:
+    """Годится ли файл шрифта: читаемый sfnt нужного размера.
 
-    Сначала проверяем, что это читаемый sfnt нужного размера: битый файл в
-    папке шрифтов молча ломает @font-face для всей страницы.
+    Битый файл в папке шрифтов молча ломает @font-face для всей страницы,
+    поэтому проверяем всегда — и перед копированием, и перед скачиванием.
     """
     try:
-        if src.stat().st_size < min_bytes:
-            _file_log("warning", f"font {src.name}: слишком мал, пропущен")
-            return False
+        size = path.stat().st_size
     except OSError:
         return False
-    if not _check_font(src):
-        _file_log("warning", f"font {src.name}: нечитаемый файл, пропущен")
+    if size < min_bytes:
+        _file_log("warning", f"font {path.name}: {size} байт - слишком мал, пропущен")
         return False
+    if not _check_font(path):
+        _file_log("warning", f"font {path.name}: нечитаемый файл, пропущен")
+        return False
+    return True
+
+
+def _place_font(src: Path, dest: Path) -> bool:
+    """Копирует шрифт на место через временный файл (атомарно)."""
     tmp = dest.with_name(f".part-{dest.name}")
     try:
         shutil.copyfile(src, tmp)
@@ -337,7 +344,7 @@ def seed_bundled_fonts(on_log=None) -> dict:
             result["skipped"].append(name)
             continue
         src = src_dir / name
-        if src.is_file() and _install_font(src, dest):
+        if src.is_file() and _font_ok(src) and _place_font(src, dest):
             result["added"].append(name)
         else:
             result["failed"].append(name)
@@ -354,6 +361,90 @@ def seed_bundled_fonts(on_log=None) -> dict:
     if result["failed"]:
         report("warning", f"fonts: не удалось добавить - {', '.join(result['failed'])}")
     return result
+
+
+def download_test_fonts(names=None, on_log=None, on_progress=None) -> dict:
+    """Докачивает тестовые шрифты из сети (кнопка «Докачать шрифты»).
+
+    Шрифты уже лежат в сборке, поэтому сеть здесь — запасной путь: после
+    удаления файлов, обновления версии или для проверки в свежей установке.
+    Уже скачанные пропускаем, если не передан force.
+
+    on_progress(done, total) — колбэк после каждого файла; on_log(level, msg).
+    Ошибка сети не прерывает цикл: недоступные пишутся в failed.
+    """
+    report = on_log or (lambda level, msg: _file_log(level, msg))
+    wanted = [n for n in (names or TEST_FONTS) if n in TEST_FONTS]
+    result = {"added": [], "skipped": [], "failed": []}
+    if not wanted:
+        return result
+    root = _fonts_root()
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        report("error", f"fonts: не удалось создать папку шрифтов ({exc})")
+        result["failed"] = list(wanted)
+        return result
+    total = len(wanted)
+    for index, name in enumerate(wanted, 1):
+        dest = root / name
+        meta = TEST_FONTS[name]
+        if dest.is_file():
+            result["skipped"].append(name)
+            if on_progress:
+                on_progress(index, total)
+            continue
+        report("info", f"fonts: скачиваю {meta['family']} ({index}/{total})…")
+        try:
+            req = urllib.request.Request(
+                meta["url"],
+                headers={"User-Agent": "Synfronia (test fonts)"},
+            )
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                size = int(resp.headers.get("Content-Length") or 0)
+                if size > MAX_FONT_BYTES:
+                    raise ValueError(f"{size} байт - больше лимита")
+                tmp = dest.with_name(f".part-{dest.name}")
+                with open(tmp, "wb") as fh:
+                    while True:
+                        chunk = resp.read(1 << 16)
+                        if not chunk:
+                            break
+                        fh.write(chunk)
+        except Exception as exc:  # noqa: BLE001
+            # сеть/прокси/404 — тихо в лог, следующий шрифт не трогаем
+            result["failed"].append(name)
+            report("error", f"fonts: {meta['family']} не скачан ({exc})")
+            _unlink(dest.with_name(f".part-{dest.name}"))
+            if on_progress:
+                on_progress(index, total)
+            continue
+        if _font_ok(tmp, min_bytes=meta["bytes"] // 4):
+            # файл уже на месте (скачан во временное имя) — только переименование
+            try:
+                os.replace(tmp, dest)
+                result["added"].append(name)
+            except OSError as exc:
+                result["failed"].append(name)
+                report("error", f"fonts: {meta['family']} не сохранён ({exc})")
+        else:
+            result["failed"].append(name)
+            report("error", f"fonts: {meta['family']} — ответ не похож на шрифт, отброшен")
+        # при отказе убираем мусор: битый .part-*.ttf иначе попал бы в список шрифтов
+        _unlink(tmp)
+        if on_progress:
+            on_progress(index, total)
+    if result["added"]:
+        _write_fonts_readme(root)
+        load_fonts()  # новые семейства сразу доступны UI
+    return result
+
+
+def _unlink(path: Path) -> None:
+    try:
+        path.unlink()
+    except OSError:
+        pass
 
 
 def _write_fonts_readme(root: Path) -> None:
@@ -435,7 +526,9 @@ def load_fonts() -> dict[str, list[dict]]:
     root = _fonts_root()
     families: dict[str, list[dict]] = {}
     try:
-        files = sorted(f for f in root.iterdir() if f.is_file() and f.suffix.lower() in FONT_FORMATS)
+        files = sorted(f for f in root.iterdir()
+                       if f.is_file() and not f.name.startswith(".")
+                       and f.suffix.lower() in FONT_FORMATS)
     except OSError:
         _LOADED_FONTS = {}
         return _LOADED_FONTS

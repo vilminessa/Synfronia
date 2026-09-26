@@ -26,6 +26,7 @@
   var ffmpegFetching = false;
   var RING_CIRC = 2 * Math.PI * 52;
   var FONTS = { families: [], count: 0, folder: "" };
+  var fontsRev = -1;   // счётчик пересканирования шрифтов со стороны Python
   // Выбор шрифтов из настроек (без кавычек) — нужен, чтобы при переключении
   // темы вернуть шрифт, если у темы нет своих font/font_mono, и чтобы запросить
   // @font-face именно для этих семейств.
@@ -463,6 +464,12 @@
           ffmpegFetching = false;
         }
       }
+      fontDlState(st);
+      // Шрифты докачались на стороне Python: перерисовываем списки и @font-face.
+      if (typeof st.fonts_rev === "number" && st.fonts_rev !== fontsRev) {
+        fontsRev = st.fonts_rev;
+        reloadFonts();
+      }
     } catch (e) {}
     scheduleTick(200);
   }
@@ -600,6 +607,43 @@
         applyI18n();
       })
       .catch(function(e) { console.error("reload fonts:", e); });
+  }
+  // Докачка шрифтов из сети: кнопка busy на всё время, прогресс в note.
+  // Список обновится сам, когда Python поднимет fonts_rev (см. tick).
+  function downloadFonts() {
+    var btn = document.getElementById("download-fonts");
+    var note = document.getElementById("font-dl-note");
+    pywebview.api.download_fonts()
+      .then(function(res) {
+        if (res === "busy") { setFontDlNote(t("font.dl.busy")); return; }
+        btn.classList.add("busy");
+        btn.disabled = true;
+        setFontDlNote(t("font.dl.start"));
+      })
+      .catch(function(e) {
+        btn.classList.remove("busy");
+        btn.disabled = false;
+        setFontDlNote(t("font.dl.fail").replace("{names}", String(e)));
+      });
+  }
+  function setFontDlNote(text) {
+    var note = document.getElementById("font-dl-note");
+    if (!note) return;
+    note.textContent = text || "";
+    note.hidden = !text;
+  }
+  function fontDlState(st) {
+    var d = st.fonts_dl;
+    if (!d) return;
+    var btn = document.getElementById("download-fonts");
+    if (d.downloading) {
+      if (btn) { btn.classList.add("busy"); btn.disabled = true; }
+      setFontDlNote(t("font.dl.progress").replace("{pct}", String(Math.round(d.pct || 0))));
+    } else if (btn && btn.disabled) {
+      btn.classList.remove("busy");
+      btn.disabled = false;
+      setFontDlNote(d.error ? t("font.dl.fail").replace("{names}", String(d.error)) : "");
+    }
   }
   function openFontsFolder() {
     pywebview.api.open_fonts_folder();
@@ -753,6 +797,7 @@
     document.getElementById("reload-themes").addEventListener("click", function() { reloadThemes(); });
     document.getElementById("open-themes").addEventListener("click", function() { openThemesFolder(); });
     document.getElementById("reload-fonts").addEventListener("click", function() { reloadFonts(); });
+    document.getElementById("download-fonts").addEventListener("click", function() { downloadFonts(); });
     document.getElementById("open-fonts").addEventListener("click", function() { openFontsFolder(); });
     document.getElementById("settings-overlay").addEventListener("click", closeSettings);
     document.getElementById("tab-ui").addEventListener("click", function() { switchSettingsTab("ui"); });

@@ -1,0 +1,88 @@
+r"""Собирает страницу Synfronia со стабом pywebview для headless-проверок вёрстки.
+
+Зачем: app.js живёт внутри одной <script> и сразу дёргает pywebview.api, поэтому
+для проверки разметки нужен настоящий DOM + заглушка API. Стаб подставляется
+перед <script> приложения, дальше страницу открывает tools/ui_*.js через CDP.
+
+    python tools/ui_probe_page.py            -> %TEMP%\synf_probe_page.html
+    python tools/ui_probe_page.py out.html   -> свой путь
+"""
+
+import sys
+import tempfile
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from settings import load_settings  # noqa: E402
+from themes import build_page  # noqa: E402
+
+# Стаб API: init() и tick() должны пройти целиком, чтобы мы мерили реальную
+# разметку, а не падение скрипта. Значения повторяют ответы Api.get_initial/poll.
+STUB = """<script>
+(function () {
+  var FONTS = {families: ["Inter", "JetBrains Mono", "Noto Sans"], mono: ["JetBrains Mono"],
+               count: 3, folder: "C:\\\\Synfronia\\\\fonts"};
+  var state = {lang: "%(lang)s", css: "", fontsRev: 0, dl: null};
+  var settings = {
+    language: state.lang, theme: "scarred_mind", subtitles: "en", quality: "lossless",
+    transcode: "none", retries: 10, socket_timeout: 20, ftp_active: false,
+    ftp_host: "", ftp_port: 21, ftp_user: "", ftp_password: "", ftp_tls: false,
+    ftp_tls_verify: true, ftp_pasv: true, ftp_delete_local: false, ftp_dir: "",
+    ftp_template: "", ftp_timeout: 60, ftp_retries: 3, ftp_mode: "passive",
+    dest: "C:\\\\Downloads", font_sans: "", font_mono: ""
+  };
+  function ok(r) { return Promise.resolve(r === undefined ? {} : r); }
+  window.pywebview = {api: {
+    get_initial: function () { return Promise.resolve({settings: settings, ffmpeg: true,
+      default_dir: settings.dest, transcoders: ["libx265", "nvenc"], fonts: FONTS}); },
+    poll: function () { return Promise.resolve({busy: false, status: "", progress: {mode: "determinate", value: 0},
+      logs: [], log_cursor: 0, ffmpeg: {downloading: false, extracting: false, pct: 0, ok: true, error: null},
+      fonts_dl: {downloading: false, pct: 0, error: null}, fonts_rev: state.fontsRev}); },
+    set_font: function () { return ok({css: state.css}); },
+    reload_fonts: function () { return ok({fonts: FONTS, css: state.css}); },
+    download_fonts: function () { state.dl = "started"; return ok("started"); },
+    apply_theme_css: function () { return ok(); },
+    switch_theme: function () { return ok(); },
+    reload_themes: function () { return ok([]); },
+    set_language: function (lang) { settings.language = lang; return ok(); },
+    save_setting: function () { return ok(); },
+    start_download: function () { return ok({}); },
+    stop_download: function () { return ok(); },
+    browse_folder: function () { return ok("C:\\\\Downloads"); },
+    test_ftp: function () { return ok({error: "test"}); },
+    open_fonts_folder: function () { return ok(); },
+    open_themes_folder: function () { return ok(); }
+  }};
+  window.__probe = state;
+})();
+</script>
+"""
+
+
+def build_page_with_stub(theme: str = "scarred_mind", lang: str = "ru") -> str:
+    """Страница приложения со стабом API перед основным <script>."""
+    page = build_page(theme)
+    marker = "<script>"
+    idx = page.find(marker)
+    if idx < 0:
+        raise SystemExit("build_page: не найден <script> для вставки стаба")
+    stub = STUB % {"lang": lang}
+    return page[:idx] + stub + page[idx:]
+
+
+def main(argv: list[str]) -> int:
+    lang = "ru"
+    if len(argv) > 1 and argv[1] == "--lang":
+        lang = argv[2] if len(argv) > 2 else "ru"
+        out = Path(argv[3]) if len(argv) > 3 else Path(tempfile.gettempdir()) / "synf_probe_page.html"
+    else:
+        out = Path(argv[1]) if len(argv) > 1 else Path(tempfile.gettempdir()) / "synf_probe_page.html"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(build_page_with_stub(lang=lang), encoding="utf-8")
+    print(out)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

@@ -42,9 +42,12 @@
     0%, 100% { text-shadow: 0 0 5px var(--accent), 0 0 12px var(--accent), 0 0 24px var(--accent); opacity: .92; }
     50% { text-shadow: 0 0 8px var(--accent), 0 0 20px var(--accent), 0 0 44px var(--accent); opacity: 1; }
   }
-  .tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+  /* Вкладки переносились по ширине панели: немецкие подписи не влезали в
+     .sheet (330px) и выдавливали FTP за правый край — панель «уезжала». */
+  .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
   .tab {
-    padding: 8px 22px; border: 1px solid var(--surface); border-radius: var(--radius-m);
+    flex: 0 1 auto; min-width: 0;
+    padding: 8px 18px; border: 1px solid var(--surface); border-radius: var(--radius-m);
     background: var(--surface); color: var(--text); font-size: 14px; cursor: pointer;
   }
   .tab.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
@@ -209,11 +212,13 @@
   #ffmpeg-retry:hover { background: rgba(255,255,255,.12); }
 
   .ffmpeg-hidden { display: none !important; }
-.theme-actions { display: flex; gap: 8px; margin-top: 10px; }
+.theme-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .theme-actions button {
-  flex: 1; min-width: 0; padding: 8px 10px;
+  /* nowrap + flex:1/min-width:0 обрезали длинные подписи ("Schriften neu laden",
+     "Обновить шрифты") — строка переносится, кнопки перетекают на вторую. */
+  flex: 1 1 auto; min-width: 0; padding: 8px 10px;
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  font-size: 13px; line-height: 1; white-space: nowrap;
+  font-size: 13px; line-height: 1.15; white-space: normal; overflow-wrap: anywhere;
   background: transparent; color: var(--text);
   border: 1px solid var(--widget); border-radius: var(--radius-s);
   cursor: pointer; transition: border-color .15s, color .15s, background .15s;

@@ -18,6 +18,7 @@ from core import (
     build_page,
     default_download_dir,
     download_ffmpeg,
+    download_test_fonts,
     find_ffmpeg,
     font_css,
     fonts_embed,
@@ -62,6 +63,8 @@ class Api:
         self._busy = False
         self._progress = {"mode": "determinate", "value": 0.0}
         self._ffmpeg = {"downloading": False, "extracting": False, "pct": 0.0, "ok": False, "error": None}
+        self._fonts_dl = {"downloading": False, "pct": 0.0, "error": None}
+        self._fonts_rev = 0
         self._page_gen = 0
 
     # -- подмена страницы ----------------------------------------------------
@@ -102,6 +105,8 @@ class Api:
                 "logs": lines[start - oldest:],
                 "log_cursor": self._log_total,
                 "ffmpeg": dict(self._ffmpeg),
+                "fonts_dl": dict(self._fonts_dl),
+                "fonts_rev": self._fonts_rev,
             }
 
     def get_initial(self) -> dict:
@@ -235,6 +240,43 @@ class Api:
         """Пересканирует папку шрифтов: новый список и @font-face для JS."""
         load_fonts()
         return {"fonts": fonts_embed(), "css": self._font_css_now()}
+
+    def download_fonts(self) -> str:
+        """Докачивает тестовые шрифты из сети (кнопка «Докачать шрифты»).
+
+        Шрифты вшиты в сборку, поэтому сеть здесь — запасной путь. Возвращает
+        "started" / "busy"; итог приходит в лог и подхватывается по fonts_rev.
+        """
+        with self._lock:
+            if self._fonts_dl["downloading"]:
+                return "busy"
+            self._fonts_dl.update({"downloading": True, "pct": 0.0, "error": None})
+        threading.Thread(target=self._fonts_worker, daemon=True, name="fonts-dl").start()
+        return "started"
+
+    def _fonts_worker(self) -> None:
+        def on_progress(done: int, total: int) -> None:
+            with self._lock:
+                self._fonts_dl["pct"] = done / max(total, 1) * 100.0
+
+        try:
+            result = download_test_fonts(on_log=self._log, on_progress=on_progress)
+        except Exception as exc:  # noqa: BLE001
+            with self._lock:
+                self._fonts_dl.update({"downloading": False, "error": str(exc)})
+            self._log("error", tr(self._lang, "font.dl.fail", names=str(exc)))
+            return
+        with self._lock:
+            self._fonts_dl.update({"downloading": False, "pct": 100.0})
+        if result["added"]:
+            self._log("info", tr(self._lang, "font.dl.done", names=", ".join(result["added"])))
+            # счётчик растёт — JS сам перерисует списки шрифтов
+            with self._lock:
+                self._fonts_rev += 1
+        elif result["skipped"] and not result["failed"]:
+            self._log("info", tr(self._lang, "font.dl.skip"))
+        if result["failed"]:
+            self._log("error", tr(self._lang, "font.dl.fail", names=", ".join(result["failed"])))
 
     def open_fonts_folder(self) -> None:
         """Создаёт папку шрифтов при необходимости и открывает её в Проводнике."""
