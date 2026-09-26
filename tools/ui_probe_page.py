@@ -72,15 +72,24 @@ def build_page_with_stub(theme: str = "scarred_mind", lang: str = "ru") -> str:
 
 
 def main(argv: list[str]) -> int:
-    lang = "ru"
-    if len(argv) > 1 and argv[1] == "--lang":
-        lang = argv[2] if len(argv) > 2 else "ru"
-        out = Path(argv[3]) if len(argv) > 3 else Path(tempfile.gettempdir()) / "synf_probe_page.html"
-    else:
-        out = Path(argv[1]) if len(argv) > 1 else Path(tempfile.gettempdir()) / "synf_probe_page.html"
+    args = [a for a in argv[1:] if a]
+    theme, lang = "scarred_mind", "ru"
+    out: Path | None = None
+    i = 0
+    while i < len(args):
+        if args[i] == "--theme":
+            theme = args[i + 1] if i + 1 < len(args) else theme
+            i += 2
+        elif args[i] == "--lang":
+            lang = args[i + 1] if i + 1 < len(args) else lang
+            i += 2
+        else:
+            out = Path(args[i])
+            i += 1
+    out = out or Path(tempfile.gettempdir()) / "synf_probe_page.html"
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(build_page_with_stub(lang=lang), encoding="utf-8")
-    print(out)
+    out.write_text(build_page_with_stub(theme=theme, lang=lang), encoding="utf-8")
+    print(f"{out} (тема={theme}, язык={lang})")
     return 0
 
 
