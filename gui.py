@@ -11,6 +11,7 @@ import webview
 from core import (
     DEFAULT_SETTINGS,
     Downloader,
+    FtpConfig,
     available_transcoders,
     base_dir,
     build_page,
@@ -228,18 +229,20 @@ class Api:
             self._status = tr(self._lang, "p.start")
             self._progress = {"mode": "indeterminate"}
         self.dl = Downloader(on_log=self._log, on_progress=self._on_progress, lang=self._lang)
+        ftp = FtpConfig(self.settings, self._lang)
         threading.Thread(
             target=lambda: self._run(url, dest, playlist,
                                      bool(cfg.get("group", True)),
                                      cfg.get("subtitles", "en"),
                                      cfg.get("quality", "lossless"),
-                                     cfg.get("transcode", "none") or "none"),
+                                     cfg.get("transcode", "none") or "none",
+                                     ftp),
             daemon=True,
             name="yt-dlp",
         ).start()
         return {}
 
-    def _run(self, url, dest, playlist, group, subtitles, quality, transcode) -> None:
+    def _run(self, url, dest, playlist, group, subtitles, quality, transcode, ftp=None) -> None:
         try:
             self.dl.download(
                 url,
@@ -249,6 +252,7 @@ class Api:
                 subtitles=subtitles,
                 quality=quality,
                 transcode=transcode,
+                ftp=ftp,
             )
         except Exception as exc:  # noqa: BLE001
             self._log("error", str(exc))

@@ -5,6 +5,7 @@ import re
 import shutil
 import subprocess
 import threading
+import time
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -18,6 +19,7 @@ from yt_dlp.postprocessor.ffmpeg import (
     FFmpegPostProcessorError,
 )
 
+from ftp import upload_files
 from i18n import I18N, LANGUAGES, tr
 from paths import ffmpeg_local_dir
 from settings import load_settings
@@ -316,6 +318,76 @@ class QualitySuffixPP(FFmpegPostProcessor):
         return [], info
 
 
+_IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".avif"}
+_TEMP_RE = re.compile(r"(?i)\.(?:tmp|temp|part|ytdl|aria2)(?:\.|$)")
+_FRAGMENT_RE = re.compile(r"(?i)\.f\d+\.")
+
+
+def _keep_file(path, when: float) -> bool:
+    """Готовый результат: файл есть, это не картинка, не мусор и не кусок .fNN."""
+    if not path or not os.path.isfile(path):
+        return False
+    name = os.path.basename(path)
+    if os.path.splitext(name)[1].lower() in _IMAGE_EXT:
+        return False
+    if _TEMP_RE.search(name) or _FRAGMENT_RE.search(name):
+        return False
+    try:
+        return os.path.getmtime(path) >= when
+    except OSError:
+        return False
+
+
+def _result_items(info: dict, dest: str, when: float) -> list[tuple[str, dict]]:
+    """Готовые к выгрузке файлы загрузки как список (путь, meta).
+
+    Берём filepath из info: после склейки и транскодирования там уже итоговый
+    файл (хук yt-dlp смотрит на файл до постпроцессоров). Субтитры добавляем
+    отдельно. Если info ничего не дал (старый yt-dlp, нестандартный PP) —
+    добираем всё, что появилось в папке за время загрузки.
+    """
+    items: list[tuple[str, dict]] = []
+    seen: set[str] = set()
+
+    def meta_for(path, title: str = "", video_id: str = "", playlist: str = "") -> dict:
+        stem, ext = os.path.splitext(os.path.basename(str(path or "")))
+        return {"title": title or stem, "ext": ext, "id": video_id, "playlist": playlist}
+
+    def add(path, meta: dict) -> None:
+        if not _keep_file(path, when):
+            return
+        key = os.path.abspath(path)
+        if key in seen:
+            return
+        seen.add(key)
+        items.append((path, meta))
+
+    def visit(node, playlist_title: str = "") -> None:
+        if not isinstance(node, dict):
+            return
+        if node.get("entries") is not None:
+            title = node.get("title") or playlist_title
+            for entry in node.get("entries") or []:
+                visit(entry, title)
+            return
+        path = node.get("filepath") or node.get("_filename")
+        meta = meta_for(path, node.get("title") or "", str(node.get("id") or ""), playlist_title)
+        add(path, meta)
+        subs = node.get("requested_subtitles") or {}
+        for sub in (subs.values() if isinstance(subs, dict) else subs):
+            if isinstance(sub, dict) and sub.get("filepath"):
+                sub_meta = meta_for(sub["filepath"], meta["title"], meta["id"], playlist_title)
+                add(sub["filepath"], sub_meta)
+
+    visit(info)
+    if not items:
+        for root, _dirs, files in os.walk(dest or "."):
+            for name in files:
+                path = os.path.join(root, name)
+                add(path, meta_for(path))
+    return items
+
+
 class Downloader:
     """Запускает yt-dlp в рабочем потоке и стучится в UI через колбэки."""
 
@@ -512,10 +584,12 @@ class Downloader:
         subtitles: str = "en",
         quality: str = "lossless",
         transcode: str = "none",
+        ftp=None,
     ) -> None:
         os.makedirs(dest, exist_ok=True)
         self._errors = False
         self._finished = []
+        when = time.time()
         opts = self._build_opts(dest, playlist, group, subtitles, quality)
         subs_on = bool(SUBTITLE_OPTIONS.get(subtitles))
         mode = self._t("p.mode.playlist" if playlist else "p.mode.video")
@@ -562,12 +636,33 @@ class Downloader:
             if not self._errors:
                 if short:
                     self._log("info", short)
-                return
+                break
             self._cleanup_orphans()
             if info and info.get("_type") == "playlist":
                 break
+        if info is not None and ftp is not None:
+            self._upload_ftp(ftp, info, dest, when)
         if not self._errors:
             return
         self._log("warning", self._t("p.done_errors"))
         if short and info and info.get("_type") == "playlist":
             self._log("info", short)
+
+    # -- выгрузка на FTP ------------------------------------------------------
+    def _upload_ftp(self, ftp, info: dict, dest: str, when: float) -> None:
+        """Выгружает готовые файлы: per_file — по одному подключению на файл,
+        batch — все файлы одним заходом. Возвращает список удалённых локальных."""
+        if not getattr(ftp, "enabled", False):
+            return
+        items = _result_items(info, dest, when)
+        if not items:
+            return
+        deleted: list[str] = []
+        if ftp.per_file:
+            for number, item in enumerate(items, start=1):
+                deleted.extend(upload_files(ftp, [item], log=self._log,
+                                           index_from=number).get("deleted", []))
+        else:
+            deleted.extend(upload_files(ftp, items, log=self._log).get("deleted", []))
+        if deleted:
+            self._log("info", self._t("ftp.local_gone", n=len(deleted)))

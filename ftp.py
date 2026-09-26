@@ -286,6 +286,17 @@ def delete_local(path, lang: str = "en", log=None) -> bool:
     return True
 
 
+def _unique(remote: str, taken: set[str]) -> str:
+    """Два файла с одинаковым именем не затирают друг друга: stem~2.ext."""
+    if remote not in taken:
+        return remote
+    stem, ext = os.path.splitext(remote)
+    num = 2
+    while f"{stem}~{num}{ext}" in taken:
+        num += 1
+    return f"{stem}~{num}{ext}"
+
+
 def _close(ftp) -> None:
     try:
         ftp.quit()
@@ -344,6 +355,7 @@ def upload_files(cfg: FtpConfig, files, metas=None, log=None, index_from: int = 
         return report
 
     made: set[str] = set()
+    taken: set[str] = set()
 
     def reopen() -> "ftplib.FTP | None":
         """Новое соединение после обрыва + восстановление созданных каталогов."""
@@ -370,6 +382,8 @@ def upload_files(cfg: FtpConfig, files, metas=None, log=None, index_from: int = 
                 continue
             name = render_name(cfg.template, meta, index=number)
             remote = f"{remote_dir}/{name}" if remote_dir else name
+            remote = _unique(remote, taken)
+            taken.add(remote)
             ok, ftp = _upload_with_retry(ftp, path, remote, cfg, log=log, reopen=reopen)
             if ok:
                 report["uploaded"] += 1
