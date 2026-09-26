@@ -27,6 +27,7 @@ from core import (
     load_settings,
     load_themes,
     save_settings,
+    seed_bundled_fonts,
     test_connection,
     themes_embed,
     tr,
@@ -35,6 +36,7 @@ from core import _file_log as file_log
 from core import _fonts_root as fonts_root
 from core import _themes_root as themes_root
 
+seed_bundled_fonts()   # вшитые шрифты в папку шрифтов: первый запуск работает без сети
 load_languages()
 load_fonts()   # раньше load_themes: темы проверяют font/font_mono по списку семейств
 load_themes()

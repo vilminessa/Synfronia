@@ -37,6 +37,7 @@ from fonts import (
     font_vars,
     fonts_embed,
     load_fonts,
+    seed_bundled_fonts,
 )
 from ftp import (
     DEFAULT_TEMPLATE,

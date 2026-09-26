@@ -1,9 +1,12 @@
 r"""Модульные шрифты: %LOCALAPPDATA%\Synfronia\fonts.
 
-В приложение не встроено ни одного шрифта (лицензии): пользователь кладёт
-файлы .ttf/.otf/.woff/.woff2 в папку fonts, а Synfronia читает из них
-семейство, начертание и вес, встраивает нужные как @font-face с data:URI и
-подставляет их в CSS через переменные --font-sans / --font-mono.
+В сборку вшиты три тестовых шрифта (assets/fonts, лицензия OFL 1.1): Inter,
+JetBrains Mono и Noto Sans. При первом запуске они раскладываются в папку
+шрифтов, поэтому свежая установка работает без сети и список шрифтов не
+пустой. Свои файлы пользователь кладёт в ту же папку (или жмёт «Докачать
+шрифты»), а Synfronia читает из них семейство, начертание и вес, встраивает
+нужные как @font-face с data:URI и подставляет их в CSS через переменные
+--font-sans / --font-mono.
 
 • выбор делается в настройках (font_sans / font_mono) или самой темой
   (поля "font" / "font_mono" в theme.json имеют приоритет);
@@ -17,6 +20,7 @@ r"""Модульные шрифты: %LOCALAPPDATA%\Synfronia\fonts.
 import base64
 import os
 import re
+import shutil
 from pathlib import Path
 
 from paths import _file_log, base_dir
@@ -203,6 +207,170 @@ def _face_from_name(stem: str) -> tuple[str, int, bool]:
         left.append(part)
     family = _clean_family(" ".join(left)) or _clean_family(stem) or "font"
     return family, weight, italic
+
+
+# -- вшитые шрифты (assets/fonts) ---------------------------------------------
+# Копии лежат в репозитории и попадают в сборку (Synfronia.spec -> datas),
+# поэтому первый запуск не требует сети. Кнопка «Докачать шрифты» тянет те же
+# файлы из сети — см. TEST_FONTS.
+BUNDLED_FONTS = ("Inter.ttf", "JetBrainsMono.ttf", "NotoSans.ttf")
+BUNDLED_LICENSES = ("OFL-Inter.txt", "OFL-JetBrainsMono.txt", "OFL-NotoSans.txt")
+_RAW = "https://raw.githubusercontent.com/google/fonts/main/ofl"
+# Источник каждого файла: имена совпадают с BUNDLED_FONTS, чтобы «докачать»
+# можно было ровно те же бинарники, что лежат в сборке.
+TEST_FONTS = {
+    "Inter.ttf": {
+        "url": f"{_RAW}/inter/Inter%5Bopsz%2Cwght%5D.ttf",
+        "family": "Inter",
+        "bytes": 876576,
+    },
+    "JetBrainsMono.ttf": {
+        "url": f"{_RAW}/jetbrainsmono/JetBrainsMono%5Bwght%5D.ttf",
+        "family": "JetBrains Mono",
+        "bytes": 187208,
+    },
+    "NotoSans.ttf": {
+        "url": f"{_RAW}/notosans/NotoSans%5Bwdth%2Cwght%5D.ttf",
+        "family": "Noto Sans",
+        "bytes": 2049096,
+    },
+}
+_FONTS_README = """Synfronia - тестовые шрифты
+=========================
+
+{list}
+Все три - переменные шрифты под SIL Open Font License 1.1 (полные тексты
+лицензий лежат рядом в файлах OFL-*.txt). Приложение положило их сюда при
+первом запуске, чтобы список шрифтов не был пустым; файлы можно свободно
+удалить и положить свои .ttf/.otf/.woff/.woff2.
+
+Источники (неизменённые файлы upstream):
+{urls}
+
+Папка: {folder}
+"""
+
+
+def _bundle_dir() -> Path:
+    r"""Папка со вшитыми шрифтами: assets/fonts (рядом с исходниками или в _MEIPASS)."""
+    here = Path(__file__).resolve().parent
+    for root in (here, base_dir()):
+        path = root / "assets" / "fonts"
+        if path.is_dir():
+            return path
+    return here / "assets" / "fonts"
+
+
+def _check_font(path: Path) -> str:
+    """Проверяет файл шрифта и возвращает семейство ('' - файл не годится)."""
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return ""
+    if size > MAX_FONT_BYTES:
+        _file_log("warning", f"font {path.name}: {size} байт - пропущен (слишком большой)")
+        return ""
+    if path.suffix.lower() not in (".ttf", ".otf"):
+        return _clean_family(path.stem)
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return ""
+    names = _names(data)
+    return _clean_family(names.get(16) or names.get(1))
+
+
+def _install_font(src: Path, dest: Path, min_bytes: int = 1024) -> bool:
+    """Копирует шрифт на место через временный файл (атомарно).
+
+    Сначала проверяем, что это читаемый sfnt нужного размера: битый файл в
+    папке шрифтов молча ломает @font-face для всей страницы.
+    """
+    try:
+        if src.stat().st_size < min_bytes:
+            _file_log("warning", f"font {src.name}: слишком мал, пропущен")
+            return False
+    except OSError:
+        return False
+    if not _check_font(src):
+        _file_log("warning", f"font {src.name}: нечитаемый файл, пропущен")
+        return False
+    tmp = dest.with_name(f".part-{dest.name}")
+    try:
+        shutil.copyfile(src, tmp)
+        os.replace(tmp, dest)
+    except OSError as exc:
+        _file_log("warning", f"font {dest.name}: не удалось сохранить ({exc})")
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        return False
+    return True
+
+
+def seed_bundled_fonts(on_log=None) -> dict:
+    """Раскладывает вшитые шрифты в папку шрифтов (чего там ещё нет).
+
+    Работает без сети. Уже существующие файлы не трогаем: папка шрифтов
+    принадлежит пользователю, и его шрифты приоритетнее.
+
+    Возвращает {"added": [...], "skipped": [...], "failed": [...]}.
+    """
+    report = on_log or (lambda level, msg: _file_log(level, msg))
+    result = {"added": [], "skipped": [], "failed": []}
+    src_dir = _bundle_dir()
+    if not src_dir.is_dir():
+        result["skipped"] = list(BUNDLED_FONTS)
+        report("info", "fonts: вшитые шрифты не найдены (assets/fonts), пропуск")
+        return result
+    root = _fonts_root()
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        report("warning", f"fonts: не удалось создать папку шрифтов ({exc})")
+        result["failed"] = list(BUNDLED_FONTS)
+        return result
+    for name in BUNDLED_FONTS:
+        dest = root / name
+        if dest.exists():
+            result["skipped"].append(name)
+            continue
+        src = src_dir / name
+        if src.is_file() and _install_font(src, dest):
+            result["added"].append(name)
+        else:
+            result["failed"].append(name)
+    for name in BUNDLED_LICENSES:
+        src, dest = src_dir / name, root / name
+        if src.is_file() and not dest.exists():
+            try:
+                shutil.copyfile(src, dest)
+            except OSError:
+                pass
+    if result["added"]:
+        _write_fonts_readme(root)
+        report("info", f"fonts: добавлено тестовых шрифтов - {', '.join(result['added'])}")
+    if result["failed"]:
+        report("warning", f"fonts: не удалось добавить - {', '.join(result['failed'])}")
+    return result
+
+
+def _write_fonts_readme(root: Path) -> None:
+    """README в папке шрифтов: что внутри и где взято (OFL требует атрибуции)."""
+    lines = []
+    for name in BUNDLED_FONTS:
+        meta = TEST_FONTS.get(name, {})
+        lines.append(f"  {name:<18} {meta.get('family', name)}")
+        if meta.get("url"):
+            lines.append(f"  {'':<18} {meta['url']}")
+    text = _FONTS_README.format(list="\n".join(lines) + "\n",
+                                urls="  https://github.com/google/fonts",
+                                folder=root)
+    try:
+        (root / "README.txt").write_text(text, encoding="utf-8")
+    except OSError:
+        pass
 
 
 # -- загрузка папки ----------------------------------------------------------
