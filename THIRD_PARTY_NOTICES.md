@@ -20,6 +20,9 @@ requirements of each license.
 | cryptography | 50.0.1 (bundled) | Apache-2.0 OR BSD-3-Clause | https://github.com/pyca/cryptography |
 | CPython | 3.14.2 (bundled) | PSF License Agreement | https://www.python.org/ |
 | ffmpeg | any recent build (external, NOT bundled) | GPL-2.0-or-later | https://ffmpeg.org/ |
+| [Inter](https://rsms.me/inter/) | variable (bundled, `assets/fonts`) | OFL-1.1 | https://github.com/google/fonts/tree/main/ofl/inter |
+| [JetBrains Mono](https://www.jetbrains.com/lp/mono/) | variable (bundled, `assets/fonts`) | OFL-1.1 | https://github.com/google/fonts/tree/main/ofl/jetbrainsmono |
+| [Noto Sans](https://fonts.google.com/noto/specimen/Noto+Sans) | variable (bundled, `assets/fonts`) | OFL-1.1 | https://github.com/google/fonts/tree/main/ofl/notosans |
 
 ## yt-dlp — Unlicense
 
@@ -264,6 +267,32 @@ manually (PATH / winget). ffmpeg is distributed under the GNU
 GPL (or LGPL depending on the specific build). The build used for
 testing was the GPL build from https://www.gyan.dev/ffmpeg/builds/.
 Full text: https://www.gnu.org/licenses/gpl-3.0.html
+
+## Bundled test fonts — SIL Open Font License 1.1
+
+Three variable fonts are bundled in `assets/fonts` and are laid out into
+`%LOCALAPPDATA%\Synfronia\fonts` on first launch, so a clean install works
+offline and the font list is never empty. The "Докачать шрифты" button
+re-downloads the same files from the sources below.
+
+| File | Family | Coverage | Upstream file |
+|---|---|---|---|
+| `Inter.ttf` | Inter | Latin, Greek, Cyrillic | `ofl/inter/Inter[opsz,wght].ttf` |
+| `JetBrainsMono.ttf` | JetBrains Mono | Latin, Greek, Cyrillic | `ofl/jetbrainsmono/JetBrainsMono[wght].ttf` |
+| `NotoSans.ttf` | Noto Sans | Latin, Greek, Cyrillic | `ofl/notosans/NotoSans[wdth,wght].ttf` |
+
+Sources: https://github.com/google/fonts (files are unmodified upstream
+binaries). The full license texts are shipped next to the fonts as
+`OFL-Inter.txt`, `OFL-JetBrainsMono.txt`, `OFL-NotoSans.txt` and are copied
+into the user's fonts folder on first launch. Copyright of each font stays
+with its upstream authors:
+
+- Inter — Copyright (c) 2016 The Inter Project Authors (https://github.com/rsms/inter)
+- JetBrains Mono — Copyright (c) 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)
+- Noto Sans — Copyright (c) 2012 Google Inc. (https://github.com/notofonts/latin-greek-cyrillic)
+
+CJK glyphs (Japanese, Chinese, Korean) are not covered by these files; the
+app falls back to the system font for those scripts.
 
 ## CSS / visual references (rain & liquid-glass effects)
 
