@@ -9,8 +9,11 @@ from core import (
     SUBTITLE_OPTIONS,
     TRANSCODERS,
     Downloader,
+    FtpConfig,
     default_download_dir,
     is_playlist,
+    load_settings,
+    tr,
 )
 
 
@@ -25,12 +28,21 @@ def main() -> int:
     parser.add_argument("--transcode", choices=TRANSCODERS, default="none",
                         help="перекодировка: none (нет), libx265, nvenc, amf, qsv")
     parser.add_argument("--lang", choices=LANGUAGES, default="en")
+    parser.add_argument("--no-ftp", action="store_true",
+                        help="не выгружать на FTP, даже если он включён в настройках")
     args = parser.parse_args()
 
     playlist = args.playlist or is_playlist(args.url)
 
     def _log(level: str, msg: str) -> None:
         print(f"[{level}] {msg}")
+
+    settings = load_settings()
+    ftp = None
+    if not args.no_ftp:
+        ftp = FtpConfig(settings, args.lang)
+        if not ftp.enabled and settings.get("ftp_active"):
+            print(f"[warning] {tr(args.lang, 'ftp.no_host')}")
 
     dl = Downloader(on_log=_log, lang=args.lang)
     dl.download(
@@ -41,6 +53,7 @@ def main() -> int:
         subtitles=args.subtitles,
         quality=args.quality,
         transcode=args.transcode,
+        ftp=ftp,
     )
     return 0 if not dl.stopped else 1
 

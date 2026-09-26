@@ -187,11 +187,12 @@ python gui.py
 ### CLI
 
 ```bat
-python download.py <URL> [--dest C:\videos] [--subtitles ru] [--quality 720] [--transcode nvenc] [--lang en]
+python download.py <URL> [--dest C:\videos] [--subtitles ru] [--quality 720] [--transcode nvenc] [--lang en] [--no-ftp]
 ```
 
 Те же аргументы принимает `python core.py <URL> ...` — это тот же движок,
-если не нужен web-интерфейс.
+если не нужен web-интерфейс. Выгрузка на FTP берётся из настроек;
+`--no-ftp` её отключает для одного запуска.
 
 ### Самопроверка (для отладки сборки)
 
