@@ -100,6 +100,10 @@
   }
   .range-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
   .range-row label { display: inline-block; margin: 0; min-width: 0; font-size: 13px; white-space: nowrap; }
+  .range-row input[type=text], .range-row input[type=password], .range-row select { flex: 1 1 0; min-width: 0; }
+  #ftp-fields[hidden] { display: none; }
+  #ftp-test-note.ok { color: var(--accent); opacity: 1; }
+  #ftp-test-note.bad { color: var(--warn); opacity: 1; }
   .pb-wrap { margin-top: 14px; height: 10px; border-radius: var(--radius-s); background: var(--surface); overflow: hidden; }
   #pb { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
   #pb.indeterminate { width: 30%; animation: slide 1.2s infinite; }

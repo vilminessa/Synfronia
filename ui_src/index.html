@@ -130,6 +130,7 @@ __APP_CSS__
       <div class="tabs">
         <button type="button" class="tab active" id="tab-ui" data-i18n="sheet.tab.ui">Интерфейс</button>
         <button type="button" class="tab" id="tab-dl" data-i18n="sheet.tab.dl">Загрузчик</button>
+        <button type="button" class="tab" id="tab-ftp" data-i18n="sheet.tab.ftp">FTP</button>
       </div>
       <div id="panel-ui">
         <label for="lang" data-i18n="sheet.lang.label">Язык:</label>
@@ -175,6 +176,56 @@ __APP_CSS__
             <label for="socket_timeout" data-i18n="sheet.timeout.label">Таймаут (сек.):</label>
             <input type="range" id="socket_timeout-range" min="1" max="120" step="1">
             <input type="number" id="socket_timeout" min="1" max="120" step="1">
+          </div>
+        </div>
+      </div>
+      <div id="panel-ftp" hidden>
+        <div class="check"><input type="checkbox" id="ftp-active"><span data-i18n="sheet.ftp.active">Выгружать готовые файлы на FTP</span></div>
+        <div class="range-row">
+          <label for="ftp-mode" data-i18n="sheet.ftp.mode">Режим:</label>
+          <select id="ftp-mode">
+            <option value="batch" data-i18n="sheet.ftp.mode.batch">в конце, одним заходом</option>
+            <option value="per_file" data-i18n="sheet.ftp.mode.per_file">сразу после каждого файла</option>
+          </select>
+        </div>
+        <div id="ftp-fields">
+          <div class="range-row">
+            <label for="ftp-host" data-i18n="sheet.ftp.host">Сервер:</label>
+            <input type="text" id="ftp-host" placeholder="ftp.example.org" spellcheck="false">
+          </div>
+          <div class="range-row">
+            <label for="ftp-port" data-i18n="sheet.ftp.port">Порт:</label>
+            <input type="number" id="ftp-port" min="1" max="65535" step="1">
+          </div>
+          <div class="range-row">
+            <label for="ftp-user" data-i18n="sheet.ftp.user">Логин:</label>
+            <input type="text" id="ftp-user" spellcheck="false">
+          </div>
+          <div class="range-row">
+            <label for="ftp-password" data-i18n="sheet.ftp.password">Пароль:</label>
+            <input type="password" id="ftp-password" autocomplete="off" spellcheck="false">
+          </div>
+          <div class="check"><input type="checkbox" id="ftp-tls"><span data-i18n="sheet.ftp.tls">FTPS (шифрование)</span></div>
+          <div class="check"><input type="checkbox" id="ftp-tls-verify"><span data-i18n="sheet.ftp.tls_verify">Проверять сертификат сервера</span></div>
+          <div class="check"><input type="checkbox" id="ftp-pasv"><span data-i18n="sheet.ftp.pasv">Пассивный режим (PASV)</span></div>
+          <div class="check"><input type="checkbox" id="ftp-delete-local"><span data-i18n="sheet.ftp.delete_local">Удалять локальный файл после выгрузки</span></div>
+          <label for="ftp-dir" data-i18n="sheet.ftp.dir">Папка на сервере:</label>
+          <input type="text" id="ftp-dir" placeholder="{playlist}/{date}" spellcheck="false">
+          <div id="ftp-dir-note" class="note"></div>
+          <label for="ftp-template" data-i18n="sheet.ftp.template">Имя файла:</label>
+          <input type="text" id="ftp-template" placeholder="{index:02d} - {title}{ext}" spellcheck="false">
+          <div class="settings-box">
+            <div class="settings-box-title" data-i18n="sheet.ftp.conn">Подключение</div>
+            <div class="range-row">
+              <label for="ftp-timeout" data-i18n="sheet.ftp.timeout">Таймаут (сек.):</label>
+              <input type="number" id="ftp-timeout" min="5" max="3600" step="5">
+              <label for="ftp-retries" data-i18n="sheet.ftp.retries">Повторы:</label>
+              <input type="number" id="ftp-retries" min="1" max="10" step="1">
+            </div>
+            <div class="range-row">
+              <button type="button" id="ftp-test" data-i18n="sheet.ftp.test">Проверить подключение</button>
+              <span id="ftp-test-note" class="note"></span>
+            </div>
           </div>
         </div>
       </div>

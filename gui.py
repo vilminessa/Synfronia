@@ -25,6 +25,7 @@ from core import (
     load_settings,
     load_themes,
     save_settings,
+    test_connection,
     themes_embed,
     tr,
 )
@@ -265,6 +266,15 @@ class Api:
                     else tr(self._lang, "p.ready")
                 )
                 self._progress = {"mode": "determinate", "value": 100.0}
+
+    def test_ftp(self) -> dict:
+        """Проверка настроек FTP: подключается и сразу отключается."""
+        cfg = FtpConfig(self.settings, self._lang)
+        if not cfg.host:
+            return {"error": tr(self._lang, "ftp.no_host")}
+        if test_connection(cfg, log=self._log):
+            return {"ok": True, "host": cfg.describe()}
+        return {"error": tr(self._lang, "sheet.ftp.test_fail")}
 
     def stop_download(self) -> None:
         if self.dl:

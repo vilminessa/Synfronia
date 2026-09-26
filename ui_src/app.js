@@ -447,6 +447,76 @@
     scheduleTick(200);
   }
 
+  // -- вкладка FTP -----------------------------------------------------------
+  // Поля FTP сохраняются по событию change (потеря фокуса/Enter), чтобы не
+  // писать в settings.json на каждый символ. Пароль хранится как есть.
+  var FTP_DEFAULTS = { ftp_port: 21, ftp_timeout: 60, ftp_retries: 3 };
+  var FTP_FIELDS = [
+    ["ftp-active", "ftp_active", "bool"],
+    ["ftp-mode", "ftp_mode", "text"],
+    ["ftp-host", "ftp_host", "text"],
+    ["ftp-port", "ftp_port", "int"],
+    ["ftp-user", "ftp_user", "text"],
+    ["ftp-password", "ftp_password", "text"],
+    ["ftp-tls", "ftp_tls", "bool"],
+    ["ftp-tls-verify", "ftp_tls_verify", "bool"],
+    ["ftp-pasv", "ftp_pasv", "bool"],
+    ["ftp-delete-local", "ftp_delete_local", "bool"],
+    ["ftp-dir", "ftp_dir", "text"],
+    ["ftp-template", "ftp_template", "text"],
+    ["ftp-timeout", "ftp_timeout", "int"],
+    ["ftp-retries", "ftp_retries", "int"],
+  ];
+
+  function updateFtpVisibility() {
+    var on = document.getElementById("ftp-active").checked;
+    document.getElementById("ftp-fields").hidden = !on;
+  }
+
+  function updateFtpDirNote() {
+    var dir = document.getElementById("ftp-dir").value.trim();
+    document.getElementById("ftp-dir-note").textContent = dir
+      ? t("sheet.ftp.dir.ok")
+      : t("sheet.ftp.dir.empty");
+  }
+
+  function initFtp(settings) {
+    FTP_FIELDS.forEach(function(spec) {
+      var el = document.getElementById(spec[0]);
+      var value = settings[spec[1]];
+      if (spec[2] === "bool") el.checked = value !== false && !!value;
+      else if (spec[2] === "int") el.value = value || FTP_DEFAULTS[spec[1]] || "";
+      else el.value = value || el.placeholder || "";
+    });
+    updateFtpVisibility();
+    updateFtpDirNote();
+    FTP_FIELDS.forEach(function(spec) {
+      var el = document.getElementById(spec[0]);
+      var event = (spec[2] === "bool" || spec[2] === "int") ? "change" : "change";
+      el.addEventListener(event, function() {
+        var value = spec[2] === "bool" ? this.checked
+                  : spec[2] === "int" ? parseInt(this.value, 10) || 0
+                  : this.value.trim();
+        if (spec[1] === "ftp_active") updateFtpVisibility();
+        if (spec[1] === "ftp_dir") updateFtpDirNote();
+        pywebview.api.save_setting(spec[1], value);
+      });
+    });
+    document.getElementById("ftp-test").addEventListener("click", async function() {
+      var note = document.getElementById("ftp-test-note");
+      note.className = "note";
+      note.textContent = t("sheet.ftp.testing");
+      var res = await pywebview.api.test_ftp();
+      if (res && res.ok) {
+        note.className = "note ok";
+        note.textContent = t("sheet.ftp.test_ok").replace("{host}", res.host);
+      } else {
+        note.className = "note bad";
+        note.textContent = (res && res.error) || t("sheet.ftp.test_fail");
+      }
+    });
+  }
+
   function collect() {
     return {
       url: document.getElementById(activeTab === "video" ? "url-video" : "url-playlist").value.trim(),
@@ -581,6 +651,7 @@
     updateThemeMeta();
       pywebview.api.save_setting("language", this.value);
     });
+    initFtp(initData.settings);
     document.getElementById("download").addEventListener("click", async function() {
       var cfg = collect();
       if (!cfg.url) {
@@ -628,11 +699,10 @@
       document.getElementById("settings-sheet").hidden = true;
     }
     function switchSettingsTab(tab) {
-      var isUi = tab === "ui";
-      document.getElementById("panel-ui").hidden = !isUi;
-      document.getElementById("panel-dl").hidden = isUi;
-      document.getElementById("tab-ui").classList.toggle("active", isUi);
-      document.getElementById("tab-dl").classList.toggle("active", !isUi);
+      ["ui", "dl", "ftp"].forEach(function(name) {
+        document.getElementById("panel-" + name).hidden = name !== tab;
+        document.getElementById("tab-" + name).classList.toggle("active", name === tab);
+      });
     }
     document.getElementById("settings-btn").addEventListener("click", openSettings);
     document.getElementById("settings-close").addEventListener("click", closeSettings);
@@ -643,6 +713,7 @@
     document.getElementById("settings-overlay").addEventListener("click", closeSettings);
     document.getElementById("tab-ui").addEventListener("click", function() { switchSettingsTab("ui"); });
     document.getElementById("tab-dl").addEventListener("click", function() { switchSettingsTab("dl"); });
+    document.getElementById("tab-ftp").addEventListener("click", function() { switchSettingsTab("ftp"); });
     document.addEventListener("keydown", function(ev) {
       if (ev.key === "Escape") closeSettings();
     });

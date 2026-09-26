@@ -46,6 +46,7 @@ from ftp import (
     clean_name,
     render_name,
     render_path,
+    test_connection,
     upload_files,
 )
 from i18n import I18N, LANGUAGES, SELF_NAMES, _lang_root, load_languages, tr

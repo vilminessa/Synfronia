@@ -297,6 +297,19 @@ def _unique(remote: str, taken: set[str]) -> str:
     return f"{stem}~{num}{ext}"
 
 
+def test_connection(cfg: FtpConfig, log=None) -> bool:
+    """Проверка настроек: подключается и сразу отключается. False при ошибке."""
+    try:
+        _close(connect(cfg, log=log))
+    except (FtpError, ftplib.Error, OSError, ssl.SSLError) as exc:
+        if log:
+            log("error", _t(cfg.lang, "ftp.error", exc=exc))
+        return False
+    if log:
+        log("info", _t(cfg.lang, "ftp.test_ok", host=cfg.describe()))
+    return True
+
+
 def _close(ftp) -> None:
     try:
         ftp.quit()
