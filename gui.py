@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 import threading
+import time
 from collections import deque
 
 import webview
@@ -58,6 +59,30 @@ class Api:
         self._busy = False
         self._progress = {"mode": "determinate", "value": 0.0}
         self._ffmpeg = {"downloading": False, "extracting": False, "pct": 0.0, "ok": False, "error": None}
+        self._page_gen = 0
+
+    # -- подмена страницы ----------------------------------------------------
+    def _swap_page(self, html: str, delay: float = 0.35) -> None:
+        """Заменяет страницу после того, как значение метода ушло в JS.
+
+        pywebview после каждого вызова API дёргает evaluate_js, чтобы отдать
+        результат промису из window.pywebview._returnValuesCallbacks. Если
+        перезагрузить страницу до возврата, колбэк не найдётся и pywebview
+        напишет в консоль JavascriptException. Поэтому подмену откладываем, а
+        поколение гасит устаревшую задержку при быстрых повторных вызовах.
+        """
+        self._page_gen += 1
+        gen = self._page_gen
+
+        def worker() -> None:
+            time.sleep(delay)
+            if gen != self._page_gen:
+                return
+            win = webview.windows[0] if webview.windows else None
+            if win:
+                win.load_html(html)
+
+        threading.Thread(target=worker, daemon=True, name="page-swap").start()
 
     # -- состояние (poll из JS) ----------------------------------------------
     def poll(self, since: int = 0) -> dict:
@@ -150,9 +175,7 @@ class Api:
             save_settings(self.settings)
         except OSError as exc:
             return f"error: {exc}"
-        win = webview.windows[0] if webview.windows else None
-        if win:
-            win.load_html(build_page(theme_id))
+        self._swap_page(build_page(theme_id))
         return "ok"
 
     def reload_themes(self) -> dict:
@@ -178,22 +201,18 @@ class Api:
             save_settings(self.settings)
         except OSError as exc:
             return f"error: {exc}"
-        win = webview.windows[0] if webview.windows else None
-        if win:
-            win.load_html(build_page(self.settings.get("theme", "scarred_mind"),
-                                     fonts={"sans": self.settings.get("font_sans") or "",
-                                            "mono": self.settings.get("font_mono") or ""}))
+        self._swap_page(build_page(self.settings.get("theme", "scarred_mind"),
+                                   fonts={"sans": self.settings.get("font_sans") or "",
+                                          "mono": self.settings.get("font_mono") or ""}))
         return "ok"
 
     def reload_fonts(self) -> dict:
         """Пересканирует папку шрифтов и пересобирает страницу с новыми @font-face."""
         load_fonts()
         info = fonts_embed()
-        win = webview.windows[0] if webview.windows else None
-        if win:
-            win.load_html(build_page(self.settings.get("theme", "scarred_mind"),
-                                     fonts={"sans": self.settings.get("font_sans") or "",
-                                            "mono": self.settings.get("font_mono") or ""}))
+        self._swap_page(build_page(self.settings.get("theme", "scarred_mind"),
+                                   fonts={"sans": self.settings.get("font_sans") or "",
+                                          "mono": self.settings.get("font_mono") or ""}))
         return info
 
     def open_fonts_folder(self) -> None:
