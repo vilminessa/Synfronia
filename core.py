@@ -6,6 +6,7 @@
   i18n.py       — переводы и языковые файлы;
   themes.py     — модульные темы и сборка страницы;
   fonts.py      — модульные шрифты из папки fonts (@font-face, data:URI);
+  ftp.py        — выгрузка готовых файлов на FTP/FTPS;
   downloader.py — загрузка через yt-dlp, постпроцессоры, ffmpeg.
 
 Этот файл только реэкспортирует имена, чтобы `from core import ...`
@@ -36,6 +37,16 @@ from fonts import (
     font_vars,
     fonts_embed,
     load_fonts,
+)
+from ftp import (
+    DEFAULT_TEMPLATE,
+    TEMPLATE_FIELDS,
+    FtpConfig,
+    FtpError,
+    clean_name,
+    render_name,
+    render_path,
+    upload_files,
 )
 from i18n import I18N, LANGUAGES, SELF_NAMES, _lang_root, load_languages, tr
 from paths import _file_log, base_dir, ffmpeg_local_dir, logs_dir

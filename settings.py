@@ -19,6 +19,21 @@ DEFAULT_SETTINGS = {
     "language": "en",
     "font_sans": "",          # шрифт интерфейса ("" = системный)
     "font_mono": "",          # моноширинный шрифт ("" = системный)
+    # выгрузка на FTP/FTPS (см. ftp.py)
+    "ftp_active": False,
+    "ftp_mode": "batch",      # batch / per_file
+    "ftp_host": "",
+    "ftp_port": 21,
+    "ftp_user": "anonymous",
+    "ftp_password": "",       # хранится в settings.json как есть
+    "ftp_tls": False,         # FTPS (явный TLS)
+    "ftp_tls_verify": True,
+    "ftp_pasv": True,         # пассивный режим
+    "ftp_dir": "",
+    "ftp_template": "{title}{ext}",
+    "ftp_delete_local": False,
+    "ftp_timeout": 60,
+    "ftp_retries": 3,
 }
 
 

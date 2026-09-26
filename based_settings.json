@@ -6,5 +6,21 @@
   "socket_timeout": 20,
   "transcode": "none",
   "group_playlist": true,
-  "language": "en"
+  "language": "en",
+  "font_sans": "",
+  "font_mono": "",
+  "ftp_active": false,
+  "ftp_mode": "batch",
+  "ftp_host": "",
+  "ftp_port": 21,
+  "ftp_user": "anonymous",
+  "ftp_password": "",
+  "ftp_tls": false,
+  "ftp_tls_verify": true,
+  "ftp_pasv": true,
+  "ftp_dir": "",
+  "ftp_template": "{title}{ext}",
+  "ftp_delete_local": false,
+  "ftp_timeout": 60,
+  "ftp_retries": 3
 }
