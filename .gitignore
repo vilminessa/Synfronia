@@ -16,3 +16,8 @@ Synfronia/
 settings.json
 selftest.log
 out*.txt
+
+# Временные хелперы и артефакты правок (opencode)
+_*.py
+*.bak_opencode
+result_log.txt

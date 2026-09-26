@@ -97,6 +97,18 @@ THEMES = {
         "accent": "#B89968",
         **_THEME_DEFAULTS,
     },
+    "liquid_glass": {
+        "label": "Liquid Glass",
+        "bg": "#060a14",
+        "surface": "#101b2f",
+        "widget": "#16223d",
+        "text": "#e9f1ff",
+        "accent": "#69c1ff",
+        "opacity": 1.0,
+        "radius_s": 12,
+        "radius_m": 18,
+        "radius_l": 26,
+    },
 }
 
 
@@ -127,6 +139,399 @@ _BASE_CSS = (
     "/* Дополнительный CSS темы. Ресурсы темы кладите рядом и подключайте "
     "относительно: url(\"bg.png\"), url(\"anim.gif\"). */\n"
 )
+
+
+# Liquid Glass: CSS встроенной темы. Лежит здесь, а не в папке тем,
+# чтобы новая установка сразу получила тему; _SEED_CSS раскладывает его
+# в %LOCALAPPDATA%\Synfronia\themes\liquid_glass\custom.css (правки
+# пользователя не перезаписываются). Идея и рецепт — MIT, FreeFrontend:
+#   · Liquid Glass Distortion Card (igcorreia, 2026) — SVG-дисплейсмент;
+#   · Liquid Toggle Switch (jh3y, 2025) — «капсульный» переключатель.
+_LIQUID_GLASS_FILTER = (
+    "data:image/svg+xml;base64,"
+    "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxmaWx0ZXIgaWQ9"
+    "ImxnIiB4PSItMzAlIiB5PSItMzAlIiB3aWR0aD0iMTYwJSIgaGVpZ2h0PSIxNjAlIiBj"
+    "b2xvci1pbnRlcnBvbGF0aW9uLWZpbHRlcnM9InNSR0IiPjxmZVR1cmJ1bGVuY2UgdHlw"
+    "ZT0iZnJhY3RhbE5vaXNlIiBiYXNlRnJlcXVlbmN5PSIwLjAxMiAwLjA4IiBudW1PY3Rh"
+    "dmVzPSIyIiBzZWVkPSI0IiByZXN1bHQ9IndhcnAiLz48ZmVEaXNwbGFjZW1lbnRNYXAg"
+    "aW49IlNvdXJjZUdyYXBoaWMiIGluMj0id2FycCIgc2NhbGU9IjI2IiB4Q2hhbm5lbFNl"
+    "bGVjdG9yPSJSIiB5Q2hhbm5lbFNlbGVjdG9yPSJHIiByZXN1bHQ9ImRpc3AiLz48ZmVH"
+    "YXVzc2lhbkJsdXIgaW49ImRpc3AiIHN0ZERldmlhdGlvbj0iNyIvPjwvZmlsdGVyPjwv"
+    "c3ZnPg=="
+)
+
+_LIQUID_GLASS_CSS = r"""/*
+   Liquid Glass — «жидкое стекло» поверх анимированной «воды».
+
+   Вдохновлено подборкой FreeFrontend «CSS Liquid Glass» (примеры MIT):
+   · Liquid Glass Distortion Card (igcorreia, 2026) — SVG-дисплейсмент
+     фона и многослойные inset-блики на кромке стекла;
+   · Liquid Toggle Switch (jh3y, 2025) — капсульные «жидкие» переключатели;
+   · Liquid Glass Effect (cubiq, 2025) — турбулентность и движение за стеклом.
+*/
+
+:root {
+  --lg-tint: rgba(16, 30, 58, .46);
+  --lg-tint-deep: rgba(10, 20, 44, .52);
+  --lg-line: rgba(255, 255, 255, .14);
+  --lg-line-strong: rgba(255, 255, 255, .24);
+  --lg-shadow: 0 10px 30px rgba(0, 0, 0, .35);
+  --lg-inset: inset 0 1px 0 rgba(255, 255, 255, .16), inset 0 -10px 22px rgba(0, 0, 0, .22);
+}
+
+/* --- Liquid Glass: «жидкое стекло», тёмное окно. Дождь удалён в v1.2.6:
+   GPU-слой капель рендерился с «провисаниями» и швами на этом движке,
+   поэтому Слой-Дождь вырезан полностью. Осталась чистая стеклянная тема. */
+html, body { background-color: #05080f; }
+html { background-color: #05080f; }
+body { background: transparent; background-attachment: fixed; }
+
+/* --- фоновая сцена темы: Дождь ⇄ Огонь. Только обычный CSS, БЕЗ GPU-слоёв
+   (нет translate3d / will-change / canvas): анимация — исключительно
+   background-position по бесшовным целочисленным тайлам, поэтому на любом
+   планшете/телефоне считается дёшево и без «провисаний».
+   Режим: body[data-bg="rain"] (по умолчанию) или body[data-bg="fire"].
+   «Разгорание» огня крутит ползунок → CSS-переменная --lg-heat (0..1). */
+body[data-bg="rain"]::before,
+body[data-bg="fire"]::before,
+body[data-bg="fire"]::after {
+  content: "";
+  position: fixed;
+  top: -10%; bottom: -10%; left: -12%; right: -12%;
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* --- Дождь за стеклом (референс freefrontend aickle/XKjMZY «Rain»,
+       техника переписана самостоятельно): наклонные ленты linear-gradient,
+       тайл 94x1220 — перевод ровно на высоту тайла даёт бесшовный цикл. --- */
+body[data-bg="rain"]::before {
+  background-image:
+    linear-gradient(118deg,
+      rgba(190, 220, 255, 0) 0%, rgba(190, 220, 255, .10) 3.2%, rgba(190, 220, 255, .04) 4.6%, rgba(190, 220, 255, 0) 6%,
+      rgba(190, 220, 255, 0) 49%, rgba(190, 220, 255, .085) 52.2%, rgba(190, 220, 255, .035) 53.6%, rgba(190, 220, 255, 0) 55%);
+  background-size: 94px 1220px;
+  background-repeat: repeat;
+  background-position: 0 0;
+  animation: lg-rain-shift 3.4s linear infinite;
+  opacity: .5;
+}
+@keyframes lg-rain-shift {
+  from { background-position: 0 0; }
+  to   { background-position: 0 -1220px; }   /* бесшовно: ровно одна высота тайла */
+}
+
+/* --- Огонь (референс freefrontend freedommayer/vYRmarM «Pixel Fire»,
+       техника переписана самостоятельно): языки пламени radial-gradient +
+       бесшовный тайл искр; разгорание масштабирует прозрачность. --- */
+body[data-bg="fire"]::before {
+  background-color: #1a0c04;
+  background-image:
+    radial-gradient(52% 78% at 22% 110%, rgba(255, 190, 40, .60) 0%, rgba(255, 110, 20, .38) 42%, rgba(255, 70, 10, 0) 78%),
+    radial-gradient(58% 84% at 64% 112%, rgba(255, 205, 46, .55) 0%, rgba(255, 130, 24, .44) 46%, rgba(255, 80, 12, 0) 82%),
+    radial-gradient(42% 62% at 88% 106%, rgba(255, 176, 34, .46) 0%, rgba(255, 96, 16, .32) 52%, rgba(200, 40, 4, 0) 78%);
+  background-size: 340px 620px, 400px 690px, 300px 540px;
+  background-repeat: repeat;
+  background-position: 0 0;
+  animation: lg-fire-linger 5.4s ease-in-out infinite;
+  opacity: calc(.55 + var(--lg-heat, .62) * .45);
+}
+@keyframes lg-fire-linger {
+  0%, 100% { background-position: 0 0, 0 0, 0 0; }
+  50%      { background-position: -14px -28px, 10px -18px, -6px 0; }
+}
+body[data-bg="fire"]::after {
+  background-image:
+    radial-gradient(6px 26px at 22px 26px, rgba(255, 235, 140, .70) 0 12%, rgba(255, 160, 40, 0) 55%),
+    radial-gradient(4px 16px at 68px 50px, rgba(255, 210, 90, .5) 0 10%, rgba(255, 140, 30, 0) 55%);
+  background-size: 90px 90px;      /* бесшовный тайл искр */
+  background-repeat: repeat;
+  background-position: 0 0;
+  animation: lg-ember-rise 4.2s linear infinite;
+  opacity: calc(.42 + var(--lg-heat, .62) * .58);
+}
+@keyframes lg-ember-rise {
+  from { background-position: 0 0; }
+  to   { background-position: 0 -90px; }   /* ровно одна высота тайла — бесшовно */
+}
+
+
+
+
+
+/* --- капсульные стеклянные элементы управления --- */
+.tab, .clicker, .icon-btn,
+#download, #stop, #browse, #settings-close {
+  position: relative;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(22, 38, 72, .26);
+  -webkit-backdrop-filter: blur(14px) saturate(1.6);
+  backdrop-filter: blur(14px) saturate(1.6);
+  border: 1px solid var(--lg-line);
+  box-shadow: var(--lg-inset), var(--lg-shadow);
+  color: var(--text);
+  transition: transform .16s ease, background .25s ease, border-color .25s ease,
+              box-shadow .25s ease, color .25s ease;
+}
+.tab:hover, .clicker:hover, .icon-btn:hover,
+#download:hover, #stop:hover, #browse:hover, #settings-close:hover {
+  background: rgba(34, 58, 104, .55);
+  border-color: var(--lg-line-strong);
+  box-shadow: var(--lg-inset), 0 12px 34px rgba(0, 0, 0, .42),
+              0 0 0 1px rgba(105, 193, 255, .20);
+  transform: translateY(-1px);
+}
+.tab:active, .clicker:active, .icon-btn:active,
+#download:active, #stop:active, #browse:active, #settings-close:active {
+  transform: scale(.94);
+}
+
+/* жидкий блик, пробегающий по поверхности при наведении */
+.tab::after, .clicker::after, .icon-btn::after,
+#download::after, #stop::after, #browse::after, #settings-close::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(120deg, transparent 32%, rgba(255, 255, 255, .22) 50%, transparent 68%);
+  transform: translateX(-130%) skewX(-18deg);
+  transition: transform .7s ease;
+}
+.tab:hover::after, .clicker:hover::after, .icon-btn:hover::after,
+#download:hover::after, #stop:hover::after, #browse:hover::after, #settings-close:hover::after {
+  transform: translateX(130%) skewX(-18deg);
+}
+
+/* главное действие — «заливка» жидкого акцента */
+#download {
+  background: linear-gradient(135deg, rgba(66, 176, 255, .85), rgba(122, 96, 255, .82));
+  color: #fff;
+  border-color: transparent;
+  text-shadow: 0 1px 10px rgba(8, 30, 70, .45);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .45), inset 0 -10px 22px rgba(0, 40, 110, .35),
+              0 10px 30px rgba(70, 150, 255, .45);
+}
+#download:hover {
+  background: linear-gradient(135deg, rgba(80, 190, 255, .92), rgba(134, 108, 255, .90));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .55), inset 0 -10px 22px rgba(0, 40, 110, .30),
+              0 14px 40px rgba(80, 170, 255, .55);
+}
+
+/* активная вкладка — «жидкая пилюля» с дыханием */
+.tab.active {
+  background: linear-gradient(135deg, rgba(80, 190, 255, .95), rgba(132, 100, 255, .92));
+  color: #fff;
+  border-color: rgba(255, 255, 255, .35);
+  text-shadow: 0 1px 10px rgba(8, 30, 70, .45);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .5), inset 0 -10px 22px rgba(0, 40, 120, .35),
+              0 8px 26px rgba(80, 160, 255, .5);
+  animation: lg-breathe 3.2s ease-in-out infinite;
+}
+@keyframes lg-breathe {
+  0%, 100% {
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .5), inset 0 -10px 22px rgba(0, 40, 120, .35),
+                0 8px 26px rgba(80, 160, 255, .5);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .6), inset 0 -10px 22px rgba(0, 40, 120, .35),
+                0 12px 44px rgba(120, 140, 255, .75);
+    transform: scale(1.02);
+  }
+}
+
+/* --- поля --- */
+input[type=text], select, input[type=number] {
+  background: rgba(10, 20, 42, .31);
+  -webkit-backdrop-filter: blur(12px) saturate(1.5);
+  backdrop-filter: blur(12px) saturate(1.5);
+  border: 1px solid var(--lg-line);
+  border-radius: 16px;
+  box-shadow: inset 0 2px 10px rgba(0, 0, 0, .30), inset 0 1px 0 rgba(255, 255, 255, .06);
+  transition: border-color .2s ease, box-shadow .2s ease, background .2s ease;
+}
+input[type=text]:focus, select:focus, input[type=number]:focus {
+  border-color: rgba(105, 193, 255, .8);
+  background: rgba(14, 28, 56, .55);
+  box-shadow: inset 0 2px 10px rgba(0, 0, 0, .28), 0 0 0 3px rgba(105, 193, 255, .18);
+}
+/* --- выпадающие списки: убираем серую нативную стрелку, рисуем свою ---
+   (option/optgroup — тёмное стекло с жидкими бликами) */
+select {
+  color-scheme: dark;
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 36px;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='10' viewBox='0 0 14 10'%3E%3Cpath d='M1 1l6 7 6-7' fill='none' stroke='%238fd4ff' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 14px 10px;
+  transition: border-color .2s ease, box-shadow .2s ease, background-color .2s ease;
+}
+select:hover { border-color: rgba(105, 193, 255, .55); }
+select option, select optgroup {
+  background: rgba(10, 16, 32, .96);
+  color: #d6eaff;
+}
+select option:checked {
+  background: linear-gradient(90deg, rgba(70, 140, 230, .9), rgba(120, 120, 255, .9));
+  color: #fff;
+}
+select option:hover, select option:focus {
+  background: linear-gradient(90deg, rgba(70, 150, 255, .7), rgba(120, 150, 255, .7));
+  color: #fff;
+}
+select optgroup {
+  color: #9fd4ff;
+  font-style: normal;
+  font-weight: 600;
+}
+
+/* --- шапка --- (полупрозрачное стекло: сквозь него виден дождь) */
+.head {
+  padding: 10px 12px;
+  border-radius: 22px;
+  background: rgba(14, 26, 56, .13);
+  -webkit-backdrop-filter: blur(14px) saturate(1.5);
+  backdrop-filter: blur(14px) saturate(1.5);
+  border: 1px solid var(--lg-line);
+  box-shadow: var(--lg-inset), var(--lg-shadow);
+}
+.logo { text-shadow: 0 0 14px rgba(80, 190, 255, .55), 0 0 34px rgba(120, 120, 255, .35),
+              2px 0 0 rgba(255, 70, 90, .28), -2px 0 0 rgba(90, 200, 255, .30); }
+.sub { opacity: .55; }
+
+/* --- плавающая стеклянная панель настроек --- */
+.sheet {
+  top: 14px;
+  right: 14px;
+  bottom: 14px;
+  width: 340px;
+  max-width: 92vw;
+  background: rgba(12, 24, 50, .21);
+  border-left: none;
+  border-radius: 30px;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, .09),
+    inset 0 0 18px 6px rgba(255, 255, 255, .05),
+    inset 0 20px 40px rgba(255, 255, 255, .04),
+    inset 0 -30px 60px rgba(0, 0, 0, .25),
+    0 40px 90px rgba(0, 0, 0, .60);
+}
+.sheet, #log {
+  -webkit-backdrop-filter: blur(26px) saturate(1.5);
+  backdrop-filter: blur(26px) saturate(1.5);
+}
+/* где поддерживаются SVG-фильтры — добавляем настоящую «жидкую» рефракцию
+   (feTurbulence -> feDisplacementMap -> feGaussianBlur) */
+@supports (backdrop-filter: url("data:image/svg+xml")) {
+  .sheet, #log {
+    -webkit-backdrop-filter: url("data:image/svg+xml;base64,__LG_FILTER__") saturate(1.55);
+    backdrop-filter: url("data:image/svg+xml;base64,__LG_FILTER__") saturate(1.55);
+  }
+}
+.sheet-title {
+  background: linear-gradient(90deg, #8fd4ff, #b0a5ff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 2px 0 0 rgba(255, 70, 90, .28), -2px 0 0 rgba(90, 200, 255, .30);
+}
+.overlay {
+  background: rgba(4, 8, 18, .5);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+
+/* --- вложенное стекло --- */
+.settings-box {
+  background: rgba(20, 36, 70, .26);
+  border: 1px solid var(--lg-line);
+  border-radius: 20px;
+  -webkit-backdrop-filter: blur(12px) saturate(1.4);
+  backdrop-filter: blur(12px) saturate(1.4);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .10), inset 0 -8px 18px rgba(0, 0, 0, .18);
+}
+.settings-box-title { color: rgba(233, 241, 255, .6); }
+
+/* --- журнал --- */
+#log {
+  background: rgba(10, 20, 44, .34);
+  border: 1px solid var(--lg-line);
+  border-radius: 22px;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, .07),
+    inset 0 0 14px rgba(255, 255, 255, .04),
+    inset 0 22px 40px rgba(0, 0, 0, .22),
+    0 18px 40px rgba(0, 0, 0, .40);
+}
+#log::-webkit-scrollbar { width: 10px; }
+#log::-webkit-scrollbar-track { background: rgba(255, 255, 255, .04); border-radius: 8px; }
+#log::-webkit-scrollbar-thumb {
+  background: linear-gradient(rgba(80, 180, 255, .5), rgba(130, 100, 255, .5));
+  border-radius: 8px;
+  border: 2px solid rgba(10, 20, 44, .6);
+}
+#log::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(rgba(80, 190, 255, .7), rgba(140, 110, 255, .7));
+}
+
+/* --- прогресс --- */
+#status { color: rgba(233, 241, 255, .8); }
+.pb-wrap {
+  height: 14px;
+  background: rgba(10, 20, 42, .45);
+  -webkit-backdrop-filter: blur(8px) saturate(1.4);
+  backdrop-filter: blur(8px) saturate(1.4);
+  border: 1px solid var(--lg-line);
+  border-radius: 999px;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, .45), inset 0 1px 0 rgba(255, 255, 255, .05);
+}
+#pb {
+  background: linear-gradient(90deg, #45b8ff, #9b6bff, #3de1f0, #45b8ff);
+  background-size: 300% 100%;
+  border-radius: 999px;
+  box-shadow: 0 0 16px rgba(80, 170, 255, .55), inset 0 1px 0 rgba(255, 255, 255, .55);
+  animation: lg-flow 3s linear infinite;
+}
+#pb.indeterminate { animation: slide 1.2s infinite, lg-flow 3s linear infinite; }
+@keyframes lg-flow {
+  from { background-position: 0% 0; }
+  to   { background-position: -300% 0; }
+}
+
+/* --- кликер: упругая капля при нажатии --- */
+.clicker { min-width: 150px; height: 48px; font-size: 16px; }
+.clicker.pressed { animation: lg-squish .18s ease; }
+@keyframes lg-squish {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(.82) rotate(-2deg); }
+  70%  { transform: scale(1.06) rotate(1deg); }
+  100% { transform: scale(1); }
+}
+
+#warn {
+  border-radius: 14px;
+  background: rgba(255, 180, 84, .12);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+::selection { background: rgba(105, 193, 255, .30); }
+
+@media (prefers-reduced-motion: reduce) {
+  body::before, .tab.active, #pb, .clicker, .logo { animation: none !important; }
+  .tab:hover, .clicker:hover, .icon-btn:hover,
+  #download:hover, #stop:hover, #browse:hover, #settings-close:hover { transform: none; }
+  *::after { transition: none !important; }
+}
+"""
+
+_LIQUID_GLASS_CSS = _LIQUID_GLASS_CSS.replace("__LG_FILTER__", _LIQUID_GLASS_FILTER)
+
+_SEED_CSS: dict[str, str] = {"liquid_glass": _LIQUID_GLASS_CSS}
 
 _URLEX = re.compile(r"""url\(\s*(?:"([^"]*)"|'([^']*)'|([^)"'\s][^)"']*))\s*\)""")
 
@@ -379,7 +784,7 @@ def _seed_theme(root: Path, key: str, payload: dict) -> None:
     css = folder / "custom.css"
     if not css.exists():
         try:
-            css.write_text(_BASE_CSS, encoding="utf-8-sig")
+            css.write_text(_SEED_CSS.get(key, _BASE_CSS), encoding="utf-8-sig")
         except OSError:
             pass
 

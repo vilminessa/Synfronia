@@ -265,6 +265,27 @@ GPL (or LGPL depending on the specific build). The build used for
 testing was the GPL build from https://www.gyan.dev/ffmpeg/builds/.
 Full text: https://www.gnu.org/licenses/gpl-3.0.html
 
+## CSS / visual references (rain & liquid-glass effects)
+
+The "rain behind glass" animation and the "Liquid Glass" look are based on
+publicly available CSS design references, adapted (not copied verbatim):
+- "Liquid Rain Glass" & three-layer seamless rain — technique from
+  freefrontend.com collection "CSS Rain" (2018, by TralahMuck; MIT):
+  https://freefrontend.com/css-rain/ and the original Pen
+  https://codepen.io/TralahMuck/pen/GZvKba
+- Freefrontend "Liquid Glass UI" examples referenced for glass panels,
+  capsule controls and backdrop-filter layering:
+  - "Liquid Glass Morphism UI" https://freefrontend.com/ glass collection
+- Glass highlights, inset edges and high-opacity cores follow the common
+  "glassmorphism / liquid glass" style (UI gradients), described at
+  https://freefrontend.com/
+
+All CSS in this project is original code (own animation frames, own color
+palette, own transform/backdrop layers) written after studying the above
+references' visual technique; no copyrighted assets, fonts or images are
+bundled from these references. Rain tile sizes, animation timings and
+drop emission effects were re-implemented from scratch.
+
 ## Color palettes (UI themes)
 
 UI themes are based on publicly shared color palettes published on
@@ -274,6 +295,15 @@ own terms of use (personal/non-commercial use as stated on
 color-hex.com). Source: https://color-hex.com/
 
 ---
+
+### Known issue (tag 1.2.5): rain rendering
+
+As of tag 1.2.5 the rain animation may render misaligned / flickering on
+some GPUs and WebView2/Chromium versions (background-position layers with
+different tile heights can produce a visible "seam"/sag). This was a
+temporary visual state; the rain layer has since been removed from the
+theme (see later tags). See `THIRD_PARTY_NOTICES` above for the original
+technique reference.
 
 Project code: Copyright © 2026 vilminessa, licensed under the
 PolyForm Noncommercial License 1.0.0 (see `LICENSE`).
