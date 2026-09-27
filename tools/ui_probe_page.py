@@ -8,14 +8,22 @@ r"""Собирает страницу Synfronia со стабом pywebview дл
     python tools/ui_probe_page.py out.html   -> свой путь
 """
 
+import json
 import sys
 import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from settings import load_settings  # noqa: E402
+import settings_schema  # noqa: E402
 from themes import build_page  # noqa: E402
+
+# Настройки в стабе берём из схемы: так пробник проверяет настоящие умолчания,
+# а не отдельный список (он уже расходился с приложением).
+def stub_settings(lang: str) -> str:
+    data = {**settings_schema.defaults(), "dest": r"C:\Downloads", "language": lang}
+    return json.dumps(data, ensure_ascii=False).replace("\\", "\\\\")
+
 
 # Стаб API: init() и tick() должны пройти целиком, чтобы мы мерили реальную
 # разметку, а не падение скрипта. Значения повторяют ответы Api.get_initial/poll.
@@ -24,14 +32,7 @@ STUB = """<script>
   var FONTS = {families: ["Inter", "JetBrains Mono", "Noto Sans"], mono: ["JetBrains Mono"],
                count: 3, folder: "C:\\\\Synfronia\\\\fonts"};
   var state = {lang: "%(lang)s", css: "", fontsRev: 0, dl: null};
-  var settings = {
-    language: state.lang, theme: "scarred_mind", subtitles: "en", quality: "lossless",
-    transcode: "none", retries: 10, socket_timeout: 20, ftp_active: false,
-    ftp_host: "", ftp_port: 21, ftp_user: "", ftp_password: "", ftp_tls: false,
-    ftp_tls_verify: true, ftp_pasv: true, ftp_delete_local: false, ftp_dir: "",
-    ftp_template: "", ftp_timeout: 60, ftp_retries: 3, ftp_mode: "passive",
-    dest: "C:\\\\Downloads", font_sans: "", font_mono: ""
-  };
+  var settings = __SETTINGS__;
   function ok(r) { return Promise.resolve(r === undefined ? {} : r); }
   window.pywebview = {api: {
     get_initial: function () { return Promise.resolve({settings: settings, ffmpeg: true,
@@ -68,6 +69,7 @@ def build_page_with_stub(theme: str = "scarred_mind", lang: str = "ru") -> str:
     if idx < 0:
         raise SystemExit("build_page: не найден <script> для вставки стаба")
     stub = STUB % {"lang": lang}
+    stub = stub.replace("__SETTINGS__", stub_settings(lang))
     return page[:idx] + stub + page[idx:]
 
 
