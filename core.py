@@ -54,7 +54,6 @@ from ftp import (
 from i18n import I18N, LANGUAGES, SELF_NAMES, _lang_root, load_languages, tr
 from paths import _file_log, base_dir, ffmpeg_local_dir, logs_dir
 from settings import (
-    DEFAULT_SETTINGS,
     based_settings,
     default_download_dir,
     load_settings,

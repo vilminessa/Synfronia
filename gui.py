@@ -9,8 +9,8 @@ from collections import deque
 
 import webview
 
+import settings_schema
 from core import (
-    DEFAULT_SETTINGS,
     Downloader,
     FtpConfig,
     available_transcoders,
@@ -158,18 +158,18 @@ class Api:
 
     # -- настройки -----------------------------------------------------------
     def save_setting(self, key: str, value) -> str:
-        if key in DEFAULT_SETTINGS:
-            self.settings[key] = value
-            if key == "language":
-                self._lang = str(value)
-                if not self._busy:
-                    self._status = tr(self._lang, "p.ready")
-            try:
-                save_settings(self.settings)
-                return "ok"
-            except OSError as exc:
-                return f"error: {exc}"
-        return "unknown key"
+        if not settings_schema.has(key):
+            return "unknown key"
+        self.settings[key] = settings_schema.coerce(key, value)
+        if key == "language":
+            self._lang = str(self.settings[key])
+            if not self._busy:
+                self._status = tr(self._lang, "p.ready")
+        try:
+            save_settings(self.settings)
+            return "ok"
+        except OSError as exc:
+            return f"error: {exc}"
 
     # -- темы (модульные) ----------------------------------------------------
     def set_theme(self, theme_id: str) -> str:

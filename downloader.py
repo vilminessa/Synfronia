@@ -23,6 +23,7 @@ from ftp import upload_files
 from i18n import I18N, LANGUAGES, tr
 from paths import ffmpeg_local_dir
 from settings import load_settings
+from settings_schema import value as _value
 
 
 _PLAYLIST_RE = re.compile(r"[?&]list=")
@@ -399,6 +400,13 @@ class Downloader:
         self._wd_done = threading.Event()
         self._errors = False
         self._finished = []
+        # сеть читается один раз на загрузку: перечитывать файл на каждой
+        # попытке смысла нет, а значения всё равно приходят из схемы
+        stored = load_settings()
+        self._net = {
+            "retries": _value(stored, "dl.retries"),
+            "socket_timeout": _value(stored, "dl.socket_timeout"),
+        }
 
     def _t(self, key: str, **kwargs) -> str:
         return tr(self._lang, key, **kwargs)
@@ -518,8 +526,8 @@ class Downloader:
             outtmpl = os.path.join(dest, "%(title)s.%(ext)s")
 
         subs_langs = SUBTITLE_OPTIONS.get(subtitles)
-        _retries = int(load_settings().get("retries", 10))
-        _timeout = int(load_settings().get("socket_timeout", 20))
+        _retries = self._net.get("retries", 10)
+        _timeout = self._net.get("socket_timeout", 20)
         opts = {
             "outtmpl": outtmpl,
             "format": QUALITY_FORMATS.get(quality, QUALITY_FORMATS["lossless"]),
@@ -666,3 +674,42 @@ class Downloader:
             deleted.extend(upload_files(ftp, items, log=self._log).get("deleted", []))
         if deleted:
             self._log("info", self._t("ftp.local_gone", n=len(deleted)))
+
+
+# Панель настроек модуля: порядок полей = порядок строк. Значения опций
+# сверяются со словарями выше (options_of) - если yt-dlp поменяет список
+# форматов, об этом расскажет tools/check_settings.py.
+SETTINGS = {
+    "id": "dl",
+    "label": "sheet.tab.dl",
+    "order": 20,
+    "flat_prefix": "",  # исторически без префикса: retries, socket_timeout, quality
+    "boxes": {"net": "sheet.network.label"},
+    "fields": [
+        {"key": "subtitles", "type": "choice", "label": "sheet.subs.label", "default": "en",
+         "dom": "subs", "options": [
+             ["off", "subs.off"], ["ru", "subs.ru"], ["en", "subs.en"], ["all", "subs.all"],
+         ], "options_of": "SUBTITLE_OPTIONS"},
+        {"key": "quality", "type": "choice", "label": "sheet.qual.label", "default": "lossless",
+         "dom": "qual", "options": [
+             ["lossless", "qual.lossless"], ["2k", "2K (1440p)"], ["1080", "1080p"],
+             ["720", "720p"], ["480", "480p"], ["240", "240p"],
+         ], "options_of": "QUALITY_FORMATS"},
+        {"key": "transcode", "type": "choice", "label": "sheet.transcode.label",
+         "default": "none", "dom": "transcode", "options": [
+             ["none", "trans.none"], ["libx265", "trans.libx265"], ["nvenc", "trans.nvenc"],
+             ["amf", "trans.amf"], ["qsv", "trans.qsv"],
+         ], "options_of": "TRANSCODERS", "dynamic": "transcoders"},
+        {"type": "note", "transient": True, "dom": "transcode-note",
+         "note_source": "transcodeNote"},
+        {"key": "retries", "type": "int", "label": "sheet.retries.label", "default": 10,
+         "min": 1, "max": 50, "step": 1, "box": "net", "mirror": "range",
+         "dom": "retries", "dom_range": "retries-range"},
+        {"key": "socket_timeout", "type": "int", "label": "sheet.timeout.label", "default": 20,
+         "min": 1, "max": 120, "step": 1, "box": "net", "mirror": "range",
+         "dom": "socket_timeout", "dom_range": "socket_timeout-range"},
+        # флажок в главном окне, а не в панели: значение общее для всех загрузок
+        {"key": "group_playlist", "type": "bool", "label": "group.label", "default": True,
+         "dom": "group", "in_panel": False},
+    ],
+}

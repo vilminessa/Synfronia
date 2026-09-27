@@ -5,17 +5,11 @@ r"""Выгрузка готовых файлов на FTP/FTPS.
 Сеть проверяется на живых загрузках, поэтому ошибки не поднимаются наружу как
 исключения: вызывающий получает отчёт и читает журнал.
 
-Настройки (ключи ftp_* в settings.json, см. settings.DEFAULT_SETTINGS):
-  ftp_active      — включена ли выгрузка;
-  ftp_mode        — batch (всё одним заходом в конце) / per_file (сразу после
-                    каждой успешной загрузки);
-  ftp_host, ftp_port, ftp_user, ftp_password, ftp_timeout, ftp_retries;
-  ftp_tls         — FTPS (явный TLS), ftp_tls_verify — проверка сертификата;
-  ftp_pasv        — пассивный режим (по умолчанию; выключать только если сервер
-                    не умеет PASV);
-  ftp_dir         — серверный каталог, можно с подстановками {playlist}/{date};
-  ftp_template    — имя файла, например «{index:02d} - {title}{ext}»;
-  ftp_delete_local — удалять локальный файл после успешной загрузки.
+Настройки модуля описаны в SETTINGS в конце файла: оттуда берутся и панель
+настроек, и значения по умолчанию. Плоские имена в settings.json - те же,
+что и раньше: ftp_active, ftp_host, ftp_port, ftp_user, ftp_password,
+ftp_tls, ftp_tls_verify, ftp_pasv, ftp_dir, ftp_template, ftp_delete_local,
+ftp_timeout, ftp_retries.
 """
 
 import ftplib
@@ -27,6 +21,7 @@ from datetime import datetime
 from pathlib import Path
 
 from i18n import tr
+from settings_schema import value as _value
 
 # Что можно подставлять в шаблоны имени файла и каталога.
 TEMPLATE_FIELDS = ("title", "ext", "index", "id", "playlist", "date")
@@ -125,25 +120,25 @@ def render_path(template: str, meta: dict, fallback: str = "") -> str:
 
 
 class FtpConfig:
-    """Настройки выгрузки, разобранные из settings.json."""
+    """Настройки выгрузки, разобранные из settings.json (тип и умолчания - из схемы)."""
 
     def __init__(self, settings: dict | None = None, lang: str = "en"):
         data = settings or {}
         self.lang = lang
-        self.active = bool(data.get("ftp_active"))
-        self.mode = "per_file" if data.get("ftp_mode") == "per_file" else "batch"
-        self.host = str(data.get("ftp_host") or "").strip()
-        self.port = _as_int(data.get("ftp_port"), 21, 1, 65535)
-        self.user = str(data.get("ftp_user") or "anonymous")
-        self.password = str(data.get("ftp_password") or "")
-        self.tls = bool(data.get("ftp_tls"))
-        self.tls_verify = data.get("ftp_tls_verify") is not False
-        self.pasv = data.get("ftp_pasv") is not False
-        self.dir = str(data.get("ftp_dir") or "")
-        self.template = str(data.get("ftp_template") or "").strip() or DEFAULT_TEMPLATE
-        self.delete_local = bool(data.get("ftp_delete_local"))
-        self.timeout = _as_int(data.get("ftp_timeout"), 60, 5, 3600)
-        self.retries = _as_int(data.get("ftp_retries"), 3, 1, 10)
+        self.active = _value(data, "ftp.active")
+        self.mode = _value(data, "ftp.mode")
+        self.host = _value(data, "ftp.host").strip()
+        self.port = _value(data, "ftp.port")
+        self.user = _value(data, "ftp.user")
+        self.password = _value(data, "ftp.password")
+        self.tls = _value(data, "ftp.tls")
+        self.tls_verify = _value(data, "ftp.tls_verify")
+        self.pasv = _value(data, "ftp.pasv")
+        self.dir = _value(data, "ftp.dir")
+        self.template = _value(data, "ftp.template").strip()
+        self.delete_local = _value(data, "ftp.delete_local")
+        self.timeout = _value(data, "ftp.timeout")
+        self.retries = _value(data, "ftp.retries")
 
     @property
     def enabled(self) -> bool:
@@ -160,14 +155,6 @@ class FtpConfig:
     def describe(self) -> str:
         scheme = "ftps" if self.tls else "ftp"
         return f"{scheme}://{self.user}@{self.host}:{self.port}"
-
-
-def _as_int(value, default: int, low: int, high: int) -> int:
-    try:
-        num = int(value)
-    except (TypeError, ValueError):
-        return default
-    return max(low, min(high, num))
 
 
 def _ssl_context(verify: bool) -> ssl.SSLContext:
@@ -436,3 +423,57 @@ def _upload_with_retry(ftp, path, remote: str, cfg: FtpConfig, log=None, reopen=
                 if fresh is not None:
                     ftp = fresh
     return False, ftp
+
+
+# Панель настроек модуля. Порядок полей = порядок строк в панели; поля кроме
+# active видны только при включённой выгрузке (visible_if), умолчания, min/max и
+# подписи берутся отсюда же - FtpConfig их больше не дублирует.
+_WHEN_ACTIVE = {"key": "active", "equals": True}
+
+SETTINGS = {
+    "id": "ftp",
+    "label": "sheet.tab.ftp",
+    "order": 30,
+    "flat_prefix": "ftp_",
+    "boxes": {"conn": "sheet.ftp.conn"},
+    "fields": [
+        {"key": "active", "type": "bool", "label": "sheet.ftp.active",
+         "default": False, "check": True, "live": True},
+        {"key": "mode", "type": "choice", "label": "sheet.ftp.mode", "default": "batch",
+         "options": [["batch", "sheet.ftp.mode.batch"], ["per_file", "sheet.ftp.mode.per_file"]],
+         "visible_if": _WHEN_ACTIVE},
+        {"key": "host", "type": "text", "label": "sheet.ftp.host", "default": "",
+         "placeholder": "ftp.example.org", "live": True, "visible_if": _WHEN_ACTIVE},
+        {"key": "port", "type": "int", "label": "sheet.ftp.port", "default": 21,
+         "min": 1, "max": 65535, "step": 1, "visible_if": _WHEN_ACTIVE},
+        {"key": "user", "type": "text", "label": "sheet.ftp.user", "default": "anonymous",
+         "live": True, "visible_if": _WHEN_ACTIVE},
+        {"key": "password", "type": "password", "label": "sheet.ftp.password", "default": "",
+         "secret": True, "live": True, "visible_if": _WHEN_ACTIVE},
+        {"key": "tls", "type": "bool", "label": "sheet.ftp.tls", "default": False,
+         "check": True, "live": True, "visible_if": _WHEN_ACTIVE},
+        {"key": "tls_verify", "type": "bool", "label": "sheet.ftp.tls_verify", "default": True,
+         "check": True, "live": True, "visible_if": _WHEN_ACTIVE},
+        {"key": "pasv", "type": "bool", "label": "sheet.ftp.pasv", "default": True,
+         "check": True, "live": True, "visible_if": _WHEN_ACTIVE},
+        {"key": "delete_local", "type": "bool", "label": "sheet.ftp.delete_local",
+         "default": False, "check": True, "live": True, "visible_if": _WHEN_ACTIVE},
+        {"key": "dir", "type": "text", "label": "sheet.ftp.dir", "default": "",
+         "placeholder": "{playlist}/{date}", "live": True, "visible_if": _WHEN_ACTIVE},
+        {"type": "note", "transient": True, "dom": "ftp-dir-note",
+         "note_source": "ftpDirNote", "visible_if": _WHEN_ACTIVE},
+        {"key": "template", "type": "text", "label": "sheet.ftp.template",
+         "default": DEFAULT_TEMPLATE, "placeholder": "{index:02d} - {title}{ext}",
+         "live": True, "visible_if": _WHEN_ACTIVE},
+        {"key": "timeout", "type": "int", "label": "sheet.ftp.timeout", "default": 60,
+         "min": 5, "max": 3600, "step": 5, "box": "conn", "row": 1, "visible_if": _WHEN_ACTIVE},
+        {"key": "retries", "type": "int", "label": "sheet.ftp.retries", "default": 3,
+         "min": 1, "max": 10, "step": 1, "box": "conn", "row": 1, "visible_if": _WHEN_ACTIVE},
+        {"type": "actions", "transient": True, "box": "conn", "row": 2,
+         "visible_if": _WHEN_ACTIVE, "buttons": [
+             {"dom": "ftp-test", "label": "sheet.ftp.test"},
+         ]},
+        {"type": "note", "transient": True, "dom": "ftp-test-note", "box": "conn", "row": 2,
+         "inline": True, "visible_if": _WHEN_ACTIVE},
+    ],
+}
