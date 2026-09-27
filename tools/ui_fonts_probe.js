@@ -18,24 +18,40 @@ const PORT = 9337;
 const LANGS = ["ru", "en", "ja", "zh-CN", "es", "de"];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Что и как мерить внутри .theme-actions (три кнопки шрифтов).
+// Что и как мерить в панели: вкладки переключаются по очереди, в каждой
+// проверяем, что блок не вылезает по ширине и ни один control не обрезает текст.
+// Панель рисуется из схемы (__SETTINGS_SCHEMA__), поэтому список вкладок берём
+// из неё, а не из разметки.
 const MEASURE = `(function () {
   var sheet = document.getElementById("settings-sheet");
   sheet.hidden = false;
   document.getElementById("settings-overlay").hidden = false;
-  var rows = [].slice.call(document.querySelectorAll("#panel-ui .theme-actions"));
-  var out = {rows: [], buttons: 0, labels: [], overflowX: 0};
+  var out = {tabs: [], buttons: 0, labels: [], overflowX: 0, controls: 0, clipped: []};
   out.overflowX = sheet.scrollWidth - sheet.clientWidth;
-  rows.forEach(function (row) {
-    var r = row.getBoundingClientRect();
-    out.rows.push({width: Math.round(r.width), scrollWidth: row.scrollWidth});
+  var names = SETTINGS_SCHEMA.groups.map(function (g) { return g.id; });
+  names.forEach(function (name) {
+    switchSettingsTab(name);
+    var panel = document.getElementById("panel-" + name);
+    var rec = {id: name, controls: 0, overflowX: panel.scrollWidth - panel.clientWidth, clipped: []};
+    [].slice.call(panel.querySelectorAll("select, button")).forEach(function (el) {
+      if (el.offsetParent === null) return;   // скрытое поле не мешает
+      rec.controls++;
+      if (el.scrollWidth > el.clientWidth + 1) rec.clipped.push(el.id || el.tagName);
+    });
+    out.controls += rec.controls;
+    out.clipped = out.clipped.concat(rec.clipped);
+    out.tabs.push(rec);
+  });
+  // кнопки шрифтов - предмет старой проверки (нужна активная вкладка «Интерфейс»)
+  switchSettingsTab("ui");
+  [].slice.call(document.querySelectorAll("#panel-ui .theme-actions")).forEach(function (row) {
     [].slice.call(row.querySelectorAll("button")).forEach(function (b) {
       out.buttons++;
-      var t = b.textContent.trim();
-      out.labels.push({text: t, clipped: b.scrollWidth > b.clientWidth + 1,
+      out.labels.push({text: b.textContent.trim(), clipped: b.scrollWidth > b.clientWidth + 1,
                        h: Math.round(b.getBoundingClientRect().height)});
     });
   });
+  switchSettingsTab(names[0]);
   sheet.hidden = true;
   document.getElementById("settings-overlay").hidden = true;
   return out;
@@ -139,11 +155,16 @@ async function waitForPage() {
     await send("Page.enable");
     await send("Runtime.enable");
     await send("Page.navigate", { url: "file:///" + path.resolve(PAGE).replace(/\\/g, "/") });
-    // init() асинхронный: ждём, пока отрисуется список шрифтов
+    // init() асинхронный, а панель рисуется скриптом: ждём, пока отрисуется
+    // список шрифтов (getElementById может ещё вернуть null - это не ошибка)
+    const READY = '(function () { var el = document.getElementById("font-sans");' +
+      ' return !!(el && el.options.length > 0); })()';
     for (let i = 0; i < 40; i++) {
-      if (await evaluate('document.getElementById("font-sans").options.length > 0')) break;
+      if (await evaluate(READY)) break;
       await sleep(100);
     }
+    if (errors.length) console.error("ошибки при инициализации:", errors);
+    if (!(await evaluate(READY))) throw new Error("панель настроек не отрисовалась (font-sans пуст)");
     const seeded = await evaluate('[].slice.call(document.getElementById("font-sans").options).map(function(o){return o.value;}).filter(Boolean)');
 
     let bad = 0;
@@ -152,17 +173,58 @@ async function waitForPage() {
       const m = await evaluate(`(function () {
         curLang = ${JSON.stringify(lang)}; applyI18n(); return ${MEASURE};
       })()`);
-      const dl = m.labels.find((l) => /download|ダウンロード|下载|Descargar|laden|качать/i.test(l.text)) ||
+      const dl = m.labels.find((l) => /шрифт|font|Schrift|下载|ダウンロード|Descargar/i.test(l.text)) ||
                  m.labels[m.buttons - 1];
       const clipped = m.labels.filter((l) => l.clipped);
-      const over = m.overflowX > 0;
+      const over = m.overflowX > 0 || m.tabs.some((t) => t.overflowX > 0) || m.clipped.length > 0;
       if (over || clipped.length) bad++;
-      console.log(`${lang.padEnd(6)} кнопок=${m.buttons} перелив=${m.overflowX}px ` +
-        `обрезано=${clipped.length} dl="${dl.text}" h=${dl.h}`);
-      m.labels.forEach((l) => { if (l.clipped) console.log(`        обрезана: "${l.text}"`); });
+      console.log(`${lang.padEnd(6)} кнопок=${m.buttons} полей=${m.controls} ` +
+        `перелив=${m.overflowX}px вкладки=[${m.tabs.map((t) => `${t.id}:${t.overflowX}/${t.controls}`).join(" ")}] ` +
+        `обрезано=${clipped.length + m.clipped.length} dl="${dl.text}" h=${dl.h}`);
+      m.tabs.forEach((t) => {
+        if (t.overflowX > 0) console.log(`        ${t.id}: вылезает на ${t.overflowX}px`);
+      });
+      m.clipped.forEach((c) => console.log(`        обрезан control: ${c}`));
+      clipped.forEach((l) => console.log(`        обрезана кнопка: "${l.text}"`));
     }
     if (errors.length) { console.error("ошибки страницы:", errors); bad++; }
 
+    // --- видимость по схеме: флажок «Выгружать на FTP» открывает блок полей ---
+    const ftp = await evaluate(`(function () {
+      var sheet = document.getElementById("settings-sheet");
+      var flag = document.getElementById("ftp-active");
+      sheet.hidden = false;
+      document.getElementById("settings-overlay").hidden = false;
+      switchSettingsTab("ftp");
+      function count() {
+        var panel = document.getElementById("panel-ftp");
+        return {visible: [].slice.call(panel.querySelectorAll("input, select, button, label, .note"))
+          .filter(function (el) { return el.offsetParent !== null; }).length,
+          overflowX: panel.scrollWidth - panel.clientWidth};
+      }
+      var out = {off: count()};
+      flag.checked = true;
+      flag.dispatchEvent(new Event("change"));
+      out.on = count();
+      out.clipped = [].slice.call(document.querySelectorAll("#panel-ftp select, #panel-ftp button"))
+        .filter(function (el) { return el.offsetParent !== null && el.scrollWidth > el.clientWidth + 1; })
+        .map(function (el) { return el.id; });
+      flag.checked = false;
+      flag.dispatchEvent(new Event("change"));
+      out.back = count();
+      switchSettingsTab("ui");
+      sheet.hidden = true;
+      document.getElementById("settings-overlay").hidden = true;
+      return out;
+    })()`);
+    console.log("--- вкладка FTP ---");
+    const ftpOk = ftp.on.visible > ftp.off.visible && ftp.back.visible === ftp.off.visible &&
+                  ftp.on.overflowX <= 0 && !ftp.clipped.length;
+    console.log(`  флажок выключен: видно ${ftp.off.visible} полей, включён: ${ftp.on.visible}` +
+      `, снова выключен: ${ftp.back.visible}, перелив=${ftp.on.overflowX}px` +
+      `${ftpOk ? "" : "  <-- FAIL"}`);
+    if (ftp.clipped.length) console.log(`        обрезано: ${ftp.clipped.join(", ")}`);
+    if (!ftpOk) bad++;
 
     // --- растягивание панели настроек ---
     const rz = await evaluate(RESIZE);

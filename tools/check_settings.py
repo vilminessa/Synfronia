@@ -37,7 +37,7 @@ from ftp import FtpConfig  # noqa: E402
 # служит контрактом для следующих этапов (генерация панели).
 LEGACY_DOM = {
     # вкладка «Интерфейс»
-    "lang", "theme", "reload-themes", "open-themes", "dest", "browse",
+    "lang", "theme", "theme-meta", "reload-themes", "open-themes", "dest", "browse",
     "font-sans", "font-mono", "font-note", "font-dl-note",
     "reload-fonts", "download-fonts", "open-fonts",
     # вкладка «Загрузчик»
@@ -200,6 +200,34 @@ def main() -> int:
     section("4. dom-id панели не изменились")
     ok(set(doms) == LEGACY_DOM, "набор id совпадает с контрактом app.js",
        f"нет: {sorted(LEGACY_DOM - set(doms))}, лишние: {sorted(set(doms) - LEGACY_DOM)}")
+
+    # 4b. что страница получает из schema_json (app.js рисует по нему панель)
+    section("4b. schema_json для страницы")
+    page = settings_schema.schema_json()
+    fields = [f for g in page["groups"] for f in g["fields"]]
+    stored = [f for f in fields if "setting" in f]
+    ok(len(stored) == len(defaults),
+       f"у {len(stored)} полей есть плоское имя для save_setting",
+       f"сохраняемых настроек в схеме {len(defaults)}")
+    ok(all(settings_schema.has(f["setting"]) for f in stored),
+       "плоские имена известны схеме (save_setting их примет)",
+       str([f["setting"] for f in stored if not settings_schema.has(f["setting"])]))
+    pairs = {f["path"]: f["setting"] for f in stored}
+    ok(all(settings_schema.flat_name(*p.split(".", 1)) == s for p, s in pairs.items()),
+       "плоское имя выводится из пути (как в flat_name)")
+    conds = [f["visible_if"] for f in fields if f.get("visible_if")]
+    ok(conds and all("." in c["key"] for c in conds),
+       "visible_if.key абсолютный (как в app.js)", str(conds[:2]))
+    ok(all(f["dom"] for f in stored), "у каждого сохраняемого поля есть dom")
+    transients = [f for f in fields if "setting" not in f]
+    ok(all(f.get("type") in ("actions", "note") or f.get("value_source") for f in transients),
+       "у нес сохраняемых полей есть type или value_source",
+       str([f.get("key") for f in transients]))
+    ok(any(f.get("type") == "actions" and f.get("buttons") for f in fields),
+       "кнопки описаны в схеме, а не в разметке")
+    ok(all(len(f["visible_if"]) == 2 for f in fields if f.get("visible_if")),
+       "в visible_if только key и equals")
+
 
     # 5. coerce
     section("5. приведение значений")

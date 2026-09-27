@@ -16,6 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import settings_schema  # noqa: E402
+import i18n  # noqa: E402
 from themes import build_page  # noqa: E402
 
 # Настройки в стабе берём из схемы: так пробник проверяет настоящие умолчания,
@@ -63,6 +64,9 @@ STUB = """<script>
 
 def build_page_with_stub(theme: str = "scarred_mind", lang: str = "ru") -> str:
     """Страница приложения со стабом API перед основным <script>."""
+    # приложение грузит языковые файлы до сборки страницы: без этого в I18N нет
+    # thisLang, список языков в панели пуст и мы меряем не то, что видит юзер
+    i18n.load_languages()
     page = build_page(theme)
     marker = "<script>"
     idx = page.find(marker)

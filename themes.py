@@ -4,7 +4,7 @@ r"""Модульные темы и сборка страницы.
 theme.json (палитра/мета/extends/entry), custom.css, slots/*.html,
 ресурсы (url(...) и {{asset:rel}} -> data:URI). Из этого собирается
 итоговый HTML: build_page() наполняет __THEME_ROOT__/__THEME_CSS__/
-__APP_CSS__/__APPJS__/__I18N__/__THEMES__ в ui.BASE_TEMPLATE.
+__APP_CSS__/__APPJS__/__I18N__/__THEMES__/__SETTINGS_SCHEMA__ в ui.BASE_TEMPLATE.
 """
 
 import base64
@@ -13,6 +13,7 @@ import os
 import re
 from pathlib import Path
 
+import settings_schema
 import ui as _ui
 
 from i18n import I18N
@@ -539,6 +540,9 @@ _URLEX = re.compile(r"""url\(\s*(?:"([^"]*)"|'([^']*)'|([^)"'\s][^)"']*))\s*\)""
 _ASSET_RE = re.compile(r"\{\{asset:([^}]*)\}\}")
 # Секции базового шаблона: <!-- SLOT:name --> ... <!-- /SLOT:name -->
 _SLOT_RE = re.compile(r"<!-- SLOT:([a-z0-9_-]+) -->(.*?)<!-- /SLOT:\1 -->", re.S)
+# Слоты, содержимое которых собирает приложение, а не тема: панель настроек
+# рисует app.js из settings_schema, свой slots/settings.html она не примет.
+GENERATED_SLOTS = {"settings"}
 _PALETTE_FIELDS = (
     "bg", "surface", "widget", "text", "accent", "warn",
     "opacity", "radius_s", "radius_m", "radius_l",
@@ -834,6 +838,7 @@ CSS наследуется по цепочке extends: файлы родите�
   __APPJS__         логика приложения (обязателен в полном HTML-шаблоне)
   __I18N__          переводы (JSON)
   __THEMES__        список тем (JSON)
+  __SETTINGS_SCHEMA__  схема настроек (JSON) - панель рисуется из неё
   {{asset:rel}}     локальный файл темы -> data:URI
 
 Пример минимального index.html:
@@ -847,9 +852,11 @@ CSS наследуется по цепочке extends: файлы родите�
 --------------
 Эти секции базового шаблона можно переопределить файлами slots\\<имя>.html:
   head, tabs, panel-video, panel-playlist, warn, ffmpeg-overlay, actions,
-  progress, clicker, settings.
+  progress, clicker.
 Маркеры в шаблоне: <!-- SLOT:<имя> --> ... <!-- /SLOT:<имя> -->.
 Слоты ищутся по цепочке extends: сначала в теме, затем у родителей.
+Слот settings не переопределяется: панель настроек рисует app.js из схемы
+(settings_schema), файл темы с таким именем игнорируется с записью в лог.
 """
 
 
@@ -1091,6 +1098,12 @@ def _apply_slots(template: str, folders: list[Path]) -> str:
 
     def repl(m: re.Match) -> str:
         name = m.group(1)
+        if name in GENERATED_SLOTS:
+            for folder in folders or []:
+                if (folder / "slots" / f"{name}.html").is_file():
+                    _file_log("WARN", f"тема {folder.name}: slots/{name}.html игнорируется, "
+                                     f"панель настроек строится из схемы")
+            return m.group(0)
         for folder in folders or []:
             slot = folder / "slots" / f"{name}.html"
             if slot.is_file():
@@ -1171,6 +1184,8 @@ def build_page(theme_key: str, lang: str | None = None, fonts: dict | None = Non
     page = page.replace("__APPJS__", _ui.APP_JS)
     page = page.replace("__I18N__", _js_json(I18N))
     page = page.replace("__THEMES__", _js_json(themes_embed()))
+    # __SETTINGS_SCHEMA__ лежит внутри app.js, поэтому подменяем после него
+    page = page.replace("__SETTINGS_SCHEMA__", _js_json(settings_schema.schema_json()))
     return page
 
 

@@ -1,12 +1,9 @@
   var THEMES = __THEMES__;
   var I18N = __I18N__;
   var LANGS = Object.keys(I18N).filter(function(k) { return I18N[k] && I18N[k].thisLang; });
-  var TRANS_KEYS = ["none", "libx265", "nvenc", "amf", "qsv"];
-  var QUAL_OPTIONS = [
-    ["lossless", "qual.lossless"], ["2k", "2K (1440p)"],
-    ["1080", "1080p"], ["720", "720p"], ["480", "480p"], ["240", "240p"]
-  ];
-  var SUB_OPTIONS = [["off", "subs.off"], ["ru", "subs.ru"], ["en", "subs.en"], ["all", "subs.all"]];
+  // Схема настроек (settings_schema.py): из неё рисуется панель настроек и берутся
+  // подписи списков - свои копии option-значений в app.js не нужны.
+  var SETTINGS_SCHEMA = __SETTINGS_SCHEMA__;
   var since = 0;
   var LOG_LINES = 2000; // сколько строк лога держим в textarea
   var LOG_CHARS = 120000; // порог (~2000 строк) для обрезки без split на каждом poll
@@ -255,18 +252,18 @@
     box.textContent = parts.join(" · ");
     box.hidden = parts.length === 0;
   }
-  function buildSubsOptions() { fillSelect("subs", SUB_OPTIONS); }
-  function buildQualOptions() { fillSelect("qual", QUAL_OPTIONS); }
+  function buildSubsOptions() { fillSelect("subs", fieldOptions("dl.subtitles")); }
+  function buildQualOptions() { fillSelect("qual", fieldOptions("dl.quality")); }
   function buildTranscodeOptions() {
     var sel = document.getElementById("transcode");
     var prev = sel.value;
     sel.innerHTML = "";
     var missing = [];
-    TRANS_KEYS.forEach(function(key) {
+    fieldOptions("dl.transcode").forEach(function(pair) {
       var o = document.createElement("option");
-      o.value = key;
-      var label = t("trans." + key);
-      if (key !== "none" && (!transAvailability.ffmpeg || transAvailability.avail.indexOf(key) === -1)) {
+      o.value = pair[0];
+      var label = t(pair[1]);
+      if (pair[0] !== "none" && (!transAvailability.ffmpeg || transAvailability.avail.indexOf(pair[0]) === -1)) {
         o.disabled = true;
         missing.push(label);
         o.textContent = label + " " + t("trans.unavailable");
@@ -556,62 +553,186 @@
     scheduleTick(200);
   }
 
-  // -- вкладка FTP -----------------------------------------------------------
-  // Поля FTP сохраняются по событию change (потеря фокуса/Enter), чтобы не
-  // писать в settings.json на каждый символ. Пароль хранится как есть.
-  var FTP_DEFAULTS = { ftp_port: 21, ftp_timeout: 60, ftp_retries: 3 };
-  var FTP_FIELDS = [
-    ["ftp-active", "ftp_active", "bool"],
-    ["ftp-mode", "ftp_mode", "text"],
-    ["ftp-host", "ftp_host", "text"],
-    ["ftp-port", "ftp_port", "int"],
-    ["ftp-user", "ftp_user", "text"],
-    ["ftp-password", "ftp_password", "text"],
-    ["ftp-tls", "ftp_tls", "bool"],
-    ["ftp-tls-verify", "ftp_tls_verify", "bool"],
-    ["ftp-pasv", "ftp_pasv", "bool"],
-    ["ftp-delete-local", "ftp_delete_local", "bool"],
-    ["ftp-dir", "ftp_dir", "text"],
-    ["ftp-template", "ftp_template", "text"],
-    ["ftp-timeout", "ftp_timeout", "int"],
-    ["ftp-retries", "ftp_retries", "int"],
-  ];
+  // -- панель настроек -------------------------------------------------------
+  // Панель целиком рисуется из схемы (__SETTINGS_SCHEMA__): вкладки, поля,
+  // кнопки, блоки и пояснения. Здесь только то, чего схема знать не может:
+  // что делает кнопка, как поле применяется и чем наполняется пояснение.
+  // Текстовые поля сохраняются по событию change (потеря фокуса/Enter),
+  // чтобы не писать в settings.json на каждый символ.
+  var panelFields = {};   // путь настройки -> {spec, nodes, input, range}
+  var panelButtons = {};  // id кнопки -> элемент
+  var noteFillers = {};   // note_source -> нужно перерисовывать
+  var customSave = {};    // путь настройки -> поле со своим обработчиком
 
-  function updateFtpVisibility() {
-    var on = document.getElementById("ftp-active").checked;
-    document.getElementById("ftp-fields").hidden = !on;
-  }
-
-  function updateFtpDirNote() {
-    var dir = document.getElementById("ftp-dir").value.trim();
-    document.getElementById("ftp-dir-note").textContent = dir
-      ? t("sheet.ftp.dir.ok")
-      : t("sheet.ftp.dir.empty");
-  }
-
-  function initFtp(settings) {
-    FTP_FIELDS.forEach(function(spec) {
-      var el = document.getElementById(spec[0]);
-      var value = settings[spec[1]];
-      if (spec[2] === "bool") el.checked = value !== false && !!value;
-      else if (spec[2] === "int") el.value = value || FTP_DEFAULTS[spec[1]] || "";
-      else el.value = value || el.placeholder || "";
-    });
-    updateFtpVisibility();
-    updateFtpDirNote();
-    FTP_FIELDS.forEach(function(spec) {
-      var el = document.getElementById(spec[0]);
-      var event = (spec[2] === "bool" || spec[2] === "int") ? "change" : "change";
-      el.addEventListener(event, function() {
-        var value = spec[2] === "bool" ? this.checked
-                  : spec[2] === "int" ? parseInt(this.value, 10) || 0
-                  : this.value.trim();
-        if (spec[1] === "ftp_active") updateFtpVisibility();
-        if (spec[1] === "ftp_dir") updateFtpDirNote();
-        pywebview.api.save_setting(spec[1], value);
+  function el(tag, cls, attrs) {
+    var node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (Array.isArray(attrs)) {
+      attrs.forEach(function(n) { node.appendChild(n); });
+    } else if (attrs) {
+      Object.keys(attrs).forEach(function(k) {
+        if (attrs[k] !== undefined && attrs[k] !== null) node.setAttribute(k, attrs[k]);
       });
+    }
+    return node;
+  }
+  function fieldSpec(path) {
+    var groups = SETTINGS_SCHEMA.groups;
+    for (var i = 0; i < groups.length; i++) {
+      var fields = groups[i].fields;
+      for (var j = 0; j < fields.length; j++) {
+        if (fields[j].path === path) return fields[j];
+      }
+    }
+    return null;
+  }
+  function fieldOptions(path) {
+    var spec = fieldSpec(path);
+    return (spec && spec.options) || [];
+  }
+  function caption(key, cls) {
+    var node = el("span", cls, {"data-i18n": key});
+    node.textContent = t(key);
+    return node;
+  }
+  function labelNode(spec) {
+    var node = el("label", null, {for: spec.dom, "data-i18n": spec.label});
+    node.textContent = t(spec.label);
+    if (spec.title) {
+      node.setAttribute("data-i18n-title", spec.title);
+      node.title = t(spec.title);
+    }
+    return node;
+  }
+
+  // Одно поле схемы -> узлы и, если поле редактируемое, input (+range-зеркало).
+  function renderField(spec) {
+    if (spec.type === "actions") {
+      var buttons = spec.buttons.map(function(b) {
+        var btn = el("button", null, {type: "button", id: b.dom});
+        if (b.icon) {
+          var ico = el("span", "ta-ico");
+          ico.textContent = b.icon;
+          btn.appendChild(ico);
+        }
+        btn.appendChild(caption(b.label));
+        panelButtons[b.dom] = btn;
+        return btn;
+      });
+      // в строке кнопки не оборачиваем: строку собирает renderSettingsPanel
+      if (spec.row !== undefined && spec.row !== null) return {nodes: buttons};
+      return {nodes: [el("div", spec.row_class || (spec.browse_dest ? "row" : "theme-actions"), buttons)]};
+    }
+    if (spec.type === "note") {
+      var note = el(spec.inline ? "span" : "div", "note", {id: spec.dom});
+      if (spec.hidden) note.hidden = true;
+      // перерисовываем при правке настроек только те пояснения, чьё содержимое
+      // зависит от значения поля (остальные наполняют свои команды)
+      if (NOTE_FILLERS[spec.note_source]) noteFillers[spec.note_source] = true;
+      return {nodes: [note]};
+    }
+    if (spec.type === "bool" && spec.check) {
+      var check = el("div", "check");
+      var box = el("input", null, {type: "checkbox", id: spec.dom});
+      check.appendChild(box);
+      check.appendChild(caption(spec.label));
+      return {nodes: [check], input: box};
+    }
+    var nodes = [labelNode(spec)];
+    var input;
+    if (spec.type === "choice") {
+      input = el("select", null, {id: spec.dom});
+    } else if (spec.type === "int") {
+      input = el("input", null, {type: "number", id: spec.dom, min: spec.min, max: spec.max, step: spec.step});
+    } else {
+      input = el("input", null, {type: "text", id: spec.dom});
+      input.setAttribute("spellcheck", "false");
+      if (spec.type === "password") input.setAttribute("autocomplete", "off");
+      if (spec.placeholder) input.placeholder = spec.placeholder;
+    }
+    nodes.push(input);
+    var range = null;
+    if (spec.mirror === "range" && spec.dom_range) {
+      range = el("input", null, {type: "range", id: spec.dom_range, min: spec.min, max: spec.max, step: spec.step});
+      nodes.splice(1, 0, range);
+    }
+    return {nodes: nodes, input: input, range: range};
+  }
+
+  function renderSettingsPanel() {
+    var tabs = document.getElementById("settings-tabs");
+    var panels = document.getElementById("settings-panels");
+    tabs.innerHTML = "";
+    panels.innerHTML = "";
+    SETTINGS_SCHEMA.groups.forEach(function(group, gi) {
+      var tab = el("button", gi ? "tab" : "tab active", {type: "button", id: "tab-" + group.id});
+      tab.appendChild(caption(group.label));
+      tab.addEventListener("click", function() { switchSettingsTab(group.id); });
+      tabs.appendChild(tab);
+
+      var panel = el("div", null, {id: "panel-" + group.id});
+      if (gi) panel.hidden = true;
+      var out = [];        // узлы панели
+      var boxNodes = null; // узлы текущего блока
+      var rowNodes = null; // узлы текущей строки
+      var rowIdx = null;
+      var rowCls = null;
+      var boxName = null;
+      function flushRow() {
+        if (rowNodes) {
+          (boxNodes || out).push(el("div", rowCls, rowNodes));
+          rowNodes = null; rowIdx = null; rowCls = null;
+        }
+      }
+      function flushBox() {
+        flushRow();
+        if (boxNodes) { out.push(el("div", "settings-box", boxNodes)); boxNodes = null; }
+      }
+      group.fields.forEach(function(spec) {
+        if (spec.in_panel === false) return;
+        if ((spec.box || null) !== boxName) {
+          flushBox();
+          boxName = spec.box || null;
+          if (boxName) boxNodes = [caption(group.boxes[boxName], "settings-box-title")];
+        }
+        var part = renderField(spec);
+        if (spec.row !== undefined && spec.row !== null) {
+          // поля с одинаковым row встают в одну строку (label + input)
+          if (rowNodes && spec.row !== rowIdx) flushRow();
+          if (!rowNodes) { rowNodes = []; rowIdx = spec.row; rowCls = spec.row_class || "range-row"; }
+          part.nodes.forEach(function(n) { rowNodes.push(n); });
+        } else {
+          flushRow();
+          var host = boxNodes || out;
+          part.nodes.forEach(function(n) { host.push(n); });
+        }
+        panelFields[spec.path || spec.dom] = {spec: spec, nodes: part.nodes, input: part.input, range: part.range};
+      });
+      flushBox();
+      out.forEach(function(n) { panel.appendChild(n); });
+      panels.appendChild(panel);
     });
-    document.getElementById("ftp-test").addEventListener("click", async function() {
+  }
+
+  function switchSettingsTab(name) {
+    SETTINGS_SCHEMA.groups.forEach(function(group) {
+      document.getElementById("panel-" + group.id).hidden = group.id !== name;
+      document.getElementById("tab-" + group.id).classList.toggle("active", group.id === name);
+    });
+  }
+
+  // Кнопки панели: в схеме у кнопки есть dom и подпись, здесь - только действие.
+  var ACTIONS = {
+    "reload-themes": function() { reloadThemes(); },
+    "open-themes": function() { openThemesFolder(); },
+    "reload-fonts": function() { reloadFonts(); },
+    "download-fonts": function() { downloadFonts(); },
+    "open-fonts": function() { openFontsFolder(); },
+    "browse": async function() {
+      var picked = await pywebview.api.browse_folder();
+      if (picked) panelFields["ui.dest"].input.value = picked;
+    },
+    "ftp-test": async function() {
       var note = document.getElementById("ftp-test-note");
       note.className = "note";
       note.textContent = t("sheet.ftp.testing");
@@ -623,7 +744,71 @@
         note.className = "note bad";
         note.textContent = (res && res.error) || t("sheet.ftp.test_fail");
       }
+    }
+  };
+  var NOTE_FILLERS = {ftpDirNote: updateFtpDirNote};
+  function refreshNotes() {
+    Object.keys(noteFillers).forEach(function(src) { NOTE_FILLERS[src](); });
+  }
+
+  function fillSettings(settings, initData) {
+    Object.keys(panelFields).forEach(function(key) {
+      var f = panelFields[key], spec = f.spec, node = f.input;
+      if (!node) return;
+      var value = spec.value_source ? initData[spec.value_source] : settings[spec.setting];
+      if (spec.type === "bool") node.checked = value !== false && !!value;
+      else if (spec.type === "text" || spec.type === "password") node.value = value || node.placeholder || "";
+      else node.value = value || spec.default;
+      if (f.range) f.range.value = node.value;
     });
+  }
+
+  function bindSettings() {
+    Object.keys(panelFields).forEach(function(key) {
+      var f = panelFields[key], spec = f.spec, node = f.input;
+      if (!node || customSave[key]) return;
+      node.addEventListener("change", function() {
+        var value = spec.type === "bool" ? node.checked : node.value.trim();
+        if (f.range) f.range.value = value;
+        if (spec.setting) pywebview.api.save_setting(spec.setting, value);
+        applyVisibility();
+        refreshNotes();
+      });
+      if (f.range) {
+        f.range.addEventListener("input", function() {
+          node.value = this.value;
+          if (spec.setting) pywebview.api.save_setting(spec.setting, this.value);
+        });
+      }
+    });
+    Object.keys(ACTIONS).forEach(function(dom) {
+      if (panelButtons[dom]) panelButtons[dom].addEventListener("click", function() { ACTIONS[dom](); });
+    });
+  }
+
+  // Условия видимости описаны в схеме (visible_if) - здесь только их применение.
+  function applyVisibility() {
+    Object.keys(panelFields).forEach(function(key) {
+      var cond = panelFields[key].spec.visible_if;
+      if (!cond) return;
+      var src = panelFields[cond.key];
+      var show = !!(src && src.input && src.input.checked) === !!cond.equals;
+      panelFields[key].nodes.forEach(function(node) { node.hidden = !show; });
+    });
+  }
+
+  // Поля с собственным поведением: тема, язык, шрифты.
+  function onChange(path, fn) {
+    var f = panelFields[path];
+    if (!f || !f.input) return;
+    customSave[path] = true;
+    f.input.addEventListener("change", function() { fn(f.input, f.spec); });
+  }
+
+  function updateFtpDirNote() {
+    var dir = panelFields["ftp.dir"].input.value.trim();
+    var note = document.getElementById("ftp-dir-note");
+    note.textContent = dir ? t("sheet.ftp.dir.ok") : t("sheet.ftp.dir.empty");
   }
 
   function collect() {
@@ -741,24 +926,14 @@
     FONTS = initData.fonts || FONTS;
     FONT_PICK.sans = initData.settings.font_sans || "";
     FONT_PICK.mono = initData.settings.font_mono || "";
+    renderSettingsPanel();
     buildThemeOptions();
     buildSubsOptions();
     buildQualOptions();
     buildTranscodeOptions();
     applyI18n();
-    document.getElementById("theme").value = initData.settings.theme || "scarred_mind";
-    document.getElementById("subs").value = initData.settings.subtitles || "en";
-    document.getElementById("qual").value = initData.settings.quality || "lossless";
-    document.getElementById("transcode").value = initData.settings.transcode || "none";
-    document.getElementById("retries").value = initData.settings.retries || 10;
-    document.getElementById("retries-range").value = initData.settings.retries || 10;
-    document.getElementById("socket_timeout").value = initData.settings.socket_timeout || 20;
-    document.getElementById("socket_timeout-range").value = initData.settings.socket_timeout || 20;
-    document.getElementById("lang").value = curLang;
-    document.getElementById("font-sans").value = initData.settings.font_sans || "";
-    document.getElementById("font-mono").value = initData.settings.font_mono || "";
-    applyTheme(document.getElementById("theme").value);
-    document.getElementById("dest").value = initData.default_dir;
+    fillSettings(initData.settings, initData);
+    applyTheme(panelFields["ui.theme"].input.value);
     document.getElementById("group").checked = initData.settings.group_playlist !== false;
     document.getElementById("status").textContent = t("status.ready");
     if (!initData.ffmpeg) {
@@ -766,62 +941,37 @@
       ffmpegOverlay.classList.remove("ffmpeg-hidden");
       ffmpegStatus.classList.add("ffmpeg-hidden");
     }
-    document.getElementById("theme").addEventListener("change", function() {
+    // тема: часть тем со своим entry собирается в Python (полный rebuild
+    // страницы), остальные применяются на лету, @font-face догружаем отдельно
+    onChange("ui.theme", function(node, spec) {
       updateThemeMeta();
-      var _t = THEMES[this.value] || {};
-      // Темы со своим entry собираются в Python: там нужен полный rebuild
-      // страницы (свой HTML). Остальные применяются на лету, @font-face темы
-      // догружаем отдельным запросом.
-      if (_t.entry) {
-        pywebview.api.set_theme(this.value);
+      var th = THEMES[node.value] || {};
+      if (th.entry) {
+        pywebview.api.set_theme(node.value);
         return;
       }
-      applyTheme(this.value);
-      pywebview.api.save_setting("theme", this.value);
-      if (_t.font || _t.font_mono) {
-        loadFontFaces([_t.font, _t.font_mono, FONT_PICK.sans, FONT_PICK.mono]);
+      applyTheme(node.value);
+      pywebview.api.save_setting(spec.setting, node.value);
+      if (th.font || th.font_mono) {
+        loadFontFaces([th.font, th.font_mono, FONT_PICK.sans, FONT_PICK.mono]);
       }
     });
-    document.getElementById("subs").addEventListener("change", function() {
-      pywebview.api.save_setting("subtitles", this.value);
+    onChange("ui.language", function(node, spec) {
+      curLang = node.value;
+      applyI18n();
+      buildFontOptions();   // подпись «системный» в списках шрифтов тоже переводится
+      applyTheme(panelFields["ui.theme"].input.value);
+      updateThemeMeta();
+      pywebview.api.save_setting(spec.setting, node.value);
     });
-    document.getElementById("qual").addEventListener("change", function() {
-      pywebview.api.save_setting("quality", this.value);
-    });
-    document.getElementById("transcode").addEventListener("change", function() {
-      pywebview.api.save_setting("transcode", this.value);
-    });
-    document.getElementById("retries").addEventListener("change", function() {
-      document.getElementById("retries-range").value = this.value;
-      pywebview.api.save_setting("retries", this.value);
-    });
-    document.getElementById("retries-range").addEventListener("input", function() {
-      document.getElementById("retries").value = this.value;
-      pywebview.api.save_setting("retries", this.value);
-    });
-    document.getElementById("socket_timeout").addEventListener("change", function() {
-      document.getElementById("socket_timeout-range").value = this.value;
-      pywebview.api.save_setting("socket_timeout", this.value);
-    });
-    document.getElementById("socket_timeout-range").addEventListener("input", function() {
-      document.getElementById("socket_timeout").value = this.value;
-      pywebview.api.save_setting("socket_timeout", this.value);
-    });
+    onChange("ui.font_sans", function(node) { setFont("font-sans", node.value); });
+    onChange("ui.font_mono", function(node) { setFont("font-mono", node.value); });
+    bindSettings();
+    applyVisibility();
+    refreshNotes();
     document.getElementById("group").addEventListener("change", function() {
       pywebview.api.save_setting("group_playlist", this.checked);
     });
-    ["font-sans", "font-mono"].forEach(function(id) {
-      document.getElementById(id).addEventListener("change", function() { setFont(id, this.value); });
-    });
-    document.getElementById("lang").addEventListener("change", function() {
-      curLang = this.value;
-      applyI18n();
-      buildFontOptions();   // подпись «системный» в списках шрифтов тоже переводится
-      applyTheme(document.getElementById("theme").value);
-      updateThemeMeta();
-      pywebview.api.save_setting("language", this.value);
-    });
-    initFtp(initData.settings);
     document.getElementById("download").addEventListener("click", async function() {
       var cfg = collect();
       if (!cfg.url) {
@@ -872,24 +1022,10 @@
       document.getElementById("sheet-resize").hidden = true;
       stopSheetResize();
     }
-    function switchSettingsTab(tab) {
-      ["ui", "dl", "ftp"].forEach(function(name) {
-        document.getElementById("panel-" + name).hidden = name !== tab;
-        document.getElementById("tab-" + name).classList.toggle("active", name === tab);
-      });
-    }
     document.getElementById("settings-btn").addEventListener("click", openSettings);
     document.getElementById("settings-close").addEventListener("click", closeSettings);
-    document.getElementById("reload-themes").addEventListener("click", function() { reloadThemes(); });
-    document.getElementById("open-themes").addEventListener("click", function() { openThemesFolder(); });
-    document.getElementById("reload-fonts").addEventListener("click", function() { reloadFonts(); });
-    document.getElementById("download-fonts").addEventListener("click", function() { downloadFonts(); });
-    document.getElementById("open-fonts").addEventListener("click", function() { openFontsFolder(); });
     document.getElementById("settings-overlay").addEventListener("click", closeSettings);
     initSheetResize();
-    document.getElementById("tab-ui").addEventListener("click", function() { switchSettingsTab("ui"); });
-    document.getElementById("tab-dl").addEventListener("click", function() { switchSettingsTab("dl"); });
-    document.getElementById("tab-ftp").addEventListener("click", function() { switchSettingsTab("ftp"); });
     document.addEventListener("keydown", function(ev) {
       if (ev.key === "Escape") closeSettings();
     });

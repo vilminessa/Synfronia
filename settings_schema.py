@@ -31,8 +31,12 @@ settings.json получается из группы и ключа: у груп�
     mirror       "range" - у поля есть ползунок
     check        поле рисуется строкой-флажком (текст подписи рядом)
     box          имя блока-секции внутри группы (см. boxes группы)
-    row          номер строки внутри блока: поля с одним row в одной строке
+    row          номер строки: поля с одинаковым row встают в одну строку
+    row_class    класс строки (по умолчанию range-row; "row" - поле + кнопка)
     inline       True для пояснения, которое живёт в строке с кнопкой
+    hidden       поле скрыто при открытии панели
+    value_source имя значения в ответе get_initial (default_dir) - для полей,
+                 которых нет в settings.json
     visible_if   {"key": ..., "equals": ...} - поле видно только при условии
     live         применить сразу, без перезагрузки страницы
     secret       значение не показывать в подсказках и логах
@@ -54,14 +58,15 @@ CORE_GROUPS = [
             {"key": "theme", "type": "choice", "label": "sheet.theme.label",
              "default": "scarred_mind", "options_source": "themes", "dom": "theme",
              "live": True, "note_source": "themeMeta"},
+            {"type": "note", "transient": True, "dom": "theme-meta", "note_source": "themeMeta"},
             {"type": "actions", "transient": True, "buttons": [
                 {"dom": "reload-themes", "icon": "⟳", "label": "sheet.theme.reload"},
                 {"dom": "open-themes", "icon": "⤢", "label": "sheet.theme.open"},
             ]},
             # папка загрузки - не настройка: значение приходит из get_initial()
             {"key": "dest", "type": "text", "label": "sheet.dest.label", "dom": "dest",
-             "transient": True, "placeholder": ""},
-            {"type": "actions", "transient": True, "buttons": [
+             "transient": True, "placeholder": "", "value_source": "default_dir", "row": 1},
+            {"type": "actions", "transient": True, "row": 1, "row_class": "row", "buttons": [
                 {"dom": "browse", "label": "sheet.browse", "browse_dest": True},
             ]},
             {"key": "font_sans", "type": "choice", "label": "sheet.font.sans",
@@ -74,7 +79,7 @@ CORE_GROUPS = [
                 {"dom": "download-fonts", "icon": "⤓", "label": "sheet.font.download"},
                 {"dom": "open-fonts", "icon": "⤢", "label": "sheet.font.open"},
             ]},
-            {"type": "note", "transient": True, "dom": "font-dl-note"},
+            {"type": "note", "transient": True, "dom": "font-dl-note", "hidden": True},
         ],
     },
 ]
@@ -257,7 +262,12 @@ def options_of(key: str):
 
 
 def schema_json() -> dict:
-    """Схема для страницы: та же структура, но с вычисленными путями и dom."""
+    """Схема для страницы: те же группы, но с готовыми путями и id.
+
+    Панель настроек рисуется по этому JSON (app.js renderSettingsPanel), поэтому
+    здесь всё, что нужно браузеру, без обращений к Python: плоское имя настройки
+    для save_setting, абсолютный путь в visible_if, id элементов.
+    """
     out = {"groups": []}
     for group in groups():
         item = {
@@ -272,7 +282,14 @@ def schema_json() -> dict:
                 entry["path"] = path_of(group["id"], spec["key"])
                 if not spec.get("transient"):
                     flat = flat_name(group["id"], spec["key"])
+                    entry["setting"] = flat
                     entry["dom"] = spec.get("dom") or flat.replace("_", "-")
+            cond = spec.get("visible_if")
+            if cond:
+                entry["visible_if"] = {
+                    "key": path_of(group["id"], cond["key"]),
+                    "equals": cond.get("equals", True),
+                }
             item["fields"].append(entry)
         out["groups"].append(item)
     return out
