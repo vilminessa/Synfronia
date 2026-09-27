@@ -114,7 +114,12 @@ const DL_READ = `(function () {
       pct = b.querySelector(".dl-pct"), ico = b.querySelector(".dl-icon");
   var r = b.getBoundingClientRect();
   return {
-    cls: b.className, w: Math.round(r.width), pct: pct.textContent, label: lbl.textContent,
+    cls: b.className, w: Math.round(r.width), h: Math.round(r.height),
+    pct: pct.textContent, label: lbl.textContent,
+    // подпись в потоке задаёт кнопке высоту: если её оторвать в absolute,
+    // в потоке не останется ничего и высота схлопнется до отступов
+    labelInFlow: getComputedStyle(lbl).position === "relative" &&
+      lbl.getBoundingClientRect().height > 8,
     svg: ico.querySelectorAll("svg").length,
     shapes: ico.querySelectorAll("svg path, svg circle").length,
     iconOpacity: +parseFloat(getComputedStyle(ico).opacity),
@@ -231,14 +236,30 @@ async function waitForPage() {
       switchSettingsTab("ftp");
       function count() {
         var panel = document.getElementById("panel-ftp");
-        return {visible: [].slice.call(panel.querySelectorAll("input, select, button, label, .note"))
+        // .settings-box в списке намеренно: пустая рамка «Подключение» с
+        // заголовком тоже видна пользователю и тоже считается мусором
+        return {visible: [].slice.call(panel.querySelectorAll(
+                 "input, select, button, label, .note, .settings-box, .settings-box-title"))
           .filter(function (el) { return el.offsetParent !== null; }).length,
+          boxes: [].slice.call(panel.querySelectorAll(".settings-box"))
+            .filter(function (el) { return el.offsetParent !== null; }).length,
           overflowX: panel.scrollWidth - panel.clientWidth};
+      }
+      function mode() {
+        var s = document.getElementById("ftp-mode");
+        return {n: s.options.length, texts: [].slice.call(s.options).map(function (o) { return o.textContent; }),
+                value: s.value};
       }
       var out = {off: count()};
       flag.checked = true;
       flag.dispatchEvent(new Event("change"));
       out.on = count();
+      out.modeRu = mode();
+      // смена языка: подписи опций должны переехать вместе с интерфейсом
+      var was = curLang;
+      curLang = "en"; applyI18n();
+      out.modeEn = mode();
+      curLang = was; applyI18n();
       out.clipped = [].slice.call(document.querySelectorAll("#panel-ftp select, #panel-ftp button"))
         .filter(function (el) { return el.offsetParent !== null && el.scrollWidth > el.clientWidth + 1; })
         .map(function (el) { return el.id; });
@@ -251,13 +272,26 @@ async function waitForPage() {
       return out;
     })()`);
     console.log("--- вкладка FTP ---");
-    const ftpOk = ftp.on.visible > ftp.off.visible && ftp.back.visible === ftp.off.visible &&
-                  ftp.on.overflowX <= 0 && !ftp.clipped.length;
-    console.log(`  флажок выключен: видно ${ftp.off.visible} полей, включён: ${ftp.on.visible}` +
-      `, снова выключен: ${ftp.back.visible}, перелив=${ftp.on.overflowX}px` +
-      `${ftpOk ? "" : "  <-- FAIL"}`);
+    const ftpChecks = [
+      ["флажок открывает и снова закрывает поля", ftp.on.visible > ftp.off.visible &&
+        ftp.back.visible === ftp.off.visible],
+      ["выключенный флажок убирает рамку «Подключение»", ftp.off.boxes === 0 &&
+        ftp.on.boxes === 1 && ftp.back.boxes === 0],
+      ["«Режим» заполнен двумя вариантами", ftp.modeRu.n === 2 && ftp.modeEn.n === 2 &&
+        ftp.modeRu.value === "batch" && ftp.modeRu.texts.every(Boolean)],
+      ["«Режим» переводится при смене языка", ftp.modeEn.texts.every(Boolean) &&
+        ftp.modeEn.texts.join("|") !== ftp.modeRu.texts.join("|")],
+      ["нет переполнения и обрезки подписей", ftp.on.overflowX <= 0 && !ftp.clipped.length]
+    ];
+    console.log(`  флажок выключен: ${ftp.off.visible} полей, рамок ${ftp.off.boxes}; ` +
+      `включён: ${ftp.on.visible} полей, рамок ${ftp.on.boxes}; ` +
+      `снова выключен: ${ftp.back.visible} полей, рамок ${ftp.back.boxes}, перелив=${ftp.on.overflowX}px`);
+    console.log(`  «Режим» ${ftp.modeRu.n} [${ftp.modeRu.texts.join(" | ")}] = "${ftp.modeRu.value}"` +
+      ` -> en ${ftp.modeEn.n} [${ftp.modeEn.texts.join(" | ")}] = "${ftp.modeEn.value}"`);
+    ftpChecks.forEach(([name, okFlag]) => {
+      if (!okFlag) { console.log(`        FAIL: ${name}`); bad++; }
+    });
     if (ftp.clipped.length) console.log(`        обрезано: ${ftp.clipped.join(", ")}`);
-    if (!ftpOk) bad++;
 
     // --- растягивание панели настроек ---
     const rz = await evaluate(RESIZE);
@@ -324,6 +358,15 @@ async function waitForPage() {
       progress: {mode: "indeterminate"}}, "busy indeterminate");
     const det = await step({busy: true, status: "Качаю…", result: null,
       progress: {mode: "determinate", value: 42.4}}, "busy 42%");
+    // 2-й файл плейлиста: yt-dlp отсчитывает процент от размера этого файла,
+    // поэтому значение меньше 42 - заливка и число обязаны остаться на 42
+    const back = await step({busy: true, status: "Качаю…", result: null,
+      progress: {mode: "determinate", value: 11}}, "следующий файл 11%");
+    // постобработка: процент неизвестен, но рекорд не должен пропадать
+    const post = await step({busy: true, status: "Свожу дорожки…", result: null,
+      progress: {mode: "indeterminate"}}, "свожу (неопр.)");
+    const full = await step({busy: true, status: "Качаю…", result: null,
+      progress: {mode: "determinate", value: 100}}, "готово 100%");
     const ok = await step({busy: false, status: "Готов.", result: "ok",
       progress: {mode: "determinate", value: 100}}, "итог ok");
     const err = await step({busy: false, status: "Готов.", result: "error",
@@ -343,24 +386,46 @@ async function waitForPage() {
     if (after.cls.indexOf("dl-idle") === -1) dlBad++;
     if (after2.cls.indexOf("dl-idle") === -1) { console.log(`        через 3.3 с снова "${after2.cls}"  <-- FAIL (мигает)`); dlBad++; }
 
-    const widths = [idle, indet, det, ok, err, cancel, after].map((m) => m.w);
+    const all = [idle, indet, det, back, post, full, ok, err, cancel, after];
+    const widths = all.map((m) => m.w);
     const wMin = Math.min(...widths), wMax = Math.max(...widths);
     console.log(`  ширина кнопки ${wMin}..${wMax}px (разброс ${wMax - wMin}px)` +
       `${wMax - wMin <= 1 ? "" : "  <-- FAIL (прыгает)"}`);
     if (wMax - wMin > 1) dlBad++;
+    // высота: подпись в потоке держит кнопку такой же, как соседняя «Отмена»
+    const hMin = Math.min(...all.map((m) => m.h));
+    const stopH = await evaluate(
+      `Math.round(document.getElementById("stop").getBoundingClientRect().height)`);
+    console.log(`  высота кнопки ${hMin}px, «Отмена» ${stopH}px` +
+      `${hMin >= 28 ? "" : "  <-- FAIL (схлопнулась)"}`);
+    if (hMin < 28) dlBad++;
+    if (Math.abs(hMin - stopH) > 1) {
+      console.log(`        высота «Скачать» ${hMin}px != «Отмена» ${stopH}px  <-- FAIL`);
+      dlBad++;
+    }
 
     const checks = [
       ["idle: нет иконки, заливка 0", idle.svg === 0 && idle.fillPct === "0%" && idle.pct === ""],
       ["idle: заголовок «Скачать»", idle.title === dlTitles.idle && idle.aria === dlTitles.idle],
       ["idle: кнопка активна", idle.dlDisabled === false && idle.stopDisabled === true],
-      ["индикатор: класс + бегунок", /dl-busy/.test(indet.cls) && /dl-indeterminate/.test(indet.cls)],
-      ["индикатор: многоточие + анимации", indet.pct === "\u2026" && indet.fillAnim === "dl-run" &&
-        indet.sheenAnim === "dl-sheen" && /38%/.test(indet.fillPct) && indet.fillW > 0],
+      ["высота: подпись в потоке", all.every((m) => m.labelInFlow)],
+      ["индикатор: класс + блик", /dl-busy/.test(indet.cls) && /dl-indeterminate/.test(indet.cls)],
+      ["индикатор: многоточие, заливка не едет", indet.pct === "\u2026" &&
+        indet.sheenAnim === "dl-sheen" && indet.fillAnim === "none" && indet.fillPct === "0%"],
       ["индикатор: заливка непрозрачна", det.fillBg !== "rgba(0, 0, 0, 0)" && indet.fillBg !== "rgba(0, 0, 0, 0)"],
       ["индикатор: кнопка выкл, отмена вкл", indet.dlDisabled === true && indet.stopDisabled === false],
       ["42%: округление и ширина заливки", det.pct === "42%" &&
         Math.abs(parseFloat(det.fillPct) - 42.4) < 0.05 && det.fillW > 0 &&
         Math.abs(det.fillW - Math.round(det.w * 0.424)) <= 2 && det.fillAnim === "none"],
+      ["11% не откатывает 42%", back.pct === "42%" &&
+        Math.abs(parseFloat(back.fillPct) - parseFloat(det.fillPct)) < 0.05 &&
+        Math.abs(back.fillW - det.fillW) <= 2],
+      ["свожу: остаётся 42% + блик", post.pct === "42%" &&
+        Math.abs(parseFloat(post.fillPct) - parseFloat(det.fillPct)) < 0.05 &&
+        /dl-indeterminate/.test(post.cls) && post.sheenAnim === "dl-sheen" &&
+        Math.abs(post.fillW - det.fillW) <= 2],
+      ["100% заливает кнопку", full.pct === "100%" && full.fillPct === "100%" &&
+        Math.abs(full.fillW - full.w) <= 2],
       ["ok: лайк, анимация, подпись", ok.svg === 1 && /dl-ok/.test(ok.cls) &&
         ok.iconAnim === "dl-pop" && ok.iconOpacity === 1 && ok.labelOpacity === 0 &&
         ok.title === dlTitles.done && ok.fillPct === "0%"],

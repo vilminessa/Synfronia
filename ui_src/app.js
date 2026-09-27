@@ -197,8 +197,13 @@
     return key;
   }
 
-  function fillSelect(id, opts, keepValue) {
-    var sel = document.getElementById(id);
+  // Наполнение <select>: opts = [["value", "i18n.key"], ...]. keepValue=true
+  // сохраняет выбор - список пересобирается при смене языка и при первой
+  // отрисовке, когда значения из настроек ещё нет. Если прежнего значения в
+  // списке не оказалось, берём первый вариант, чтобы поле не осталось пустым
+  // (так же поступает buildThemeOptions).
+  function fillSelectNode(sel, opts, keepValue) {
+    if (!sel || !opts || !opts.length) return;
     if (!keepValue) keepValue = sel.value;
     sel.innerHTML = "";
     opts.forEach(function(o) {
@@ -208,6 +213,13 @@
       sel.appendChild(opt);
     });
     sel.value = keepValue;
+    if (sel.value === "") {
+      var first = sel.querySelector("option");
+      sel.value = first ? first.value : "";
+    }
+  }
+  function fillSelect(id, opts, keepValue) {
+    fillSelectNode(document.getElementById(id), opts, keepValue);
   }
 
   function buildThemeOptions() {
@@ -350,6 +362,8 @@
     document.querySelectorAll("[data-i18n-title]").forEach(function(el) {
       el.title = t(el.getAttribute("data-i18n-title"));
     });
+    // списки из схемы переводим первыми, дальше их уточняют сборщики полей
+    fillSchemaChoices();
     buildThemeOptions();
     buildSubsOptions();
     buildQualOptions();
@@ -466,8 +480,13 @@
 
   /* ---- кнопка «Скачать»: прогресс внутри кнопки и SVG-результат ----
      Состояния: idle -> busy (determinate/indeterminate) -> ok|err|cancel -> idle.
-     Итог держим 2 секунды, потом возвращаем «Скачать». Ширину задаёт .dl-label
-     (проценты и иконка абсолютны), поэтому кнопка не прыгает. */
+     Итог держим 2 секунды, потом возвращаем «Скачать». Размеры задаёт .dl-label
+     (она в потоке), проценты и иконка накладываются поверх.
+     Процент - рекорд за текущую загрузку: yt-dlp считает его от размера
+     ТЕКУЩЕГО файла, так что в плейлисте значение возвращалось к началу, а на
+     постобработке и вовсе пропадало. dlBest не даёт заливке откатиться, а в
+     неопределённом режиме мы не меняем ни заливку, ни число - только гоним
+     блик, поэтому кнопка не мигает. */
   var DL_STATES = ["idle", "busy", "ok", "err", "cancel"];
   var DL_ICON = {
     ok: '<svg viewBox="0 0 24 24"><path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"/></svg>',
@@ -479,9 +498,9 @@
   var DL_RESULT = {ok: "ok", error: "err", cancelled: "cancel"};
   var DL_RESET_MS = 2000;
   var dlState = "idle";
-  var dlPct = 0;
+  var dlBest = 0;         // рекорд процента за загрузку
   var dlIndeterminate = false;
-  var dlShown = null;   // какой result уже показан, чтобы не мигать после сброса
+  var dlShown = null;     // какой result уже показан, чтобы не мигать после сброса
   var dlTimer = 0;
 
   function updateDownloadTitle() {
@@ -492,11 +511,9 @@
   }
   function setDownloadState(state, pct, indeterminate) {
     if (DL_STATES.indexOf(state) === -1) state = "idle";
-    dlPct = Math.max(0, Math.min(100, pct || 0));
-    dlIndeterminate = !!indeterminate;
     var btn = document.getElementById("download");
-    btn.classList.toggle("dl-indeterminate", state === "busy" && dlIndeterminate);
     if (state !== dlState) {
+      if (state === "busy") dlBest = 0;          // новая загрузка - новый рекорд
       clearTimeout(dlTimer);
       dlTimer = 0;
       DL_STATES.forEach(function(s) { btn.classList.remove("dl-" + s); });
@@ -510,10 +527,15 @@
         }, DL_RESET_MS);
       }
     }
-    btn.querySelector(".dl-pct").textContent =
-      state === "busy" ? (dlIndeterminate ? "\u2026" : Math.round(dlPct) + "%") : "";
-    btn.style.setProperty("--dl-pct",
-      state !== "busy" ? "0%" : (dlIndeterminate ? "38%" : dlPct + "%"));
+    // рекорд только растёт; в неопределённом режиме значение не трогаем
+    if (state === "busy" && !indeterminate) dlBest = Math.max(dlBest, Math.min(100, pct || 0));
+    dlIndeterminate = !!indeterminate;
+    btn.classList.toggle("dl-indeterminate", state === "busy" && dlIndeterminate);
+    // многоточие - только пока процент ещё ни разу не пришёл
+    var text = state !== "busy" ? "" : (dlBest > 0 ? Math.round(dlBest) + "%" : "\u2026");
+    var pctNode = btn.querySelector(".dl-pct");
+    if (pctNode.textContent !== text) pctNode.textContent = text;
+    btn.style.setProperty("--dl-pct", state !== "busy" || dlBest <= 0 ? "0%" : dlBest + "%");
     updateDownloadTitle();
   }
   function setDownloadResult(result) {
@@ -629,6 +651,10 @@
   var panelButtons = {};  // id кнопки -> элемент
   var noteFillers = {};   // note_source -> нужно перерисовывать
   var customSave = {};    // путь настройки -> поле со своим обработчиком
+  // обёртки (блок .settings-box, строка .range-row) с полями внутри: если все
+  // поля скрыты, пустая рамка и пустая строка тоже убираются, иначе на вкладке
+  // FTP остаётся рамка «Подключение» с пустым содержимым
+  var panelWrappers = []; // [{el, keys}]
 
   function el(tag, cls, attrs) {
     var node = document.createElement(tag);
@@ -655,6 +681,16 @@
   function fieldOptions(path) {
     var spec = fieldSpec(path);
     return (spec && spec.options) || [];
+  }
+  // Пересборка списков, опции которых пришли прямо из схемы (ftp.mode и т.п.).
+  // Поля со своей логикой (dl.transcode с недоступными кодировщиками) дальше
+  // переопределяются своими сборщиками.
+  function fillSchemaChoices() {
+    Object.keys(panelFields).forEach(function(key) {
+      var f = panelFields[key], spec = f.spec;
+      if (spec.type !== "choice" || !spec.options) return;
+      fillSelectNode(f.input, spec.options, true);
+    });
   }
   function caption(key, cls) {
     var node = el("span", cls, {"data-i18n": key});
@@ -708,6 +744,9 @@
     var input;
     if (spec.type === "choice") {
       input = el("select", null, {id: spec.dom});
+      // опции из схемы наполняем сразу: иначе у поля без своей функции
+      // (например ftp.mode) список остался бы пустым
+      fillSelectNode(input, spec.options, true);
     } else if (spec.type === "int") {
       input = el("input", null, {type: "number", id: spec.dom, min: spec.min, max: spec.max, step: spec.step});
     } else {
@@ -730,6 +769,7 @@
     var panels = document.getElementById("settings-panels");
     tabs.innerHTML = "";
     panels.innerHTML = "";
+    panelWrappers = [];
     SETTINGS_SCHEMA.groups.forEach(function(group, gi) {
       var tab = el("button", gi ? "tab" : "tab active", {type: "button", id: "tab-" + group.id});
       tab.appendChild(caption(group.label));
@@ -738,41 +778,53 @@
 
       var panel = el("div", null, {id: "panel-" + group.id});
       if (gi) panel.hidden = true;
-      var out = [];        // узлы панели
-      var boxNodes = null; // узлы текущего блока
-      var rowNodes = null; // узлы текущей строки
+      var out = [];         // узлы панели
+      var boxNodes = null;  // узлы текущего блока
+      var boxKeys = null;   // пути полей блока
+      var rowNodes = null;  // узлы текущей строки
+      var rowKeys = null;   // пути полей строки
       var rowIdx = null;
       var rowCls = null;
       var boxName = null;
+      function wrap(host, node, keys) {
+        host.push(node);
+        panelWrappers.push({el: node, keys: keys});
+      }
       function flushRow() {
         if (rowNodes) {
-          (boxNodes || out).push(el("div", rowCls, rowNodes));
-          rowNodes = null; rowIdx = null; rowCls = null;
+          wrap(boxNodes || out, el("div", rowCls, rowNodes), rowKeys);
+          rowNodes = rowKeys = null; rowIdx = rowCls = null;
         }
       }
       function flushBox() {
         flushRow();
-        if (boxNodes) { out.push(el("div", "settings-box", boxNodes)); boxNodes = null; }
+        if (boxNodes) {
+          wrap(out, el("div", "settings-box", boxNodes), boxKeys);
+          boxNodes = boxKeys = null;
+        }
       }
       group.fields.forEach(function(spec) {
         if (spec.in_panel === false) return;
         if ((spec.box || null) !== boxName) {
           flushBox();
           boxName = spec.box || null;
-          if (boxName) boxNodes = [caption(group.boxes[boxName], "settings-box-title")];
+          if (boxName) { boxNodes = [caption(group.boxes[boxName], "settings-box-title")]; boxKeys = []; }
         }
         var part = renderField(spec);
+        var key = spec.path || spec.dom;
+        if (boxKeys) boxKeys.push(key);
         if (spec.row !== undefined && spec.row !== null) {
           // поля с одинаковым row встают в одну строку (label + input)
           if (rowNodes && spec.row !== rowIdx) flushRow();
-          if (!rowNodes) { rowNodes = []; rowIdx = spec.row; rowCls = spec.row_class || "range-row"; }
+          if (!rowNodes) { rowNodes = []; rowKeys = []; rowIdx = spec.row; rowCls = spec.row_class || "range-row"; }
+          rowKeys.push(key);
           part.nodes.forEach(function(n) { rowNodes.push(n); });
         } else {
           flushRow();
           var host = boxNodes || out;
           part.nodes.forEach(function(n) { host.push(n); });
         }
-        panelFields[spec.path || spec.dom] = {spec: spec, nodes: part.nodes, input: part.input, range: part.range};
+        panelFields[key] = {spec: spec, nodes: part.nodes, input: part.input, range: part.range};
       });
       flushBox();
       out.forEach(function(n) { panel.appendChild(n); });
@@ -860,6 +912,16 @@
       var src = panelFields[cond.key];
       var show = !!(src && src.input && src.input.checked) === !!cond.equals;
       panelFields[key].nodes.forEach(function(node) { node.hidden = !show; });
+    });
+    // Рамка блока и строка прячутся, когда скрыты все поля внутри: иначе на
+    // вкладке FTP остаётся пустая рамка «Подключение», а в строках - пустые
+    // отступы от margin.
+    panelWrappers.forEach(function(box) {
+      var any = box.keys.some(function(key) {
+        var f = panelFields[key];
+        return f && f.nodes.some(function(node) { return !node.hidden; });
+      });
+      box.el.hidden = !any;
     });
   }
 

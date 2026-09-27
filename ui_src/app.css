@@ -135,8 +135,9 @@
 
   /* ---- кнопка «Скачать»: прогресс и итог внутри самой кнопки ----
      Слои: .dl-fill (заливка) -> .dl-label (текст) -> .dl-pct (проценты) ->
-     .dl-icon (SVG-результат). Ширина кнопки задаётся текстом, проценты и
-     иконка абсолютны, поэтому ширина не прыгает при смене состояния.
+     .dl-icon (SVG-результат). Подпись остаётся в потоке - по ней кнопка
+     берёт высоту и ширину, поэтому она одинакова во всех состояниях, а
+     проценты и иконка накладываются поверх и не двигают её размер.
      Анимации - короткие и пружинистые, как микровзаимодействия Telegram. */
   .dl {
     position: relative; overflow: hidden;
@@ -158,7 +159,14 @@
   }
   /* вне прогресса заливки нет: у итога остаётся чистая поверхность */
   .dl:not(.dl-busy) .dl-fill { display: none; }
-  .dl-label, .dl-pct, .dl-icon {
+  /* подпись в потоке: из неё кнопка берёт высоту (как у соседней «Отмены»);
+     если сделать её абсолютной, в потоке не останется ничего и высота
+     схлопнется до отступов */
+  .dl-label {
+    position: relative; z-index: 2; display: block;
+    transition: opacity .18s, transform .18s; pointer-events: none;
+  }
+  .dl-pct, .dl-icon {
     position: absolute; inset: 0; z-index: 2; display: flex;
     align-items: center; justify-content: center; gap: 6px;
     transition: opacity .18s, transform .18s; pointer-events: none;
@@ -197,8 +205,9 @@
     85% { transform: translateX(2px); }
     100% { opacity: 1; transform: scale(1) translateX(0); }
   }
-  /* бегунок, пока yt-dlp не сообщил процент: заливка ездит с бликом */
-  .dl.dl-indeterminate .dl-fill { width: 38%; animation: dl-run 1.5s cubic-bezier(.65, 0, .35, 1) infinite; }
+  /* пока процент неизвестен, заливка не едет: по ней ходит блик. Сама заливка
+     всегда равна рекорду процента (dlBest), поэтому на новом файле плейлиста
+     не откатывается */
   .dl.dl-indeterminate::after {
     /* сплошной градиент + opacity вместо color-mix: работает в любом WebView2 */
     content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none;
@@ -206,14 +215,7 @@
     opacity: .22;
     transform: translateX(-100%); animation: dl-sheen 1.5s ease-in-out infinite;
   }
-  @keyframes dl-run { 0% { left: -38%; } 100% { left: 100%; } }
   @keyframes dl-sheen { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
-  /* иконка с галочкой дорисовывается штрихом, как в Telegram */
-  .dl.dl-ok .dl-icon path.check {
-    stroke-dasharray: 22; stroke-dashoffset: 22;
-    animation: dl-draw .34s .06s cubic-bezier(.4, 0, .2, 1) forwards;
-  }
-  @keyframes dl-draw { to { stroke-dashoffset: 0; } }
   /* disabled должен гасить кнопку, но не заливку прогресса и не иконку итога */
   .dl:disabled { opacity: 1; cursor: default; }
   .dl.dl-busy:disabled { background: var(--surface); color: var(--text); }
@@ -223,7 +225,7 @@
   }
   @media (prefers-reduced-motion: reduce) {
     .dl, .dl-fill, .dl-label, .dl-pct, .dl-icon,
-    .dl.dl-indeterminate .dl-fill, .dl.dl-indeterminate::after,
+    .dl.dl-indeterminate::after,
     .dl.dl-ok .dl-icon, .dl.dl-err .dl-icon, .dl.dl-cancel .dl-icon { animation: none !important; transition: none !important; }
   }
   #status { margin-top: 6px; font-size: 13px; height: 18px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
