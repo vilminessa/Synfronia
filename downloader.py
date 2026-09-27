@@ -389,6 +389,40 @@ def _result_items(info: dict, dest: str, when: float) -> list[tuple[str, dict]]:
     return items
 
 
+def _download_counts(info: dict | None) -> tuple[int, int]:
+    """Сколько видео скачалось и сколько было в плейлисте: (скачано, всего).
+
+    Считаем по тому же признаку, что и _result_items: filepath yt-dlp ставит в
+    post_process, то есть ровно после того, как файл записан на диск. Запись
+    без filepath - видео не скачалось, None на её месте (ignoreerrors) - не
+    удалось даже извлечь. Всего считаем вместе с ними, иначе «часть файлов
+    не скачалась» прятала бы провали.
+
+    info is None - extract_info не вернул ничего, судить не по чему: отдаём
+    (0, 0), и вызывающий решает по флагу ошибок.
+    """
+    ok = total = 0
+
+    def visit(node) -> None:
+        nonlocal ok, total
+        if node is None:
+            total += 1
+            return
+        if not isinstance(node, dict):
+            return
+        if node.get("entries") is not None:
+            for entry in node.get("entries") or []:
+                visit(entry)
+            return
+        total += 1
+        if node.get("filepath"):
+            ok += 1
+
+    if isinstance(info, dict):
+        visit(info)
+    return ok, total
+
+
 class Downloader:
     """Запускает yt-dlp в рабочем потоке и стучится в UI через колбэки."""
 
@@ -399,6 +433,7 @@ class Downloader:
         self._stop = threading.Event()
         self._wd_done = threading.Event()
         self._errors = False
+        self._summary = ("ok", 0, 0)
         self._finished = []
         # сеть читается один раз на загрузку: перечитывать файл на каждой
         # попытке смысла нет, а значения всё равно приходят из схемы
@@ -421,6 +456,16 @@ class Downloader:
     @property
     def failed(self) -> bool:
         return self._errors
+
+    @property
+    def summary(self) -> tuple[str, int, int]:
+        """Итог последней загрузки: (режим, скачано, всего).
+
+        Режим отвечает на вопрос «что именно не так», а не «были ли ошибки»:
+        ok - скачалось всё, partial - часть плейлиста, failed - не скачалось
+        ничего, warn - всё скачалось, но в логе были ошибки постобработки.
+        """
+        return self._summary
 
     # -- колбэки в yt-dlp -----------------------------------------------------
     def _log(self, level: str, msg: str) -> None:
@@ -596,6 +641,7 @@ class Downloader:
     ) -> None:
         os.makedirs(dest, exist_ok=True)
         self._errors = False
+        self._summary = ("ok", 0, 0)
         self._finished = []
         when = time.time()
         opts = self._build_opts(dest, playlist, group, subtitles, quality)
@@ -608,6 +654,7 @@ class Downloader:
             label = self._t("trans." + transcode) if "trans." + transcode in I18N["ru"] else (encoder["label"] if encoder else transcode)
             self._log("info", self._t("p.transcoding", label=label))
         candidates = self._format_candidates(quality)
+        last_info = None
         for i, fmt in enumerate(candidates):
             self._errors = False
             self._finished = []
@@ -626,9 +673,17 @@ class Downloader:
                     ).start()
                     self._register_pps(ydl, subs_on, transcode, quality)
                     info = ydl.extract_info(url, download=True)
+                    if info is not None:
+                        # попытка обнуляет info, но файлы на диске остались:
+                        # итог считаем по последнему непустому ответу, иначе
+                        # ретрай после ошибки постобработки выглядел бы так,
+                        # будто не скачалось ничего
+                        last_info = info
                     if info and info.get("_type") == "playlist":
-                        done = [e for e in info.get("entries", []) if e]
-                        short = self._t("p.done.playlist", n=len(done), dest=os.path.basename(dest))
+                        # n - скачанные, а не записи: записи плейлиста включают
+                        # те, что не удалось даже извлечь
+                        got, _all = _download_counts(info)
+                        short = self._t("p.done.playlist", n=got, dest=os.path.basename(dest))
                     elif info:
                         short = self._t("p.done.single", title=info.get("title", "?"))
             except _StopDownload:
@@ -650,11 +705,26 @@ class Downloader:
                 break
         if info is not None and ftp is not None:
             self._upload_ftp(ftp, info, dest, when)
+        # Итог выбираем по тому, что реально скачалось, а не по флагу ошибок:
+        # одна неудачная попытка yt-dlp не делает «часть файлов» из одного
+        # видео, а «Готово» после провала не говорит ничего.
+        ok_n, all_n = _download_counts(last_info)
         if not self._errors:
+            self._summary = ("ok", ok_n, all_n)
             return
-        self._log("warning", self._t("p.done_errors"))
-        if short and info and info.get("_type") == "playlist":
-            self._log("info", short)
+        if all_n and ok_n >= all_n:
+            self._summary = ("warn", ok_n, all_n)
+        elif ok_n:
+            self._summary = ("partial", ok_n, all_n)
+        else:
+            self._summary = ("failed", ok_n, all_n)
+        mode, got, all_got = self._summary
+        if mode == "partial":
+            self._log("warning", self._t("p.done_partial", ok=got, total=all_got))
+        elif mode == "failed":
+            self._log("warning", self._t("p.failed"))
+        else:
+            self._log("warning", self._t("p.done_warn"))
 
     # -- выгрузка на FTP ------------------------------------------------------
     def _upload_ftp(self, ftp, info: dict, dest: str, when: float) -> None:

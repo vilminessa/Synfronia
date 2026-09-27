@@ -49,6 +49,21 @@ HTML = build_page(_settings.get("theme", "scarred_mind"))
 # какого места продолжать (см. Api.poll).
 LOG_BUFFER = 2000
 
+# Итог загрузки -> строка статуса. «Часть файлов» годится только для плейлиста,
+# где что-то скачалось, а что-то нет; обрыв связи на одном видео - это
+# «не удалось скачать», а «Готово» после ошибки постобработки - «были ошибки».
+_STATUS_KEY = {
+    "ok": "p.ready",
+    "partial": "p.done_partial",
+    "failed": "p.failed",
+    "warn": "p.done_warn",
+}
+
+
+def _summary(dl) -> tuple[str, int, int]:
+    """Итог загрузки от Downloader; без загрузчика считаем успехом."""
+    return getattr(dl, "summary", None) or ("ok", 0, 0)
+
 
 class Api:
     def __init__(self) -> None:
@@ -345,7 +360,7 @@ class Api:
                 ftp=ftp,
             )
         except Exception as exc:  # noqa: BLE001
-            crashed = True   # сброс не дошёл до Downloader.failed - итог «ошибка»
+            crashed = True   # сбой не дошёл до Downloader.failed - итог «ошибка»
             self._log("error", str(exc))
         finally:
             # yt-dlp после запроса остановки ещё какое-то время дорабатывает
@@ -353,15 +368,18 @@ class Api:
             # отмены берём из флага, выставленного stop_download()
             cancelled = self._cancel or bool(self.dl and self.dl.stopped)
             bad = crashed or bool(self.dl and self.dl.failed)
+            # Строка статуса отвечает на вопрос «что не так», а не «были ли
+            # ошибки»: обрыв связи на одном видео - это «не удалось скачать»,
+            # а не «часть файлов не скачалась».
+            mode, got, all_got = ("failed", 0, 0) if crashed else _summary(self.dl)
             with self._lock:
                 self._busy = False
                 self._result = "cancelled" if cancelled else ("error" if bad else "ok")
                 if cancelled:
                     self._status = tr(self._lang, "p.cancelled")
                 else:
-                    self._status = (
-                        tr(self._lang, "p.done_errors") if bad else tr(self._lang, "p.ready")
-                    )
+                    key = _STATUS_KEY.get(mode, "p.ready")
+                    self._status = tr(self._lang, key, ok=got, total=all_got)
                 self._progress = {"mode": "determinate", "value": 100.0}
 
     def test_ftp(self) -> dict:

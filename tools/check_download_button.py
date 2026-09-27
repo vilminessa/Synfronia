@@ -13,6 +13,7 @@ r"""Проверка кнопки «Скачать»: контракт result и
     python tools\check_download_button.py
 """
 
+import json
 import os
 import re
 import shutil
@@ -30,6 +31,7 @@ os.environ["LOCALAPPDATA"] = str(_ISO)
 
 import gui  # noqa: E402
 import i18n  # noqa: E402
+import downloader  # noqa: E402
 
 _checks = 0
 _fails: list[str] = []
@@ -51,12 +53,17 @@ def section(title: str) -> None:
 
 class FakeDownloader:
     """Загрузчик с теми же свойствами, что и настоящий: stop() ставит флаг,
-    а download() в своём finally снимает его (как в downloader.py)."""
+    а download() в своём finally снимает его (как в downloader.py).
 
-    def __init__(self, failed: bool = False, boom: bool = False) -> None:
+    summary - итог последней загрузки в том же виде, что отдаёт Downloader:
+    (режим, скачано, всего)."""
+
+    def __init__(self, failed: bool = False, boom: bool = False,
+                 mode: str = "ok", ok: int = 0, total: int = 0) -> None:
         self._stop = threading.Event()
         self.failed = failed
         self.boom = boom
+        self.summary = (mode, ok, total)
         self.calls: list[dict] = []
 
     @property
@@ -116,9 +123,9 @@ def main() -> int:
     ok(after["result"] == "ok", "обычный успех = ok", repr(after["result"]))
     ok(after["busy"] is False, "после загрузки busy снят")
 
-    run(api, FakeDownloader(failed=True))
+    run(api, FakeDownloader(failed=True, mode="failed"))
     err = api.poll()
-    ok(err["result"] == "error", "частичный провал = error", repr(err["result"]))
+    ok(err["result"] == "error", "ошибки в логе = error", repr(err["result"]))
     ok(err["status"], "при ошибке статус не пуст", repr(err["status"]))
 
     run(api, FakeDownloader(boom=True))
@@ -174,6 +181,101 @@ def main() -> int:
     ok(not missing, "подписи итогов есть во всех языках", str(missing))
     ok(any(i18n.I18N.get("ru", {}).get("btn.done") == "Готово" for _ in (0,)),
        "русская подпись успеха на месте")
+
+    # 5. что именно скачалось: счёт по info
+    section("5. _download_counts считает по filepath, а не по записям")
+    counts = downloader._download_counts
+    cases = [
+        ("нет info (сеть отвалилась)", None, (0, 0)),
+        ("одно видео скачано", {"filepath": "a.mp4"}, (1, 1)),
+        ("одно видео без файла", {"title": "a"}, (0, 1)),
+        ("плейлист 3 из 5, двое не извлечены",
+         {"_type": "playlist", "entries": [{"filepath": "1.mp4"}, {"filepath": "2.mp4"},
+                                           {"filepath": "3.mp4"}, None, None]}, (3, 5)),
+        ("плейлист 3 из 5, двое не скачаны",
+         {"_type": "playlist", "entries": [{"filepath": "1.mp4"}, {"filepath": "2.mp4"},
+                                           {"filepath": "3.mp4"}, {"title": "4"},
+                                           {"title": "5"}]}, (3, 5)),
+        ("пустой плейлист", {"_type": "playlist", "entries": []}, (0, 0)),
+        ("вложенный плейлист",
+         {"_type": "playlist", "entries": [
+             {"filepath": "1.mp4"},
+             {"_type": "playlist", "entries": [{"filepath": "2.mp4"}, None]}]}, (2, 3)),
+    ]
+    for label, info, want in cases:
+        got = counts(info)
+        ok(got == want, label, f"получили {got}, ждали {want}")
+
+    # 6. строка статуса по итогу, а не по флагу ошибок
+    section("6. статус говорит, что не так, а не «были ли ошибки»")
+    api._cancel = False   # как в start_download(): прошлая отмена не должна висеть
+    for mode, ok_n, total_n, key, wrong in [
+        ("ok", 1, 1, "p.ready", "p.done_partial"),
+        ("partial", 3, 5, "p.done_partial", "p.failed"),
+        ("failed", 0, 1, "p.failed", "p.done_partial"),
+        ("warn", 5, 5, "p.done_warn", "p.done_partial"),
+        ("что-то незнакомое", 0, 0, "p.ready", "p.done_partial"),
+    ]:
+        run(api, FakeDownloader(failed=True, mode=mode, ok=ok_n, total=total_n))
+        got = api.poll()["status"]
+        want = i18n.tr("en", key, ok=ok_n, total=total_n)
+        ok(got == want, f"{mode} -> {key}", f"{got!r} != {want!r}")
+        ok(got != i18n.tr("en", wrong, ok=ok_n, total=total_n),
+           f"{mode} не показывает {wrong}", repr(got))
+
+    # обрыв связи на одном видео: «часть файлов» тут быть не может
+    run(api, FakeDownloader(failed=True, mode="failed"))
+    single = api.poll()["status"]
+    ok(single == i18n.tr("en", "p.failed"), "обрыв на одном видео -> p.failed", repr(single))
+    ok("{ok}" not in i18n.tr("en", "p.failed") and "{ok}" in i18n.tr("en", "p.done_partial"),
+       "счётчики только в сообщении про частичный провал")
+
+    run(api, FakeDownloader(boom=True))
+    ok(api.poll()["status"] == i18n.tr("en", "p.failed"),
+       "исключение в _run -> p.failed, а не «Готов»")
+    api._cancel = True    # отмена нажата во время загрузки, итог - частичный
+    run(api, FakeDownloader(failed=True, mode="partial", ok=3, total=5))
+    cancelled = api.poll()["status"]
+    api._cancel = False
+    ok(cancelled == i18n.tr("en", "p.cancelled"), "отмена перекрывает «часть файлов»", repr(cancelled))
+
+    # 7. переводы новых итогов
+    section("7. итоги переведены во всех языках")
+    keys = ["p.failed", "p.done_warn", "p.done_partial"]
+    missing = {lang: [k for k in keys if not i18n.I18N.get(lang, {}).get(k)]
+               for lang in i18n.LANGUAGES}
+    missing = {lang: v for lang, v in missing.items() if v}
+    ok(not missing, "p.failed/p.done_warn/p.done_partial есть во всех языках", str(missing))
+    no_counts = {lang: k for lang in i18n.LANGUAGES
+                 for k in keys if "{ok}" in i18n.I18N.get(lang, {}).get(k, "")
+                 and "{total}" not in i18n.I18N.get(lang, {}).get(k, "")}
+    ok(not no_counts, "везде, где есть {ok}, есть и {total}", str(no_counts))
+    leftovers = {lang: k for lang in i18n.LANGUAGES
+                 for k in keys if "{ok}" in i18n.tr(lang, k, ok=1, total=2)}
+    ok(not leftovers, "подстановка ok/total не оставляет плейсхолдеров", str(leftovers))
+
+    # 8. старая установка: свой файл перевода не должен вернуть старый текст
+    # load_languages() отдаёт файлу приоритет над встроенной таблицей, поэтому
+    # менять текст существующего ключа нельзя - на уже настроенной машине он
+    # останется старым навсегда. Поэтому все новые итоги - новые ключи.
+    section("8. свой файл перевода не возвращает старые формулировки")
+    lang_dir = _ISO / "Synfronia" / "language"
+    lang_dir.mkdir(parents=True, exist_ok=True)
+    (lang_dir / "en.json").write_text(json.dumps({
+        "p.done_errors": "Done with errors - some files were not downloaded.",
+        "p.ready": "Ready.",
+    }, ensure_ascii=False), encoding="utf-8")
+    i18n.load_languages()
+    ok("p.done_errors" not in i18n.I18N["ru"],
+       "старый ключ про «часть файлов» убран из встроенных переводов")
+    got = i18n.tr("en", "p.done_partial", ok=3, total=5)
+    ok(got == "Done with errors - downloaded 3 of 5.",
+       "частичный провал со счётчиками даже со своим файлом перевода", repr(got))
+    ok("some files" not in i18n.tr("en", "p.done_partial", ok=3, total=5),
+       "старая формулировка про «часть файлов» нигде не всплывает")
+    run(api, FakeDownloader(failed=True, mode="partial", ok=3, total=5))
+    ok(api.poll()["status"] == "Done with errors - downloaded 3 of 5.",
+       "статус со своим файлом перевода показывает счётчики", repr(api.poll()["status"]))
 
     print(f"\nитог: {_checks - len(_fails)}/{_checks} ok")
     if _fails:
