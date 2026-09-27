@@ -13,6 +13,10 @@ import sys
 import tempfile
 from pathlib import Path
 
+import utf8_console  # локальный помощник tools/, доступен по sys.path[0] скрипта
+
+utf8_console.force_utf8()
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import settings_schema  # noqa: E402

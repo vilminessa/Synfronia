@@ -15,6 +15,10 @@ import ast
 import sys
 from pathlib import Path
 
+import utf8_console  # локальный помощник tools/, доступен по sys.path[0] скрипта
+
+utf8_console.force_utf8()
+
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "ui_src"
 OUT = ROOT / "ui.py"

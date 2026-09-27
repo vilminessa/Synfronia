@@ -250,6 +250,9 @@ ui_src/           — исходники интерфейса: index.html, app.c
 ui.py             — сгенерированный из ui_src/ интерфейс (в репозитории)
 assets/fonts/     — вшитые тестовые шрифты (OFL 1.1) и их лицензии
 tools/build_ui.py — сборщик ui.py из ui_src/ (нужен только разработчикам)
+tools/utf8_console.py — общий для tools/ перевод вывода в UTF-8: консоль Windows
+  живёт в однобайтовой кодовой странице (cp1251/cp437/cp866), где нет ни
+  кириллицы, ни «✕», и проверки без этого падают с UnicodeEncodeError
 based_settings.json — настройки по умолчанию (копируются в settings.json
   при первом запуске; недостающие ключи дописываются при обновлении)
 requirements.txt  — yt-dlp, pywebview, pyinstaller
@@ -272,6 +275,15 @@ python tools/build_ui.py --check    # проверить, что ui.py акту�
 в `APP_CSS`, `ui_src/app.js` — в `APP_JS`; все плейсхолдеры
 (`__THEME_ROOT__`, `__THEME_CSS__`, `__FONTS_CSS__`, `__APP_CSS__`,
 `__APPJS__`, `__I18N__`, `__THEMES__`) подставляются при сборке страницы.
+
+### Проверки для разработчиков
+
+```bat
+python tools/check_settings.py        # схема настроек, app.js, переводы
+python tools/check_test_fonts.py      # встроенные шрифты и докачка (без сети)
+python tools/check_download_button.py # кнопка «Скачать»: прогресс и итог
+python tools/check_tools_output.py    # скрипты печатают на любой кодовой странице
+```
 
 ## Источники компонентов
 

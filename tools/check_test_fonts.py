@@ -21,6 +21,10 @@ import sys
 import tempfile
 from pathlib import Path
 
+import utf8_console  # локальный помощник tools/, доступен по sys.path[0] скрипта
+
+utf8_console.force_utf8()
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
