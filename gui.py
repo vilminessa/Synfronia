@@ -61,6 +61,9 @@ class Api:
         self._lang = self.settings.get("language", "en")
         self._status = tr(self._lang, "p.ready")
         self._busy = False
+        # итог прошлой загрузки для кнопки: None | "ok" | "error" | "cancelled"
+        self._result: str | None = None
+        self._cancel = False
         self._progress = {"mode": "determinate", "value": 0.0}
         self._ffmpeg = {"downloading": False, "extracting": False, "pct": 0.0, "ok": False, "error": None}
         self._fonts_dl = {"downloading": False, "pct": 0.0, "error": None}
@@ -101,6 +104,7 @@ class Api:
             return {
                 "busy": self._busy,
                 "status": self._status,
+                "result": self._result,
                 "progress": dict(self._progress),
                 "logs": lines[start - oldest:],
                 "log_cursor": self._log_total,
@@ -309,6 +313,8 @@ class Api:
             self._log("warning", tr(self._lang, "p.playlist_warn"))
         with self._lock:
             self._busy = True
+            self._result = None
+            self._cancel = False
             self._status = tr(self._lang, "p.start")
             self._progress = {"mode": "indeterminate"}
         self.dl = Downloader(on_log=self._log, on_progress=self._on_progress, lang=self._lang)
@@ -326,6 +332,7 @@ class Api:
         return {}
 
     def _run(self, url, dest, playlist, group, subtitles, quality, transcode, ftp=None) -> None:
+        crashed = False
         try:
             self.dl.download(
                 url,
@@ -338,15 +345,23 @@ class Api:
                 ftp=ftp,
             )
         except Exception as exc:  # noqa: BLE001
+            crashed = True   # сброс не дошёл до Downloader.failed - итог «ошибка»
             self._log("error", str(exc))
         finally:
+            # yt-dlp после запроса остановки ещё какое-то время дорабатывает
+            # файл, а Downloader чистит _stop в своём finally, поэтому итог
+            # отмены берём из флага, выставленного stop_download()
+            cancelled = self._cancel or bool(self.dl and self.dl.stopped)
+            bad = crashed or bool(self.dl and self.dl.failed)
             with self._lock:
                 self._busy = False
-                self._status = (
-                    tr(self._lang, "p.done_errors")
-                    if self.dl and self.dl.failed
-                    else tr(self._lang, "p.ready")
-                )
+                self._result = "cancelled" if cancelled else ("error" if bad else "ok")
+                if cancelled:
+                    self._status = tr(self._lang, "p.cancelled")
+                else:
+                    self._status = (
+                        tr(self._lang, "p.done_errors") if bad else tr(self._lang, "p.ready")
+                    )
                 self._progress = {"mode": "determinate", "value": 100.0}
 
     def test_ftp(self) -> dict:
@@ -361,6 +376,10 @@ class Api:
     def stop_download(self) -> None:
         if self.dl:
             self._log("warning", tr(self._lang, "p.stop_req"))
+            # итог выставит _run: yt-dlp ещё какое-то время дорабатывает файл
+            # после запроса остановки, поэтому "cancelled" рано
+            with self._lock:
+                self._cancel = True
             self.dl.stop()
 
     # -- коллбеки от core ----------------------------------------------------

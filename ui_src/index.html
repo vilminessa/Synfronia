@@ -96,7 +96,12 @@ __APP_CSS__
   
 <!-- SLOT:actions -->
 <div class="actions">
-    <button id="download" data-i18n="btn.download">Скачать</button>
+    <button id="download" class="dl" type="button">
+      <span class="dl-fill"></span>
+      <span class="dl-label" data-i18n="btn.download">Скачать</span>
+      <span class="dl-pct"></span>
+      <span class="dl-icon" aria-hidden="true"></span>
+    </button>
     <button id="stop" disabled data-i18n="btn.stop">Отмена</button>
   </div>
 <!-- /SLOT:actions -->

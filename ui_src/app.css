@@ -132,6 +132,100 @@
   #pb { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
   #pb.indeterminate { width: 30%; animation: slide 1.2s infinite; }
   @keyframes slide { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
+
+  /* ---- кнопка «Скачать»: прогресс и итог внутри самой кнопки ----
+     Слои: .dl-fill (заливка) -> .dl-label (текст) -> .dl-pct (проценты) ->
+     .dl-icon (SVG-результат). Ширина кнопки задаётся текстом, проценты и
+     иконка абсолютны, поэтому ширина не прыгает при смене состояния.
+     Анимации - короткие и пружинистые, как микровзаимодействия Telegram. */
+  .dl {
+    position: relative; overflow: hidden;
+    min-width: 132px; font-weight: 500; line-height: 1.2;
+    transition: background .2s, color .2s, border-color .2s, box-shadow .2s;
+    --dl-ok: #46a758;      /* зелёный Telegram-чата */
+    --dl-err: var(--warn); /* ошибка = цвет предупреждения темы */
+    --dl-cancel: var(--text);
+    --dl-spring: cubic-bezier(.2, .9, .25, 1.28); /* лёгкий перелёт */
+  }
+  .dl-fill {
+    position: absolute; inset: 0 auto 0 0; width: var(--dl-pct, 0%);
+    background: var(--widget);   /* фолбэк для WebView2 без color-mix() */
+    background: color-mix(in srgb, var(--accent) 34%, transparent);
+    border-right: 1px solid var(--accent);
+    border-right-color: color-mix(in srgb, var(--accent) 70%, transparent);
+    transition: width .28s cubic-bezier(.4, 0, .2, 1), background .2s;
+    z-index: 0; pointer-events: none;
+  }
+  /* вне прогресса заливки нет: у итога остаётся чистая поверхность */
+  .dl:not(.dl-busy) .dl-fill { display: none; }
+  .dl-label, .dl-pct, .dl-icon {
+    position: absolute; inset: 0; z-index: 2; display: flex;
+    align-items: center; justify-content: center; gap: 6px;
+    transition: opacity .18s, transform .18s; pointer-events: none;
+  }
+  .dl-pct { font-variant-numeric: tabular-nums; opacity: 0; transform: scale(.9); }
+  .dl-icon { opacity: 0; transform: scale(.4) rotate(-14deg); }
+  .dl-icon svg {
+    width: 19px; height: 19px; fill: none; stroke: currentColor;
+    stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round;
+  }
+  /* прогресс: текст уходит, проценты въезжают */
+  .dl.dl-busy .dl-label { opacity: 0; transform: scale(.92); }
+  .dl.dl-busy .dl-pct { opacity: 1; transform: scale(1); }
+  .dl.dl-ok .dl-icon, .dl.dl-err .dl-icon, .dl.dl-cancel .dl-icon {
+    opacity: 1; transform: scale(1) rotate(0);
+  }
+  .dl.dl-ok .dl-label, .dl.dl-err .dl-label,
+  .dl.dl-cancel .dl-label, .dl.dl-ok .dl-pct,
+  .dl.dl-err .dl-pct, .dl.dl-cancel .dl-pct { opacity: 0; }
+  .dl.dl-ok { color: var(--dl-ok); box-shadow: inset 0 0 0 1px var(--dl-ok); }
+  .dl.dl-err { color: var(--dl-err); box-shadow: inset 0 0 0 1px var(--dl-err); }
+  .dl.dl-cancel { color: var(--text); color: color-mix(in srgb, var(--dl-cancel) 75%, transparent); }
+  .dl.dl-ok .dl-icon { animation: dl-pop .42s var(--dl-spring); }
+  .dl.dl-err .dl-icon { animation: dl-shake .42s cubic-bezier(.36, .07, .19, .97); }
+  .dl.dl-cancel .dl-icon { animation: dl-pop .34s var(--dl-spring); }
+  @keyframes dl-pop {
+    0% { opacity: 0; transform: scale(.3) rotate(-16deg); }
+    60% { opacity: 1; transform: scale(1.14) rotate(4deg); }
+    100% { opacity: 1; transform: scale(1) rotate(0); }
+  }
+  @keyframes dl-shake {
+    0% { opacity: 0; transform: scale(.6); }
+    25% { opacity: 1; transform: scale(1) translateX(-4px); }
+    45% { transform: translateX(4px); }
+    65% { transform: translateX(-3px); }
+    85% { transform: translateX(2px); }
+    100% { opacity: 1; transform: scale(1) translateX(0); }
+  }
+  /* бегунок, пока yt-dlp не сообщил процент: заливка ездит с бликом */
+  .dl.dl-indeterminate .dl-fill { width: 38%; animation: dl-run 1.5s cubic-bezier(.65, 0, .35, 1) infinite; }
+  .dl.dl-indeterminate::after {
+    /* сплошной градиент + opacity вместо color-mix: работает в любом WebView2 */
+    content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none;
+    background: linear-gradient(100deg, transparent 20%, var(--text) 50%, transparent 80%);
+    opacity: .22;
+    transform: translateX(-100%); animation: dl-sheen 1.5s ease-in-out infinite;
+  }
+  @keyframes dl-run { 0% { left: -38%; } 100% { left: 100%; } }
+  @keyframes dl-sheen { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+  /* иконка с галочкой дорисовывается штрихом, как в Telegram */
+  .dl.dl-ok .dl-icon path.check {
+    stroke-dasharray: 22; stroke-dashoffset: 22;
+    animation: dl-draw .34s .06s cubic-bezier(.4, 0, .2, 1) forwards;
+  }
+  @keyframes dl-draw { to { stroke-dashoffset: 0; } }
+  /* disabled должен гасить кнопку, но не заливку прогресса и не иконку итога */
+  .dl:disabled { opacity: 1; cursor: default; }
+  .dl.dl-busy:disabled { background: var(--surface); color: var(--text); }
+  .dl.dl-busy:disabled:hover { background: var(--surface); color: var(--text); }
+  .dl.dl-ok:disabled:hover, .dl.dl-err:disabled:hover, .dl.dl-cancel:disabled:hover {
+    background: var(--surface);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .dl, .dl-fill, .dl-label, .dl-pct, .dl-icon,
+    .dl.dl-indeterminate .dl-fill, .dl.dl-indeterminate::after,
+    .dl.dl-ok .dl-icon, .dl.dl-err .dl-icon, .dl.dl-cancel .dl-icon { animation: none !important; transition: none !important; }
+  }
   #status { margin-top: 6px; font-size: 13px; height: 18px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   #log {
     width: 100%; min-height: 150px; margin-top: 6px; resize: vertical;

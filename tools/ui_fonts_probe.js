@@ -104,6 +104,39 @@ const RESIZE = `(function () {
   return out;
 })()`;
 
+// Кнопка «Скачать»: сценарий poll() гоняем через window.__probe.dlState,
+// tick() сам подхватит состояние за ~200 мс. Проверяем заливку, проценты,
+// SVG-иконки итога, возврат в idle через 2 с и блокировку «Отмены».
+const DL_SET = (st) => `(function () { window.__probe.dlState = ${JSON.stringify(st)}; return true; })()`;
+const DL_READ = `(function () {
+  var b = document.getElementById("download");
+  var fill = b.querySelector(".dl-fill"), lbl = b.querySelector(".dl-label"),
+      pct = b.querySelector(".dl-pct"), ico = b.querySelector(".dl-icon");
+  var r = b.getBoundingClientRect();
+  return {
+    cls: b.className, w: Math.round(r.width), pct: pct.textContent, label: lbl.textContent,
+    svg: ico.querySelectorAll("svg").length,
+    shapes: ico.querySelectorAll("svg path, svg circle").length,
+    iconOpacity: +parseFloat(getComputedStyle(ico).opacity),
+    labelOpacity: +parseFloat(getComputedStyle(lbl).opacity),
+    fillW: Math.round(fill.getBoundingClientRect().width),
+    fillPct: b.style.getPropertyValue("--dl-pct"),
+    fillAnim: getComputedStyle(fill).animationName,
+    sheenAnim: getComputedStyle(b, "::after").animationName,
+    iconAnim: getComputedStyle(ico).animationName,
+    color: getComputedStyle(b).color,
+    fillBg: getComputedStyle(fill).backgroundColor,
+    iconIn: (function () { var i = ico.getBoundingClientRect();
+      return {ok: i.width > 8 && i.height > 8 && i.top >= r.top - 2 && i.bottom <= r.bottom + 2 &&
+             i.left >= r.left - 2 && i.right <= r.right + 2,
+              i: [Math.round(i.left), Math.round(i.top), Math.round(i.width), Math.round(i.height)],
+              b: [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]}; })(),
+    title: b.title, aria: b.getAttribute("aria-label"),
+    dlDisabled: b.disabled, stopDisabled: document.getElementById("stop").disabled,
+    key: DL_TITLE
+  };
+})()`;
+
 async function waitForPage() {
   for (let i = 0; i < 80; i++) {
     try {
@@ -263,10 +296,120 @@ async function waitForPage() {
     // прячем панель обратно, чтобы не мешала остальным замерам
     await evaluate('[document.getElementById("settings-overlay"), document.getElementById("settings-sheet"), document.getElementById("sheet-resize")].forEach(function (el) { el.hidden = true; }); true');
     bad += rzBad;
+
+    // --- кнопка «Скачать»: прогресс, SVG-итог, возврат в idle через 2 с ---
+    console.log("--- кнопка «Скачать» ---");
+    let dlBad = 0;
+    const dlTitles = await evaluate(`(function () {
+      curLang = "ru"; applyI18n();
+      return {idle: t("btn.download"), busy: t("btn.downloading"), done: t("btn.done"),
+              failed: t("btn.failed"), cancelled: t("btn.cancelled")};
+    })()`);
+    const read = async () => await evaluate(DL_READ);
+    // 700 мс: два тика (tick() ходит в poll каждые 200 мс) плюс запас на
+    // анимацию итога (420 мс) - иначе геометрию меряем в перелёте
+    const step = async (st, label) => {
+      await evaluate(DL_SET(st));
+      await sleep(700);
+      const m = await read();
+      console.log(`  ${label.padEnd(22)} класс="${m.cls}" ширина=${m.w}px ` +
+        `заливка=${m.fillPct}/${m.fillW}px аним=[${m.fillAnim}|${m.sheenAnim}] ` +
+        `значок=${m.iconOpacity}(${m.iconAnim}) текст=${m.labelOpacity} процент="${m.pct}" ` +
+        `svg=${m.svg}/${m.shapes} кнопка_выкл=${m.dlDisabled} отмена_выкл=${m.stopDisabled}`);
+      return m;
+    };
+    const idle = await step({busy: false, status: "Готов.", result: null,
+      progress: {mode: "determinate", value: 0}}, "idle");
+    const indet = await step({busy: true, status: "Качаю…", result: null,
+      progress: {mode: "indeterminate"}}, "busy indeterminate");
+    const det = await step({busy: true, status: "Качаю…", result: null,
+      progress: {mode: "determinate", value: 42.4}}, "busy 42%");
+    const ok = await step({busy: false, status: "Готов.", result: "ok",
+      progress: {mode: "determinate", value: 100}}, "итог ok");
+    const err = await step({busy: false, status: "Готов.", result: "error",
+      progress: {mode: "determinate", value: 100}}, "итог error");
+    const cancel = await step({busy: false, status: "Готов.", result: "cancelled",
+      progress: {mode: "determinate", value: 100}}, "итог cancelled");
+    // 2 с сброса: result из poll() остаётся прежним - иконка не должна мигать
+    await evaluate(DL_SET({busy: false, status: "Готов.", result: "cancelled",
+      progress: {mode: "determinate", value: 100}}));
+    await sleep(2600);
+    const after = await read();
+    await sleep(700);
+    const after2 = await read();
+    console.log(`  ${"через 2.6 с".padEnd(22)} класс="${after.cls}" процент="${after.pct}" ` +
+      `svg=${after.svg} заголовок="${after.title}"` +
+      `${after.cls.indexOf("dl-idle") > -1 ? "" : "  <-- FAIL"}`);
+    if (after.cls.indexOf("dl-idle") === -1) dlBad++;
+    if (after2.cls.indexOf("dl-idle") === -1) { console.log(`        через 3.3 с снова "${after2.cls}"  <-- FAIL (мигает)`); dlBad++; }
+
+    const widths = [idle, indet, det, ok, err, cancel, after].map((m) => m.w);
+    const wMin = Math.min(...widths), wMax = Math.max(...widths);
+    console.log(`  ширина кнопки ${wMin}..${wMax}px (разброс ${wMax - wMin}px)` +
+      `${wMax - wMin <= 1 ? "" : "  <-- FAIL (прыгает)"}`);
+    if (wMax - wMin > 1) dlBad++;
+
+    const checks = [
+      ["idle: нет иконки, заливка 0", idle.svg === 0 && idle.fillPct === "0%" && idle.pct === ""],
+      ["idle: заголовок «Скачать»", idle.title === dlTitles.idle && idle.aria === dlTitles.idle],
+      ["idle: кнопка активна", idle.dlDisabled === false && idle.stopDisabled === true],
+      ["индикатор: класс + бегунок", /dl-busy/.test(indet.cls) && /dl-indeterminate/.test(indet.cls)],
+      ["индикатор: многоточие + анимации", indet.pct === "\u2026" && indet.fillAnim === "dl-run" &&
+        indet.sheenAnim === "dl-sheen" && /38%/.test(indet.fillPct) && indet.fillW > 0],
+      ["индикатор: заливка непрозрачна", det.fillBg !== "rgba(0, 0, 0, 0)" && indet.fillBg !== "rgba(0, 0, 0, 0)"],
+      ["индикатор: кнопка выкл, отмена вкл", indet.dlDisabled === true && indet.stopDisabled === false],
+      ["42%: округление и ширина заливки", det.pct === "42%" &&
+        Math.abs(parseFloat(det.fillPct) - 42.4) < 0.05 && det.fillW > 0 &&
+        Math.abs(det.fillW - Math.round(det.w * 0.424)) <= 2 && det.fillAnim === "none"],
+      ["ok: лайк, анимация, подпись", ok.svg === 1 && /dl-ok/.test(ok.cls) &&
+        ok.iconAnim === "dl-pop" && ok.iconOpacity === 1 && ok.labelOpacity === 0 &&
+        ok.title === dlTitles.done && ok.fillPct === "0%"],
+      ["error: восклицательный знак", err.svg === 1 && /dl-err/.test(err.cls) &&
+        err.iconAnim === "dl-shake" && err.title === dlTitles.failed],
+      ["cancelled: знак стоп", cancel.svg === 1 && cancel.shapes >= 2 && /dl-cancel/.test(cancel.cls) &&
+        cancel.iconAnim === "dl-pop" && cancel.title === dlTitles.cancelled],
+      ["иконка помещается в кнопку", ok.iconIn.ok && err.iconIn.ok && cancel.iconIn.ok ||
+        `ok=${JSON.stringify(ok.iconIn)} err=${JSON.stringify(err.iconIn)}`],
+      ["итог перекрашивает кнопку", ok.color !== idle.color && err.color !== idle.color &&
+        cancel.color !== idle.color && ok.color !== err.color],
+      ["сброс: текст вернулся", after.label === dlTitles.idle && after.pct === ""]
+    ];
+    checks.forEach(([name, okFlag]) => {
+      if (!okFlag) { console.log(`        FAIL: ${name}`); dlBad++; }
+    });
+
+    // «Отмена» блокируется после нажатия и ждёт реального завершения
+    const stopFlow = await evaluate(`(function () {
+      var stop = document.getElementById("stop");
+      window.__probe.dlState = {busy: true, status: "Качаю…", result: null,
+        progress: {mode: "determinate", value: 10}};
+      return true;
+    })()`);
+    await sleep(500);
+    const before = await read();
+    await evaluate('document.getElementById("stop").click()');
+    await sleep(300);
+    const pressed = await read();
+    await evaluate(DL_SET({busy: false, status: "Готов.", result: "cancelled",
+      progress: {mode: "determinate", value: 100}}));
+    await sleep(500);
+    const done = await read();
+    console.log(`  отмена: до=${before.stopDisabled} нажатие=${pressed.stopDisabled} ` +
+      `после_завершения=${done.stopDisabled} итог="${done.title}" svg=${done.svg}`);
+    if (before.stopDisabled !== false || pressed.stopDisabled !== true || done.stopDisabled !== true) {
+      console.log("        FAIL: «Отмена» активна только пока идёт загрузка");
+      dlBad++;
+    }
+    if (done.svg !== 1 || done.title !== dlTitles.cancelled) {
+      console.log("        FAIL: после отмены ожидался знак стоп");
+      dlBad++;
+    }
+    if (stopFlow !== true) dlBad++;
+    bad += dlBad;
+    console.log(dlBad ? "FAIL: кнопка «Скачать» (см. строки выше)" : "OK: кнопка «Скачать» отработала все состояния");
     code = bad ? 1 : 0;
     console.log(code ? "FAIL: есть переполнение/обрезанный текст/сбой растягивания"
-                     : "OK: блок шрифтов влезает, панель тянется во всех языках");
-  } catch (e) {
+                     : "OK: блок шрифтов влезает, панель тянется во всех языках");  } catch (e) {
     console.error("probe error:", e.message);
   } finally {
     edge.kill();

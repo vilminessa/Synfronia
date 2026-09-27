@@ -32,15 +32,18 @@ STUB = """<script>
 (function () {
   var FONTS = {families: ["Inter", "JetBrains Mono", "Noto Sans"], mono: ["JetBrains Mono"],
                count: 3, folder: "C:\\\\Synfronia\\\\fonts"};
-  var state = {lang: "%(lang)s", css: "", fontsRev: 0, dl: null};
+  var state = {lang: "%(lang)s", css: "", fontsRev: 0, dl: null,
+               // ответ poll() для кнопки «Скачать»: сценарий задаёт probe.dl
+               dlState: {busy: false, status: "", result: null,
+                         progress: {mode: "determinate", value: 0}}};
   var settings = __SETTINGS__;
   function ok(r) { return Promise.resolve(r === undefined ? {} : r); }
   window.pywebview = {api: {
     get_initial: function () { return Promise.resolve({settings: settings, ffmpeg: true,
       default_dir: settings.dest, transcoders: ["libx265", "nvenc"], fonts: FONTS}); },
-    poll: function () { return Promise.resolve({busy: false, status: "", progress: {mode: "determinate", value: 0},
+    poll: function () { return Promise.resolve(Object.assign({
       logs: [], log_cursor: 0, ffmpeg: {downloading: false, extracting: false, pct: 0, ok: true, error: null},
-      fonts_dl: {downloading: false, pct: 0, error: null}, fonts_rev: state.fontsRev}); },
+      fonts_dl: {downloading: false, pct: 0, error: null}, fonts_rev: state.fontsRev}, state.dlState)); },
     set_font: function () { return ok({css: state.css}); },
     reload_fonts: function () { return ok({fonts: FONTS, css: state.css}); },
     download_fonts: function () { state.dl = "started"; return ok("started"); },

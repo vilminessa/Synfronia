@@ -359,6 +359,7 @@
     document.getElementById("lang").value = curLang;
     document.documentElement.lang = curLang;
     renderClicker();
+    updateDownloadTitle();
     if (!busy) document.getElementById("status").textContent = t("status.ready");
   }
 
@@ -463,6 +464,65 @@
     });
   }
 
+  /* ---- кнопка «Скачать»: прогресс внутри кнопки и SVG-результат ----
+     Состояния: idle -> busy (determinate/indeterminate) -> ok|err|cancel -> idle.
+     Итог держим 2 секунды, потом возвращаем «Скачать». Ширину задаёт .dl-label
+     (проценты и иконка абсолютны), поэтому кнопка не прыгает. */
+  var DL_STATES = ["idle", "busy", "ok", "err", "cancel"];
+  var DL_ICON = {
+    ok: '<svg viewBox="0 0 24 24"><path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"/></svg>',
+    err: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5"/><path d="M12 16.2h.01"/></svg>',
+    cancel: '<svg viewBox="0 0 24 24"><path d="M8 3h8l5 5v8l-5 5H8l-5-5V8z"/><path d="M8.5 12h7"/></svg>'
+  };
+  var DL_TITLE = {idle: "btn.download", busy: "btn.downloading", ok: "btn.done",
+                  err: "btn.failed", cancel: "btn.cancelled"};
+  var DL_RESULT = {ok: "ok", error: "err", cancelled: "cancel"};
+  var DL_RESET_MS = 2000;
+  var dlState = "idle";
+  var dlPct = 0;
+  var dlIndeterminate = false;
+  var dlShown = null;   // какой result уже показан, чтобы не мигать после сброса
+  var dlTimer = 0;
+
+  function updateDownloadTitle() {
+    var btn = document.getElementById("download");
+    var key = DL_TITLE[dlState] || "btn.download";
+    btn.title = t(key);
+    btn.setAttribute("aria-label", t(key));
+  }
+  function setDownloadState(state, pct, indeterminate) {
+    if (DL_STATES.indexOf(state) === -1) state = "idle";
+    dlPct = Math.max(0, Math.min(100, pct || 0));
+    dlIndeterminate = !!indeterminate;
+    var btn = document.getElementById("download");
+    btn.classList.toggle("dl-indeterminate", state === "busy" && dlIndeterminate);
+    if (state !== dlState) {
+      clearTimeout(dlTimer);
+      dlTimer = 0;
+      DL_STATES.forEach(function(s) { btn.classList.remove("dl-" + s); });
+      btn.classList.add("dl-" + state);
+      btn.querySelector(".dl-icon").innerHTML = DL_ICON[state] || "";
+      dlState = state;
+      if (state === "ok" || state === "err" || state === "cancel") {
+        dlTimer = setTimeout(function() {
+          dlTimer = 0;
+          setDownloadState("idle", 0, false);
+        }, DL_RESET_MS);
+      }
+    }
+    btn.querySelector(".dl-pct").textContent =
+      state === "busy" ? (dlIndeterminate ? "\u2026" : Math.round(dlPct) + "%") : "";
+    btn.style.setProperty("--dl-pct",
+      state !== "busy" ? "0%" : (dlIndeterminate ? "38%" : dlPct + "%"));
+    updateDownloadTitle();
+  }
+  function setDownloadResult(result) {
+    var state = DL_RESULT[result];
+    if (!state || result === dlShown) return;
+    dlShown = result;
+    setDownloadState(state, 0, false);
+  }
+
   function setBusy(b) {
     if (b === busy) return;
     busy = b;
@@ -506,6 +566,12 @@
       var bar = document.getElementById("pb");
       if (p.mode === "indeterminate") { bar.classList.add("indeterminate"); bar.style.width = "30%"; }
       else { bar.classList.remove("indeterminate"); bar.style.width = (p.value || 0) + "%"; }
+      if (st.busy) {
+        dlShown = null;
+        setDownloadState("busy", p.mode === "indeterminate" ? 0 : (p.value || 0), p.mode === "indeterminate");
+      } else {
+        setDownloadResult(st.result);
+      }
       document.getElementById("status").textContent = st.status || "";
       if (ffmpegFetching && st.ffmpeg) {
         var fm = st.ffmpeg;
@@ -926,6 +992,7 @@
     FONTS = initData.fonts || FONTS;
     FONT_PICK.sans = initData.settings.font_sans || "";
     FONT_PICK.mono = initData.settings.font_mono || "";
+    setDownloadState("idle", 0, false);
     renderSettingsPanel();
     buildThemeOptions();
     buildSubsOptions();
@@ -986,11 +1053,10 @@
       if (res && res.error) document.getElementById("status").textContent = res.error;
     });
     document.getElementById("stop").addEventListener("click", function() {
+      // yt-dlp ещё дорабатывает файл после запроса остановки, поэтому кнопку
+      // блокируем до реального завершения: итог придёт в poll()
+      this.disabled = true;
       pywebview.api.stop_download();
-    });
-    document.getElementById("browse").addEventListener("click", async function() {
-      var p = await pywebview.api.browse_folder();
-      if (p) document.getElementById("dest").value = p;
     });
     ffmpegRetry.addEventListener("click", function() {
       ffmpegRetry.style.display = "none";
