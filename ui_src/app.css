@@ -145,6 +145,7 @@
     transition: background .2s, color .2s, border-color .2s, box-shadow .2s;
     --dl-ok: #46a758;      /* зелёный Telegram-чата */
     --dl-err: var(--warn); /* ошибка = цвет предупреждения темы */
+    --dl-fail: #e5484d;    /* ничего не скачалось: тот же красный, что у Telegram */
     --dl-cancel: var(--text);
     --dl-spring: cubic-bezier(.2, .9, .25, 1.28); /* лёгкий перелёт */
   }
@@ -180,18 +181,37 @@
   /* прогресс: текст уходит, проценты въезжают */
   .dl.dl-busy .dl-label { opacity: 0; transform: scale(.92); }
   .dl.dl-busy .dl-pct { opacity: 1; transform: scale(1); }
-  .dl.dl-ok .dl-icon, .dl.dl-err .dl-icon, .dl.dl-cancel .dl-icon {
+  .dl.dl-ok .dl-icon, .dl.dl-err .dl-icon, .dl.dl-warn .dl-icon,
+  .dl.dl-fail .dl-icon, .dl.dl-cancel .dl-icon {
     opacity: 1; transform: scale(1) rotate(0);
   }
-  .dl.dl-ok .dl-label, .dl.dl-err .dl-label,
-  .dl.dl-cancel .dl-label, .dl.dl-ok .dl-pct,
-  .dl.dl-err .dl-pct, .dl.dl-cancel .dl-pct { opacity: 0; }
+  .dl.dl-ok .dl-label, .dl.dl-err .dl-label, .dl.dl-warn .dl-label,
+  .dl.dl-fail .dl-label, .dl.dl-cancel .dl-label, .dl.dl-ok .dl-pct,
+  .dl.dl-err .dl-pct, .dl.dl-warn .dl-pct, .dl.dl-fail .dl-pct,
+  .dl.dl-cancel .dl-pct { opacity: 0; }
   .dl.dl-ok { color: var(--dl-ok); box-shadow: inset 0 0 0 1px var(--dl-ok); }
-  .dl.dl-err { color: var(--dl-err); box-shadow: inset 0 0 0 1px var(--dl-err); }
+  .dl.dl-err, .dl.dl-warn { color: var(--dl-err); box-shadow: inset 0 0 0 1px var(--dl-err); }
   .dl.dl-cancel { color: var(--text); color: color-mix(in srgb, var(--dl-cancel) 75%, transparent); }
   .dl.dl-ok .dl-icon { animation: dl-pop .42s var(--dl-spring); }
-  .dl.dl-err .dl-icon { animation: dl-shake .42s cubic-bezier(.36, .07, .19, .97); }
+  .dl.dl-err .dl-icon, .dl.dl-warn .dl-icon { animation: dl-shake .42s cubic-bezier(.36, .07, .19, .97); }
   .dl.dl-cancel .dl-icon { animation: dl-pop .34s var(--dl-spring); }
+  /* полный провал: крест неприлично выпячивается за кнопку и гаснет, поэтому
+     именно этому состоянию нужен overflow: visible - иначе пик срежет рамкой */
+  .dl.dl-fail {
+    overflow: visible; color: var(--dl-fail);
+    box-shadow: inset 0 0 0 1px var(--dl-fail);
+  }
+  .dl.dl-fail .dl-icon { animation: dl-bulge .5s var(--dl-spring); }
+  /* крест крупнее прочих знаков: в покое он уже впритык к краям, а на пике
+     анимации выходит за кнопку - обводку чуть тонче, чтобы не разжиреть */
+  .dl.dl-fail .dl-icon svg { width: 27px; height: 27px; stroke-width: 2; }
+  @keyframes dl-bulge {
+    0% { opacity: 0; transform: scale(.2) rotate(-28deg); }
+    32% { opacity: 1; transform: scale(1.55) rotate(7deg); filter: drop-shadow(0 0 10px var(--dl-fail)); }
+    50% { transform: scale(.84) rotate(-4deg); filter: drop-shadow(0 0 2px var(--dl-fail)); }
+    72% { transform: scale(1.16) rotate(0); filter: drop-shadow(0 0 5px var(--dl-fail)); }
+    100% { opacity: 1; transform: scale(1) rotate(0); filter: none; }
+  }
   @keyframes dl-pop {
     0% { opacity: 0; transform: scale(.3) rotate(-16deg); }
     60% { opacity: 1; transform: scale(1.14) rotate(4deg); }
@@ -220,13 +240,15 @@
   .dl:disabled { opacity: 1; cursor: default; }
   .dl.dl-busy:disabled { background: var(--surface); color: var(--text); }
   .dl.dl-busy:disabled:hover { background: var(--surface); color: var(--text); }
-  .dl.dl-ok:disabled:hover, .dl.dl-err:disabled:hover, .dl.dl-cancel:disabled:hover {
+  .dl.dl-ok:disabled:hover, .dl.dl-err:disabled:hover, .dl.dl-warn:disabled:hover,
+  .dl.dl-fail:disabled:hover, .dl.dl-cancel:disabled:hover {
     background: var(--surface);
   }
   @media (prefers-reduced-motion: reduce) {
     .dl, .dl-fill, .dl-label, .dl-pct, .dl-icon,
     .dl.dl-indeterminate::after,
-    .dl.dl-ok .dl-icon, .dl.dl-err .dl-icon, .dl.dl-cancel .dl-icon { animation: none !important; transition: none !important; }
+    .dl.dl-ok .dl-icon, .dl.dl-err .dl-icon, .dl.dl-warn .dl-icon,
+    .dl.dl-fail .dl-icon, .dl.dl-cancel .dl-icon { animation: none !important; transition: none !important; }
   }
   #status { margin-top: 6px; font-size: 13px; height: 18px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   #log {

@@ -337,6 +337,7 @@ async function waitForPage() {
     const dlTitles = await evaluate(`(function () {
       curLang = "ru"; applyI18n();
       return {idle: t("btn.download"), busy: t("btn.downloading"), done: t("btn.done"),
+              partial: t("btn.partial"), warn: t("btn.warn"),
               failed: t("btn.failed"), cancelled: t("btn.cancelled")};
     })()`);
     const read = async () => await evaluate(DL_READ);
@@ -371,6 +372,10 @@ async function waitForPage() {
       progress: {mode: "determinate", value: 100}}, "итог ok");
     const err = await step({busy: false, status: "Готов.", result: "error",
       progress: {mode: "determinate", value: 100}}, "итог error");
+    const warn = await step({busy: false, status: "Готов.", result: "warn",
+      progress: {mode: "determinate", value: 100}}, "итог warn");
+    const fail = await step({busy: false, status: "Не удалось скачать.", result: "failed",
+      progress: {mode: "determinate", value: 100}}, "итог failed");
     const cancel = await step({busy: false, status: "Готов.", result: "cancelled",
       progress: {mode: "determinate", value: 100}}, "итог cancelled");
     // 2 с сброса: result из poll() остаётся прежним - иконка не должна мигать
@@ -429,14 +434,22 @@ async function waitForPage() {
       ["ok: лайк, анимация, подпись", ok.svg === 1 && /dl-ok/.test(ok.cls) &&
         ok.iconAnim === "dl-pop" && ok.iconOpacity === 1 && ok.labelOpacity === 0 &&
         ok.title === dlTitles.done && ok.fillPct === "0%"],
-      ["error: восклицательный знак", err.svg === 1 && /dl-err/.test(err.cls) &&
-        err.iconAnim === "dl-shake" && err.title === dlTitles.failed],
+      ["error: восклицательный знак, «не всё»", err.svg === 1 && /dl-err/.test(err.cls) &&
+        err.iconAnim === "dl-shake" && err.title === dlTitles.partial],
+      ["warn: тот же знак, своя подпись", warn.svg === 1 && /dl-warn/.test(warn.cls) &&
+        warn.iconAnim === "dl-shake" && warn.title === dlTitles.warn && warn.shapes === err.shapes],
+      ["failed: крест и выпячивание", fail.svg === 1 && fail.shapes === 2 &&
+        /dl-fail/.test(fail.cls) && fail.iconAnim === "dl-bulge" &&
+        fail.title === dlTitles.failed && fail.iconOpacity === 1 && fail.labelOpacity === 0],
+      ["failed: другой цвет и знак, чем у «!»", fail.color !== err.color && fail.color !== idle.color],
       ["cancelled: знак стоп", cancel.svg === 1 && cancel.shapes >= 2 && /dl-cancel/.test(cancel.cls) &&
         cancel.iconAnim === "dl-pop" && cancel.title === dlTitles.cancelled],
-      ["иконка помещается в кнопку", ok.iconIn.ok && err.iconIn.ok && cancel.iconIn.ok ||
-        `ok=${JSON.stringify(ok.iconIn)} err=${JSON.stringify(err.iconIn)}`],
+      ["иконка помещается в кнопку", ok.iconIn.ok && err.iconIn.ok && warn.iconIn.ok &&
+        fail.iconIn.ok && cancel.iconIn.ok ||
+        `ok=${JSON.stringify(ok.iconIn)} err=${JSON.stringify(err.iconIn)} ` +
+        `warn=${JSON.stringify(warn.iconIn)} fail=${JSON.stringify(fail.iconIn)}`],
       ["итог перекрашивает кнопку", ok.color !== idle.color && err.color !== idle.color &&
-        cancel.color !== idle.color && ok.color !== err.color],
+        cancel.color !== idle.color && ok.color !== err.color && warn.color === err.color],
       ["сброс: текст вернулся", after.label === dlTitles.idle && after.pct === ""]
     ];
     checks.forEach(([name, okFlag]) => {

@@ -59,6 +59,16 @@ _STATUS_KEY = {
     "warn": "p.done_warn",
 }
 
+# Режим загрузки -> result из poll(), по которому app.js выбирает иконку.
+# partial и warn делят знак «!», но подписи у них разные, а полный провал
+# получает отдельный знак «✕».
+_RESULT_MODE = {
+    "ok": "ok",
+    "partial": "error",
+    "warn": "warn",
+    "failed": "failed",
+}
+
 
 def _summary(dl) -> tuple[str, int, int]:
     """Итог загрузки от Downloader; без загрузчика считаем успехом."""
@@ -367,14 +377,19 @@ class Api:
             # файл, а Downloader чистит _stop в своём finally, поэтому итог
             # отмены берём из флага, выставленного stop_download()
             cancelled = self._cancel or bool(self.dl and self.dl.stopped)
-            bad = crashed or bool(self.dl and self.dl.failed)
             # Строка статуса отвечает на вопрос «что не так», а не «были ли
             # ошибки»: обрыв связи на одном видео - это «не удалось скачать»,
             # а не «часть файлов не скачалась».
             mode, got, all_got = ("failed", 0, 0) if crashed else _summary(self.dl)
+            # Иконке кнопки тоже нужно различать исходы: «!» у «скачано не всё»
+            # и у «были ошибки» - разные ситуации, а «✕» означает, что не
+            # скачалось ничего. Отдельный result у каждого режима, а не общий
+            # error на любое наличие ошибок в логе. Режим «ok» недостижим при
+            # ошибках (его ставит ветка «не было ошибок»), так что сверяться
+            # с dl.failed здесь не нужно.
             with self._lock:
                 self._busy = False
-                self._result = "cancelled" if cancelled else ("error" if bad else "ok")
+                self._result = "cancelled" if cancelled else _RESULT_MODE.get(mode, "ok")
                 if cancelled:
                     self._status = tr(self._lang, "p.cancelled")
                 else:

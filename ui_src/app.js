@@ -487,15 +487,20 @@
      постобработке и вовсе пропадало. dlBest не даёт заливке откатиться, а в
      неопределённом режиме мы не меняем ни заливку, ни число - только гоним
      блик, поэтому кнопка не мигает. */
-  var DL_STATES = ["idle", "busy", "ok", "err", "cancel"];
+  var DL_STATES = ["idle", "busy", "ok", "err", "warn", "fail", "cancel"];
   var DL_ICON = {
-    ok: '<svg viewBox="0 0 24 24"><path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"/></svg>',
+    ok: '<svg viewBox="0 0 24 24"><path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"/></svg>',
     err: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5"/><path d="M12 16.2h.01"/></svg>',
+    // полный провал: голый крест без круга - заметно отличается от «!» и
+    // крупнее, потому что анимация dl-bulge выталкивает его за края кнопки
+    fail: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12"/><path d="M18 6 6 18"/></svg>',
     cancel: '<svg viewBox="0 0 24 24"><path d="M8 3h8l5 5v8l-5 5H8l-5-5V8z"/><path d="M8.5 12h7"/></svg>'
   };
+  DL_ICON.warn = DL_ICON.err;   // тот же «!», но подпись btn.warn
   var DL_TITLE = {idle: "btn.download", busy: "btn.downloading", ok: "btn.done",
-                  err: "btn.failed", cancel: "btn.cancelled"};
-  var DL_RESULT = {ok: "ok", error: "err", cancelled: "cancel"};
+                  err: "btn.partial", warn: "btn.warn", fail: "btn.failed",
+                  cancel: "btn.cancelled"};
+  var DL_RESULT = {ok: "ok", error: "err", warn: "warn", failed: "fail", cancelled: "cancel"};
   var DL_RESET_MS = 2000;
   var dlState = "idle";
   var dlBest = 0;         // рекорд процента за загрузку
@@ -520,7 +525,8 @@
       btn.classList.add("dl-" + state);
       btn.querySelector(".dl-icon").innerHTML = DL_ICON[state] || "";
       dlState = state;
-      if (state === "ok" || state === "err" || state === "cancel") {
+      if (state === "ok" || state === "err" || state === "warn" ||
+          state === "fail" || state === "cancel") {
         dlTimer = setTimeout(function() {
           dlTimer = 0;
           setDownloadState("idle", 0, false);

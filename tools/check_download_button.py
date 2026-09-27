@@ -125,12 +125,12 @@ def main() -> int:
 
     run(api, FakeDownloader(failed=True, mode="failed"))
     err = api.poll()
-    ok(err["result"] == "error", "ошибки в логе = error", repr(err["result"]))
+    ok(err["result"] == "failed", "ничего не скачалось = failed", repr(err["result"]))
     ok(err["status"], "при ошибке статус не пуст", repr(err["status"]))
 
     run(api, FakeDownloader(boom=True))
     boom = api.poll()
-    ok(boom["result"] == "error", "исключение = error", repr(boom["result"]))
+    ok(boom["result"] == "failed", "исключение = failed", repr(boom["result"]))
     ok(boom["busy"] is False, "исключение тоже снимает busy")
 
     # 3. отмена
@@ -167,20 +167,50 @@ def main() -> int:
     match = re.search(r"DL_RESULT\s*=\s*\{([^}]*)\}", app_js)
     ok(bool(match), "в app.js есть таблица DL_RESULT")
     front = set(re.findall(r"""['"]?(\w+)['"]?\s*:""", match.group(1))) if match else set()
-    produced = {"ok", "error", "cancelled"}
+    produced = set(gui._RESULT_MODE.values()) | {"cancelled"}
     ok(front == produced, "app.js ждёт ровно те итоги, что отдаёт Api",
        f"в app.js {sorted(front)}, бэкенд отдаёт {sorted(produced)}")
     ok("st.result" in app_js, "tick() передаёт result из poll() в кнопку")
     ok("dlShown" in app_js, "показанный итог запоминается (иконка не мигает)")
 
+    # у каждого result своя иконка и своя подпись
+    icons = dict(re.findall(r"""DL_ICON\.(\w+)\s*=\s*DL_ICON\.(\w+);""", app_js))
+    icon_tab = re.search(r"var DL_ICON\s*=\s*\{(.*?)\};", app_js, re.S)
+    icon_tab = icon_tab.group(1) if icon_tab else ""
+    titles = dict(re.findall(r'(\w+):\s*"(btn\.[a-z]+)"',
+                             re.search(r"var DL_TITLE\s*=\s*\{(.*?)\};", app_js, re.S).group(1)))
+    states = set(re.findall(r"""["'](\w+)["']""",
+                            re.search(r"var DL_STATES\s*=\s*\[(.*?)\]", app_js, re.S).group(1)))
+    ok("fail" in states, "состояние fail есть в DL_STATES", str(sorted(states)))
+    ok('dl-bulge' in (ROOT / "ui_src" / "app.css").read_text(encoding="utf-8"),
+       "для провала есть своя анимация dl-bulge")
+    ok(icons.get("warn") == "err", "warn делит иконку «!» с error, но не подпись")
+    ok(titles.get("err") == "btn.partial", "«!» подписана «Скачано не всё»", titles.get("err"))
+    ok(titles.get("warn") == "btn.warn", "у warn своя подпись про ошибки", titles.get("warn"))
+    ok(titles.get("fail") == "btn.failed", "«✕» подписана «Ошибка загрузки»", titles.get("fail"))
+    cross = re.search(r"""fail:\s*'<svg[^']*'""", icon_tab)
+    ok(bool(cross) and "circle" not in cross.group(0),
+       "у провала голый крест, а не круг с восклицательным знаком")
+    ok("err:" in icon_tab and (not cross or cross.group(0) !=
+                              re.search(r"""err:\s*'<svg[^']*'""", icon_tab).group(0)),
+       "иконка провала отличается от «!»")
+
     i18n.load_languages()
-    keys = ["btn.downloading", "btn.done", "btn.failed", "btn.cancelled"]
+    keys = ["btn.downloading", "btn.done", "btn.failed", "btn.cancelled",
+            "btn.partial", "btn.warn"]
     missing = {lang: [k for k in keys if not i18n.I18N.get(lang, {}).get(k)]
                for lang in i18n.LANGUAGES}
     missing = {lang: v for lang, v in missing.items() if v}
     ok(not missing, "подписи итогов есть во всех языках", str(missing))
     ok(any(i18n.I18N.get("ru", {}).get("btn.done") == "Готово" for _ in (0,)),
        "русская подпись успеха на месте")
+    # подписи разных исходов не должны совпадать: иначе «!» и «✕» говорят одно и то же
+    same = {lang: [a for a, b in (("btn.partial", "btn.failed"), ("btn.partial", "btn.warn"),
+                                   ("btn.warn", "btn.failed"))
+                   if i18n.I18N.get(lang, {}).get(a) == i18n.I18N.get(lang, {}).get(b)]
+             for lang in i18n.LANGUAGES}
+    same = {lang: v for lang, v in same.items() if v}
+    ok(not same, "подписи «не всё» / «были ошибки» / «ошибка» различаются", str(same))
 
     # 5. что именно скачалось: счёт по info
     section("5. _download_counts считает по filepath, а не по записям")
@@ -206,22 +236,24 @@ def main() -> int:
         got = counts(info)
         ok(got == want, label, f"получили {got}, ждали {want}")
 
-    # 6. строка статуса по итогу, а не по флагу ошибок
-    section("6. статус говорит, что не так, а не «были ли ошибки»")
+    # 6. строка статуса и иконка по итогу, а не по флагу ошибок
+    section("6. статус и result говорят, что не так, а не «были ли ошибки»")
     api._cancel = False   # как в start_download(): прошлая отмена не должна висеть
-    for mode, ok_n, total_n, key, wrong in [
-        ("ok", 1, 1, "p.ready", "p.done_partial"),
-        ("partial", 3, 5, "p.done_partial", "p.failed"),
-        ("failed", 0, 1, "p.failed", "p.done_partial"),
-        ("warn", 5, 5, "p.done_warn", "p.done_partial"),
-        ("что-то незнакомое", 0, 0, "p.ready", "p.done_partial"),
+    for mode, ok_n, total_n, key, wrong, result in [
+        ("ok", 1, 1, "p.ready", "p.done_partial", "ok"),
+        ("partial", 3, 5, "p.done_partial", "p.failed", "error"),
+        ("failed", 0, 1, "p.failed", "p.done_partial", "failed"),
+        ("warn", 5, 5, "p.done_warn", "p.done_partial", "warn"),
+        ("что-то незнакомое", 0, 0, "p.ready", "p.done_partial", "ok"),
     ]:
         run(api, FakeDownloader(failed=True, mode=mode, ok=ok_n, total=total_n))
-        got = api.poll()["status"]
+        state = api.poll()
+        got = state["status"]
         want = i18n.tr("en", key, ok=ok_n, total=total_n)
         ok(got == want, f"{mode} -> {key}", f"{got!r} != {want!r}")
         ok(got != i18n.tr("en", wrong, ok=ok_n, total=total_n),
            f"{mode} не показывает {wrong}", repr(got))
+        ok(state["result"] == result, f"{mode} -> result {result}", repr(state["result"]))
 
     # обрыв связи на одном видео: «часть файлов» тут быть не может
     run(api, FakeDownloader(failed=True, mode="failed"))
@@ -231,8 +263,10 @@ def main() -> int:
        "счётчики только в сообщении про частичный провал")
 
     run(api, FakeDownloader(boom=True))
-    ok(api.poll()["status"] == i18n.tr("en", "p.failed"),
+    boom = api.poll()
+    ok(boom["status"] == i18n.tr("en", "p.failed"),
        "исключение в _run -> p.failed, а не «Готов»")
+    ok(boom["result"] == "failed", "сбой даёт result failed, а не error", repr(boom["result"]))
     api._cancel = True    # отмена нажата во время загрузки, итог - частичный
     run(api, FakeDownloader(failed=True, mode="partial", ok=3, total=5))
     cancelled = api.poll()["status"]
