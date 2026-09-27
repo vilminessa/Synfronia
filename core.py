@@ -65,6 +65,7 @@ from themes import (
     _THEME_DEFAULTS,
     _themes_root,
     build_page,
+    build_settings_page,
     load_themes,
     themes_embed,
 )

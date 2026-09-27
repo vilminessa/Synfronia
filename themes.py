@@ -4,7 +4,9 @@ r"""Модульные темы и сборка страницы.
 theme.json (палитра/мета/extends/entry), custom.css, slots/*.html,
 ресурсы (url(...) и {{asset:rel}} -> data:URI). Из этого собирается
 итоговый HTML: build_page() наполняет __THEME_ROOT__/__THEME_CSS__/
-__APP_CSS__/__APPJS__/__I18N__/__THEMES__/__SETTINGS_SCHEMA__ в ui.BASE_TEMPLATE.
+__APP_CSS__/__MAIN_CSS__/__APPJS__/__I18N__/__THEMES__/__SETTINGS_SCHEMA__ в
+ui.BASE_TEMPLATE, а build_settings_page() - то же самое в ui.SETTINGS_TEMPLATE
+для отдельного окна настроек.
 """
 
 import base64
@@ -405,41 +407,18 @@ select optgroup {
               2px 0 0 rgba(255, 70, 90, .28), -2px 0 0 rgba(90, 200, 255, .30); }
 .sub { opacity: .55; }
 
-/* --- плавающая стеклянная панель настроек --- */
-.sheet {
-  top: 14px;
-  right: 14px;
-  bottom: 14px;
-  width: 340px;
-  max-width: 92vw;
-  background: rgba(12, 24, 50, .21);
-  border-left: none;
-  border-radius: 30px;
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, .09),
-    inset 0 0 18px 6px rgba(255, 255, 255, .05),
-    inset 0 20px 40px rgba(255, 255, 255, .04),
-    inset 0 -30px 60px rgba(0, 0, 0, .25),
-    0 40px 90px rgba(0, 0, 0, .60);
-}
-.sheet, #log {
+/* --- стекло журнала (панель настроек теперь отдельное окно) --- */
+#log {
   -webkit-backdrop-filter: blur(26px) saturate(1.5);
   backdrop-filter: blur(26px) saturate(1.5);
 }
 /* где поддерживаются SVG-фильтры — добавляем настоящую «жидкую» рефракцию
    (feTurbulence -> feDisplacementMap -> feGaussianBlur) */
 @supports (backdrop-filter: url("data:image/svg+xml")) {
-  .sheet, #log {
+  #log {
     -webkit-backdrop-filter: url("data:image/svg+xml;base64,__LG_FILTER__") saturate(1.55);
     backdrop-filter: url("data:image/svg+xml;base64,__LG_FILTER__") saturate(1.55);
   }
-}
-.sheet-title {
-  background: linear-gradient(90deg, #8fd4ff, #b0a5ff);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  text-shadow: 2px 0 0 rgba(255, 70, 90, .28), -2px 0 0 rgba(90, 200, 255, .30);
 }
 .overlay {
   background: rgba(4, 8, 18, .5);
@@ -540,9 +519,6 @@ _URLEX = re.compile(r"""url\(\s*(?:"([^"]*)"|'([^']*)'|([^)"'\s][^)"']*))\s*\)""
 _ASSET_RE = re.compile(r"\{\{asset:([^}]*)\}\}")
 # Секции базового шаблона: <!-- SLOT:name --> ... <!-- /SLOT:name -->
 _SLOT_RE = re.compile(r"<!-- SLOT:([a-z0-9_-]+) -->(.*?)<!-- /SLOT:\1 -->", re.S)
-# Слоты, содержимое которых собирает приложение, а не тема: панель настроек
-# рисует app.js из settings_schema, свой slots/settings.html она не примет.
-GENERATED_SLOTS = {"settings"}
 _PALETTE_FIELDS = (
     "bg", "surface", "widget", "text", "accent", "warn",
     "opacity", "radius_s", "radius_m", "radius_l",
@@ -834,11 +810,13 @@ CSS наследуется по цепочке extends: файлы родите�
 
   __THEME_ROOT__    палитра темы (:root CSS-переменные)
   __THEME_CSS__     собранный CSS темы (с data:URI внутри)
-  __APP_CSS__       базовые стили приложения
-  __APPJS__         логика приложения (обязателен в полном HTML-шаблоне)
+  __APP_CSS__       базовые стили приложения (общие для обоих окон)
+  __MAIN_CSS__      стили только главного окна
+  __COMMONJS__      общий JS обоих окон (переводы, тема, шрифты)
+  __APPJS__         логика главного окна (обязателен в полном HTML-шаблоне)
   __I18N__          переводы (JSON)
   __THEMES__        список тем (JSON)
-  __SETTINGS_SCHEMA__  схема настроек (JSON) - панель рисуется из неё
+  __SETTINGS_SCHEMA__  схема настроек (JSON) - окно настроек рисуется из неё
   {{asset:rel}}     локальный файл темы -> data:URI
 
 Пример минимального index.html:
@@ -852,11 +830,17 @@ CSS наследуется по цепочке extends: файлы родите�
 --------------
 Эти секции базового шаблона можно переопределить файлами slots\\<имя>.html:
   head, tabs, panel-video, panel-playlist, warn, ffmpeg-overlay, actions,
-  progress, clicker.
+  progress, clicker, modal.
 Маркеры в шаблоне: <!-- SLOT:<имя> --> ... <!-- /SLOT:<имя> -->.
 Слоты ищутся по цепочке extends: сначала в теме, затем у родителей.
-Слот settings не переопределяется: панель настроек рисует app.js из схемы
-(settings_schema), файл темы с таким именем игнорируется с записью в лог.
+
+ОКНО НАСТРОЕК
+-------------
+Настройки открываются отдельным окном. Оно всегда собирается приложением из
+собственного шаблона: тема влияет на него палитрой, шрифтами и своим CSS, но
+ни полный entry, ни слот settings не переопределяют его разметку - поля
+рисует settings.js из схемы настроек. Файл slots\\settings.html игнорируется
+(запись об этом появляется в журнале).
 """
 
 
@@ -1098,12 +1082,6 @@ def _apply_slots(template: str, folders: list[Path]) -> str:
 
     def repl(m: re.Match) -> str:
         name = m.group(1)
-        if name in GENERATED_SLOTS:
-            for folder in folders or []:
-                if (folder / "slots" / f"{name}.html").is_file():
-                    _file_log("WARN", f"тема {folder.name}: slots/{name}.html игнорируется, "
-                                     f"панель настроек строится из схемы")
-            return m.group(0)
         for folder in folders or []:
             slot = folder / "slots" / f"{name}.html"
             if slot.is_file():
@@ -1114,6 +1092,18 @@ def _apply_slots(template: str, folders: list[Path]) -> str:
         return m.group(0)
 
     return _SLOT_RE.sub(repl, template)
+
+
+def _warn_ignored_slot(folders: list[Path], name: str, why: str) -> None:
+    """Пишет в лог, если тема подсовывает слот, который собирает приложение.
+
+    Окно настроек рисует settings.js из схемы settings_schema, поэтому свой
+    slots/settings.html тема подставить не может - молча проглотили бы файл,
+    поэтому пишем в лог (он виден и в журнале, и в themes/README.txt).
+    """
+    for folder in folders or []:
+        if (folder / "slots" / f"{name}.html").is_file():
+            _file_log("WARN", f"тема {folder.name}: slots/{name}.html игнорируется, {why}")
 
 
 def _apply_assets(html: str, folders: list[Path]) -> str:
@@ -1128,6 +1118,54 @@ def _apply_assets(html: str, folders: list[Path]) -> str:
     return _ASSET_RE.sub(repl, html)
 
 
+def _page_theme(theme_key: str) -> dict:
+    """Спецификация темы для сборки страницы (палитра, CSS, папки слотов)."""
+    if not _LOADED_THEMES:
+        load_themes()
+    available = _LOADED_THEMES or {}
+    if theme_key not in available:
+        theme_key = "scarred_mind" if "scarred_mind" in available else next(iter(available), theme_key)
+    return _fill_palette(dict(available.get(theme_key) or THEMES.get(theme_key) or {}))
+
+
+def _page_fonts(theme: dict, fonts: dict | None) -> dict:
+    """Шрифты страницы: выбор из настроек, но тема может его переопределить."""
+    if fonts is None:
+        from settings import load_settings
+        saved = load_settings()
+        fonts = {"sans": saved.get("font_sans") or "", "mono": saved.get("font_mono") or ""}
+    return {
+        "sans": _clean_family(theme.get("font") or fonts.get("sans") or ""),
+        "mono": _clean_family(theme.get("font_mono") or fonts.get("mono") or ""),
+    }
+
+
+def _fill_placeholders(template: str, theme: dict, picked: dict) -> str:
+    """Подставляет в шаблон палитру, CSS темы, шрифты, переводы и данные.
+
+    Одинаково для главной страницы и окна настроек: набор плейсхолдеров общий,
+    лишние в шаблоне просто не встречаются.
+    """
+    fonts_css = font_css([picked["sans"], picked["mono"]])
+    page = template.replace("__THEME_ROOT__", _palette_root_vars(theme, picked))
+    page = page.replace("__THEME_CSS__", theme.get("css") or "")
+    page = page.replace("__FONTS_CSS__", fonts_css)
+    if "__FONTS_CSS__" not in template:
+        # свой entry-шаблон без плейсхолдера: добавляем стиль шрифтов сами
+        page = page.replace("</head>", f'<style id="fonts-style">{fonts_css}</style></head>', 1)
+    page = page.replace("__APP_CSS__", _ui.APP_CSS)
+    page = page.replace("__MAIN_CSS__", _ui.MAIN_CSS)
+    page = page.replace("__COMMONJS__", _ui.COMMON_JS)
+    page = page.replace("__APPJS__", _ui.APP_JS)
+    page = page.replace("__SETTINGS_CSS__", _ui.SETTINGS_CSS)
+    page = page.replace("__SETTINGS_JS__", _ui.SETTINGS_JS)
+    page = page.replace("__I18N__", _js_json(I18N))
+    page = page.replace("__THEMES__", _js_json(themes_embed()))
+    # __SETTINGS_SCHEMA__ лежит внутри settings.js, поэтому подменяем после него
+    page = page.replace("__SETTINGS_SCHEMA__", _js_json(settings_schema.schema_json()))
+    return page
+
+
 def build_page(theme_key: str, lang: str | None = None, fonts: dict | None = None) -> str:
     """Собирает итоговый HTML страницы для темы theme_key.
 
@@ -1138,25 +1176,12 @@ def build_page(theme_key: str, lang: str | None = None, fonts: dict | None = Non
     • шрифты из папки fonts (font_sans / font_mono, переопределённые полями
       темы font / font_mono) встраиваются как @font-face с data:URI;
     • плейсхолдеры (__THEME_ROOT__, __THEME_CSS__, __FONTS_CSS__, __APP_CSS__,
-      __APPJS__, __I18N__, __THEMES__) подставляются простой заменой.
+      __MAIN_CSS__, __COMMONJS__, __APPJS__, __I18N__, __THEMES__) подставляются
+      простой заменой.
     """
-    if not _LOADED_THEMES:
-        load_themes()
-    available = _LOADED_THEMES or {}
-    if theme_key not in available:
-        theme_key = "scarred_mind" if "scarred_mind" in available else next(iter(available), theme_key)
-    theme = _fill_palette(dict(available.get(theme_key) or THEMES.get(theme_key) or {}))
+    theme = _page_theme(theme_key)
     folders = theme.get("_slot_folders") or []
-
-    # 0) шрифты: выбор из настроек, но тема может его переопределить
-    if fonts is None:
-        from settings import load_settings
-        saved = load_settings()
-        fonts = {"sans": saved.get("font_sans") or "", "mono": saved.get("font_mono") or ""}
-    picked = {
-        "sans": _clean_family(theme.get("font") or fonts.get("sans") or ""),
-        "mono": _clean_family(theme.get("font_mono") or fonts.get("mono") or ""),
-    }
+    picked = _page_fonts(theme, fonts)
 
     # 1) выбор шаблона: свой index.html либо базовый
     entry = theme.get("entry")
@@ -1171,22 +1196,26 @@ def build_page(theme_key: str, lang: str | None = None, fonts: dict | None = Non
 
     # 2) ассеты в разметке -> data:URI
     template = _apply_assets(template, folders)
+    return _fill_placeholders(template, theme, picked)
 
-    # 3) плейсхолдеры
-    fonts_css = font_css([picked["sans"], picked["mono"]])
-    page = template.replace("__THEME_ROOT__", _palette_root_vars(theme, picked))
-    page = page.replace("__THEME_CSS__", theme.get("css") or "")
-    page = page.replace("__FONTS_CSS__", fonts_css)
-    if "__FONTS_CSS__" not in template:
-        # свой entry-шаблон без плейсхолдера: добавляем стиль шрифтов сами
-        page = page.replace("</head>", f'<style id="fonts-style">{fonts_css}</style></head>', 1)
-    page = page.replace("__APP_CSS__", _ui.APP_CSS)
-    page = page.replace("__APPJS__", _ui.APP_JS)
-    page = page.replace("__I18N__", _js_json(I18N))
-    page = page.replace("__THEMES__", _js_json(themes_embed()))
-    # __SETTINGS_SCHEMA__ лежит внутри app.js, поэтому подменяем после него
-    page = page.replace("__SETTINGS_SCHEMA__", _js_json(settings_schema.schema_json()))
-    return page
+
+def build_settings_page(theme_key: str, lang: str | None = None, fonts: dict | None = None) -> str:
+    """Собирает итоговый HTML окна настроек для темы theme_key.
+
+    Окно настроек - отдельная страница, и в отличие от главной оно всегда
+    собирается из встроенного шаблона ui.SETTINGS_TEMPLATE: тема влияет на
+    окно палитрой, шрифтами и своим CSS, но не переопределяет разметку (слот
+    settings и полный entry игнорируются) - иначе тема могла бы убрать поля,
+    которые рисует settings.js из схемы settings_schema.
+    """
+    theme = _page_theme(theme_key)
+    folders = theme.get("_slot_folders") or []
+    picked = _page_fonts(theme, fonts)
+    _warn_ignored_slot(folders, "settings", "окно настроек строится из схемы")
+    if theme.get("entry"):
+        _file_log("WARN", f"тема {theme.get('label')}: entry игнорируется для окна настроек, "
+                          f"его разметка собирается приложением")
+    return _fill_placeholders(_apply_assets(_ui.SETTINGS_TEMPLATE, folders), theme, picked)
 
 
 def themes_embed() -> dict:

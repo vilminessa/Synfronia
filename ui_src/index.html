@@ -16,9 +16,12 @@
 <style>
 __APP_CSS__
 </style>
+<style>
+__MAIN_CSS__
+</style>
 </head>
 <body>
-  
+
 <!-- SLOT:head -->
 <div class="head">
     <div class="brand">
@@ -124,22 +127,13 @@ __APP_CSS__
 
 
   
-<!-- SLOT:settings -->
-<div id="settings-overlay" class="overlay" hidden></div>
-  <div id="sheet-resize" class="sheet-resize" role="separator" aria-orientation="vertical"
-       tabindex="0" aria-label="Ширина панели настроек"
-       data-i18n-title="sheet.resize" title="Потяните, чтобы изменить ширину панели" hidden></div>
-  <div id="settings-sheet" class="sheet" hidden>
-    <div class="sheet-head">
-      <span class="sheet-title" data-i18n="ui.settings">Настройки</span>
-      <button type="button" id="settings-close" class="icon-btn" data-i18n-title="ui.close" title="Закрыть">&#x2715;&#xFE0E;</button>
-    </div>
-    <div class="sheet-body">
-      <div class="tabs" id="settings-tabs"></div>
-      <div id="settings-panels"></div>
-    </div>
-  </div>
-<!-- /SLOT:settings -->
+<!-- SLOT:modal -->
+<div id="settings-block" class="overlay" hidden></div>
+<!-- /SLOT:modal -->
+
+
+  
+<script>__COMMONJS__</script>
 <script>__APPJS__</script>
 </body>
 </html>

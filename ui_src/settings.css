@@ -1,0 +1,51 @@
+  /* Вёрстка окна настроек: шапка, список разделов слева, содержимое справа,
+     полоса журнала снизу. Палитра, шрифты и скругления — от темы, структура
+     и отступы — здесь, чтобы окно выглядело одинаково в любой теме. */
+  body {
+    display: flex; flex-direction: column;
+    height: 100vh; padding: 0; overflow: hidden;
+  }
+
+  .win-head {
+    flex: none;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--surface);
+  }
+  .win-title { font-size: 16px; font-weight: 600; }
+
+  .win-body { flex: 1 1 auto; display: flex; min-height: 0; }
+
+  .nav {
+    flex: 0 0 190px; display: flex; flex-direction: column; gap: 4px;
+    padding: 12px 8px; overflow-y: auto;
+    border-right: 1px solid var(--surface);
+  }
+  .nav-item {
+    text-align: left; width: 100%; padding: 9px 12px;
+    background: transparent; border: 1px solid transparent; color: var(--text);
+    border-radius: var(--radius-m); font-size: 14px;
+    transition: background .15s, color .15s, border-color .15s;
+  }
+  .nav-item:hover { background: var(--surface); color: var(--text); }
+  .nav-item.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+
+  .section {
+    flex: 1 1 auto; min-width: 0;
+    padding: 14px 18px 22px; overflow-y: auto;
+  }
+  /* поля идут плотнее, чем в старой панели: окно широкое, места много */
+  .section label { margin-top: 12px; }
+
+  .win-log {
+    flex: none; display: block;
+    width: 100%; height: 58px; margin: 0; padding: 8px 14px; resize: none;
+    border: 0; border-top: 1px solid var(--surface); border-radius: 0;
+    background: var(--surface); color: var(--text);
+    font-family: var(--font-mono, Consolas), monospace; font-size: 12px;
+    overflow-y: auto;
+  }
+
+  @media (max-width: 560px) {
+    .nav { flex-basis: 140px; }
+  }

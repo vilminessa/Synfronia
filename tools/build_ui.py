@@ -5,10 +5,11 @@
     python tools/build_ui.py --check    # ui.py актуален? (код возврата 1, если устарел)
     python tools/build_ui.py --extract  # восстановить ui_src/ из текущего ui.py
 
-Зачем это нужно: ui.py — сгенерированный файл, в котором CSS, JS и HTML-шаблон
-лежат тремя большими строковыми литералами (APP_CSS / APP_JS / BASE_TEMPLATE).
-Правки удобнее вносить в обычные текстовые файлы ui_src/, а этот скрипт
-собирает из них ui.py, который импортирует core.build_page().
+Зачем это нужно: ui.py — сгенерированный файл, в котором CSS, JS и HTML-шаблоны
+лежат строковыми литералами (APP_CSS / MAIN_CSS / APP_JS / COMMON_JS /
+SETTINGS_CSS / SETTINGS_JS / BASE_TEMPLATE / SETTINGS_TEMPLATE). Правки удобнее
+вносить в обычные текстовые файлы ui_src/, а этот скрипт собирает из них ui.py,
+который импортирует core.build_page() и core.build_settings_page().
 """
 
 import ast
@@ -26,13 +27,19 @@ OUT = ROOT / "ui.py"
 # (имя в ui.py, файл исходника в ui_src/)
 PARTS = (
     ("APP_CSS", "app.css"),
+    ("MAIN_CSS", "main.css"),
     ("APP_JS", "app.js"),
+    ("COMMON_JS", "common.js"),
+    ("SETTINGS_CSS", "settings.css"),
+    ("SETTINGS_JS", "settings.js"),
     ("BASE_TEMPLATE", "index.html"),
+    ("SETTINGS_TEMPLATE", "settings.html"),
 )
 
 HEADER = (
     "# ui.py — АВТО-ГЕНЕРИРУЕМЫЙ ФАЙЛ, не редактируй его вручную.\n"
-    "# Исходники интерфейса: ui_src/app.css, ui_src/app.js, ui_src/index.html\n"
+    "# Исходники интерфейса: ui_src/{app,main,settings}.css, ui_src/{app,common,settings}.js,\n"
+    "#                       ui_src/{index,settings}.html\n"
     "# Сборка: python tools/build_ui.py   Проверка: python tools/build_ui.py --check"
 )
 
@@ -50,7 +57,7 @@ def _write(path: Path, text: str) -> None:
 
 
 def _literals() -> dict[str, str]:
-    """Достаёт строковые литералы (APP_CSS / APP_JS / BASE_TEMPLATE) из ui.py."""
+    """Достаёт строковые литералы (APP_CSS / APP_JS / BASE_TEMPLATE и др.) из ui.py."""
     out: dict[str, str] = {}
     for line in _read(OUT).split("\n"):
         for name, _ in PARTS:

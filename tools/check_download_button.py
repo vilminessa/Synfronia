@@ -186,7 +186,7 @@ def main() -> int:
     states = set(re.findall(r"""["'](\w+)["']""",
                             re.search(r"var DL_STATES\s*=\s*\[(.*?)\]", app_js, re.S).group(1)))
     ok("fail" in states, "состояние fail есть в DL_STATES", str(sorted(states)))
-    ok('dl-bulge' in (ROOT / "ui_src" / "app.css").read_text(encoding="utf-8"),
+    ok('dl-bulge' in (ROOT / "ui_src" / "main.css").read_text(encoding="utf-8"),
        "для провала есть своя анимация dl-bulge")
     ok(icons.get("warn") == "err", "warn делит иконку «!» с error, но не подпись")
     ok(titles.get("err") == "btn.partial", "«!» подписана «Скачано не всё»", titles.get("err"))

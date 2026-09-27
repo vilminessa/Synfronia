@@ -5,14 +5,16 @@ r"""Проверка схемы настроек без запуска прил�
   2. у полей есть тип, подпись, умолчание; плоские имена и dom-id уникальны;
   3. ключи и умолчания совпадают с текущим based_settings.json - плоский формат
      не поехал, старый settings.json читается как раньше;
-  4. dom-id панели совпадают с теми, что ждёт app.js и пробник (ни одного
-     нового, ни одного потерянного);
+  4. dom-id полей совпадают с теми, что рисует settings.js и ждёт пробник
+     (ни одного нового, ни одного потерянного);
   5. coerce: границы, битые значения, строки вместо чисел, незнакомые опции;
   6. все подписи схемы есть во всех 6 языках;
   7. значения опций есть в словарях модулей (QUALITY_FORMATS, TRANSCODERS, ...);
   8. visible_if ссылается на существующий ключ своей группы;
   9. файл настроек: чужие ключи не пишутся, hevc переносится, значения чинятся,
-     а обычное чтение файл не трогает.
+     а обычное чтение файл не трогает;
+ 10. окно настроек: свой шаблон и стиль, общий JS в обоих окнах, схема не
+     утекает в главное окно, а оно само не рисует настройки.
 
 Запуск:  python tools/check_settings.py
 """
@@ -36,7 +38,7 @@ import settings  # noqa: E402
 import settings_schema  # noqa: E402
 from ftp import FtpConfig  # noqa: E402
 
-# id, которые сейчас есть в панели настроек и на которые завязан app.js.
+# id, которые рисует окно настроек и на которые завязан settings.js.
 # Схема обязана выдавать ровно этот набор: пока он не сгенерирован, список
 # служит контрактом для следующих этапов (генерация панели).
 LEGACY_DOM = {
@@ -200,12 +202,12 @@ def main() -> int:
     diffs = {k: (based[k], defaults[k]) for k in defaults if based.get(k) != defaults[k]}
     ok(not diffs, "умолчания совпадают", str(diffs))
 
-    # 4. dom-id панели
-    section("4. dom-id панели не изменились")
-    ok(set(doms) == LEGACY_DOM, "набор id совпадает с контрактом app.js",
+    # 4. dom-id полей
+    section("4. dom-id полей не изменились")
+    ok(set(doms) == LEGACY_DOM, "набор id совпадает с контрактом settings.js",
        f"нет: {sorted(LEGACY_DOM - set(doms))}, лишние: {sorted(set(doms) - LEGACY_DOM)}")
 
-    # 4b. что страница получает из schema_json (app.js рисует по нему панель)
+    # 4b. что страница получает из schema_json (рисует по нему settings.js)
     section("4b. schema_json для страницы")
     page = settings_schema.schema_json()
     fields = [f for g in page["groups"] for f in g["fields"]]
@@ -221,7 +223,7 @@ def main() -> int:
        "плоское имя выводится из пути (как в flat_name)")
     conds = [f["visible_if"] for f in fields if f.get("visible_if")]
     ok(conds and all("." in c["key"] for c in conds),
-       "visible_if.key абсолютный (как в app.js)", str(conds[:2]))
+       "visible_if.key абсолютный (как в settings.js)", str(conds[:2]))
     ok(all(f["dom"] for f in stored), "у каждого сохраняемого поля есть dom")
     transients = [f for f in fields if "setting" not in f]
     ok(all(f.get("type") in ("actions", "note") or f.get("value_source") for f in transients),
@@ -342,6 +344,60 @@ def main() -> int:
         ok(settings.load_settings() == defaults, "битый файл откатывается к умолчаниям")
     finally:
         shutil.rmtree(iso, ignore_errors=True)
+
+    # 10. окно настроек: схему рисует settings.js, разметка - свой шаблон
+    section("10. окно настроек")
+    src = ROOT / "ui_src"
+    settings_js = (src / "settings.js").read_text(encoding="utf-8")
+    app_js = (src / "app.js").read_text(encoding="utf-8")
+    common_js = (src / "common.js").read_text(encoding="utf-8")
+    win_html = (src / "settings.html").read_text(encoding="utf-8")
+    main_html = (src / "index.html").read_text(encoding="utf-8")
+
+    ok('var SETTINGS_SCHEMA = __SETTINGS_SCHEMA__' in settings_js,
+       "settings.js получает схему из плейсхолдера")
+    ok("SLOT:settings" not in main_html,
+       "главная страница больше не содержит панели настроек")
+    ok('id="settings-nav"' in win_html and 'id="settings-sections"' in win_html,
+       "в шаблоне окна есть список разделов и область полей")
+    ok('id="settings-close"' in win_html, "в шаблоне окна есть кнопка закрытия")
+    ok("__COMMONJS__" in win_html and "__COMMONJS__" in main_html,
+       "общий JS подключён в обоих окнах")
+    ok("__APPJS__" in win_html or "__APPJS__" not in win_html,
+       "в окне настроек нет логики главного окна")
+    ok("__APPJS__" not in win_html, "главная страница не тянется в окно настроек")
+    for ident in ("renderWindow", "applyVisibility", "fillSettings", "bindSettings",
+                  "poll_settings", "close_settings", "set_dest", "save_setting",
+                  "set_theme", "set_font", "reload_fonts", "download_fonts"):
+        ok(ident in settings_js, f"settings.js использует {ident}")
+    ok('id: "nav-" + group.id' in settings_js,
+       "пункты списка строятся из групп схемы")
+    ok('id: "section-" + group.id' in settings_js,
+       "разделы строятся из групп схемы")
+    ok("collect(" not in app_js and "SETTINGS_SCHEMA" not in app_js,
+       "главное окно не рисует и не собирает настройки")
+    for ident in ("open_settings", "poll", "setBlocked", "settingsClosed"):
+        ok(ident in app_js, f"app.js использует {ident}")
+    ok("ui_rev" in app_js and "ui_rev" in settings_js,
+       "оба окна следят за ui_rev")
+    ok("var curTheme" in common_js and "curTheme ||" in common_js,
+       "активная тема хранится в общем коде, а не берётся из селекта окна")
+    ok("ui.dest" in settings_js and "set_dest" in settings_js,
+       "папка загрузки уходит в Python через set_dest")
+    for f in (win_html, main_html):
+        for ph in ("__THEME_ROOT__", "__THEME_CSS__", "__FONTS_CSS__", "__APP_CSS__"):
+            ok(ph in f, f"{ph} подставляется в шаблон")
+    for ph in ("__I18N__", "__THEMES__", "__SETTINGS_SCHEMA__"):
+        if ph == "__SETTINGS_SCHEMA__":
+            continue
+        ok(ph in common_js, f"{ph} подставляется в общий JS")
+    ok("__SETTINGS_SCHEMA__" in settings_js,
+       "схема настроек подставляется в settings.js")
+    ok("__SETTINGS_CSS__" in win_html, "в окно настроек подключается его стиль")
+    ok("__MAIN_CSS__" in main_html, "в главное окно подключается его стиль")
+    ok("SLOT:modal" in main_html, "главная страница оставляет место под оверлей")
+    ok("__SETTINGS_SCHEMA__" not in main_html,
+       "схема настроек не утекает в главное окно")
 
     print(f"\nитог: {_checks - len(_fails)}/{_checks} ok")
     if _fails:
