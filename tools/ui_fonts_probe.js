@@ -206,8 +206,22 @@ const FTP_VIS = `(function () {
   flag.checked = false;
   flag.dispatchEvent(new Event("change"));
   out.back = count();
-  // подсказки полей и доступность пиксельного переключателя выгрузки
+  // подсказки полей и доступность пиксельного переключателя выгрузки. Цвета
+  // тумблера обязаны браться из темы: если переменной нет, fill падает в
+  // чёрный (rgb(0,0,0)) и на тёмной карточке тумблер просто не виден.
   var active = flag.parentElement;
+  var pxNode = active ? active.querySelector(".px") : null;
+  function pxView(sel, prop) {
+    var n = pxNode ? pxNode.querySelector(sel) : null;
+    return n ? (getComputedStyle(n).getPropertyValue(prop) || "").trim() : "";
+  }
+  var trackFill = pxView(".px-track", "fill"), trackStroke = pxView(".px-track", "stroke"),
+      knobOff = pxView(".px-knob-fill", "fill"), checkStroke = pxView(".px-check", "stroke");
+  flag.checked = true;
+  flag.dispatchEvent(new Event("change"));
+  var knobOn = pxView(".px-knob-fill", "fill"), checkOpacity = pxView(".px-check", "opacity");
+  flag.checked = false;
+  flag.dispatchEvent(new Event("change"));
   out.hints = {
     tls: tip(captionOf("ftp-tls")),
     tlsVerify: tip(captionOf("ftp-tls-verify")),
@@ -215,7 +229,9 @@ const FTP_VIS = `(function () {
     activeAria: active ? active.getAttribute("aria-label") || "" : "",
     activeTip: active ? active.getAttribute("data-tip") || "" : "",
     activePixel: active ? active.classList.contains("pixel-toggle") : false,
-    activeText: active ? active.textContent.trim() : ""
+    activeText: active ? active.textContent.trim() : "",
+    trackFill: trackFill, trackStroke: trackStroke, knobOff: knobOff,
+    knobOn: knobOn, checkStroke: checkStroke, checkOpacity: checkOpacity
   };
   return out;
 })()`;
@@ -599,6 +615,12 @@ async function waitForPage() {
       ["выгрузка: пиксельный переключатель без подписи",
         ftp.hints.activePixel && !ftp.hints.activeText &&
         ftp.hints.activeAria.length > 0 && ftp.hints.activeTip.length > 0],
+      ["тумблер виден: цвета из темы, не прозрачные",
+        /^rgba?\(/.test(ftp.hints.trackFill) && ftp.hints.trackFill !== "rgb(0, 0, 0)" &&
+        ftp.hints.trackStroke !== "none" && ftp.hints.trackStroke !== "" &&
+        /^rgba?\(/.test(ftp.hints.knobOff) && ftp.hints.knobOff !== "rgb(0, 0, 0)"],
+      ["цвет выключенного ползунка и акцентной галочки различаются",
+        ftp.hints.knobOn !== ftp.hints.knobOff && ftp.hints.checkOpacity === "1"],
       ["нет переполнения и обрезки подписей", ftp.on.overflowX <= 0 && !ftp.clipped.length],
     ];
     ftpChecks.forEach(([name, okFlag]) => { if (!okFlag) fail(name); });
@@ -611,8 +633,33 @@ async function waitForPage() {
       ` -> клик "${ftp.clicked.value}" сохранено=${JSON.stringify(ftp.saved)}`);
     console.log(`  выгрузка: пиксельный=${ftp.hints.activePixel} подпись="${ftp.hints.activeText}" ` +
       `aria="${ftp.hints.activeAria}" подсказка=${ftp.hints.activeTip.length > 0}; ` +
+      `цвета: дорожка=${ftp.hints.trackFill}/${ftp.hints.trackStroke} ползунок ${ftp.hints.knobOff}->${ftp.hints.knobOn}` +
+      ` галочка=${ftp.hints.checkOpacity}; ` +
       `подсказки: FTPS=${!!ftp.hints.tls.length} сертификат=${!!ftp.hints.tlsVerify.length} PASV=${!!ftp.hints.pasv.length}`);
     if (ftp.clipped.length) console.log(`        обрезано: ${ftp.clipped.join(", ")}`);
+    // ползунок едет с шагами (transition .09s), поэтому конечный transform
+    // читаем после завершения анимации, а не в том же тике
+    const PX_RUN = `(function () {
+      var flag = document.getElementById("ftp-active");
+      var s = flag.parentElement.querySelector(".px");
+      var knob = s.querySelector(".px-knob"), check = s.querySelector(".px-check");
+      flag.checked = false; flag.dispatchEvent(new Event("change"));
+      var before = getComputedStyle(knob).transform;
+      flag.checked = true; flag.dispatchEvent(new Event("change"));
+      return new Promise(function (done) {
+        setTimeout(function () {
+          done({before: before, after: getComputedStyle(knob).transform,
+                opacity: getComputedStyle(check).opacity, checked: flag.checked,
+                tip: flag.parentElement.getAttribute("data-tip") || ""});
+        }, 260);
+      });
+    })()`;
+    const pxMove = await evaluate(PX_RUN);
+    const pxMoveOk = /20/.test(pxMove.after) && pxMove.before !== pxMove.after &&
+      pxMove.checked === true && pxMove.opacity === "1";
+    if (!pxMoveOk) fail("тумблер едет: transform добирается до translate(20px)");
+    await evaluate('var f = document.getElementById("ftp-active"); f.checked = false; f.dispatchEvent(new Event("change")); true');
+    console.log(`  тумблер: transform ${pxMove.before} -> ${pxMove.after} галочка=${pxMove.opacity}`);
 
     console.log("--- подсказки схемы ---");
     const hints = await evaluate(`(function () {
@@ -625,6 +672,15 @@ async function waitForPage() {
           if (labels[i].htmlFor === "transcode") { transLabel = labels[i]; break; }
         }
       }
+      var transNote = document.getElementById("transcode-note");
+      // пустой контейнер не должен занимать место: когда доступны все
+      // кодировщики, пояснение очищается и скрывается
+      transAvailability = {ffmpeg: true, avail: ["libx265", "nvenc", "amf", "qsv"]};
+      buildTranscodeOptions();
+      var noteAllHidden = transNote ? transNote.hidden : null;
+      var noteAllText = transNote ? transNote.textContent.trim() : "";
+      transAvailability = {ffmpeg: true, avail: ["libx265", "nvenc"]};
+      buildTranscodeOptions();
       switchSection("ui");
       var navItems = [].slice.call(document.querySelectorAll("#settings-nav .nav-item"));
       var gear = document.getElementById("settings-btn");
@@ -632,7 +688,11 @@ async function waitForPage() {
       var browse = document.getElementById("browse");
       function tip(el) { return el ? el.getAttribute("data-tip") || "" : ""; }
       return {
-        transcode: tip(transLabel),
+        transcode: tip(trans),
+        transLabelTip: tip(transLabel),
+        transNoteHidden: transNote ? transNote.hidden : null,
+        transNoteText: transNote ? transNote.textContent.trim() : "",
+        transNoteAllHidden: noteAllHidden, transNoteAllText: noteAllText,
         navTips: navItems.map(tip),
         gearTip: tip(gear), gearAria: gear ? gear.getAttribute("aria-label") || "" : "",
         closeTip: tip(close), closeAria: close ? close.getAttribute("aria-label") || "" : "",
@@ -640,7 +700,11 @@ async function waitForPage() {
       };
     })()`);
     const hintChecks = [
-      ["«Перекодировка»: подсказка есть", hints.transcode.length > 0],
+      ["«Перекодировка»: подсказка на поле, а не на подписи",
+        hints.transcode.length > 0 && !hints.transLabelTip],
+      ["пояснение под перекодировщиком: с текстом видно, пустое скрыто",
+        hints.transNoteHidden === (hints.transNoteText.length === 0) &&
+        hints.transNoteAllHidden === true && hints.transNoteAllText === ""],
       ["разделы без подсказок", hints.navTips.every((x) => !x)],
       ["шестерёнка без подсказки, имя для доступности есть",
         !hints.gearTip && hints.gearAria.length > 0],
@@ -649,7 +713,8 @@ async function waitForPage() {
       ["«Обзор…» без подсказки (текстовая кнопка)", !hints.browseTip && !hints.browseIcon],
     ];
     hintChecks.forEach(([name, okFlag]) => { if (!okFlag) fail(name); });
-    console.log(`  перекодировка=${hints.transcode.length > 0 ? "есть" : "нет"}; ` +
+    console.log(`  перекодировка=${hints.transcode.length > 0 ? "есть" : "нет"}` +
+      ` (подпись без подсказки=${!hints.transLabelTip}, пояснение скрыто=${hints.transNoteHidden}); ` +
       `разделы=${hints.navTips.filter(Boolean).length}; шестерёнка: подсказка=${!!hints.gearTip} aria="${hints.gearAria}"; ` +
       `крестик: подсказка=${!!hints.closeTip} aria="${hints.closeAria}"; «Обзор…»: подсказка=${!!hints.browseTip}`);
 

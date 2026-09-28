@@ -74,7 +74,10 @@ STUB = """<script>
     // как настоящий reload_themes: отдаём перечитанный список тем
     reload_themes: function () { return ok(Object.assign({}, THEMES)); },
     set_language: function (lang) { settings.language = lang; return ok(); },
-    save_setting: function (key, value) { state.saved.push([key, value]); return ok(); },
+    save_setting: function (key, value) { state.saved.push([key, value]);
+      // как в приложении: значение сохраняется, и следующий poll() покажет
+      // его (иначе fillSettings() на поллу откатил бы переключатель назад)
+      settings[key] = value; return ok(); },
     start_download: function () { return ok({}); },
     stop_download: function () { return ok(); },
     browse_folder: function () { return ok("C:\\\\Downloads"); },

@@ -82,12 +82,6 @@
   function labelNode(spec) {
     var node = el("label", null, {for: spec.dom, "data-i18n": spec.label});
     node.textContent = t(spec.label);
-    // у режима выгрузки подсказка живёт на кнопках-переключателях, иначе она
-    // продублировалась бы на подписи и на самих кнопках
-    if (spec.title && spec.type !== "choice_buttons") {
-      node.setAttribute("data-i18n-tip", spec.title);
-      setTip(node, t(spec.title));
-    }
     return node;
   }
 
@@ -124,15 +118,23 @@
         }
         check.appendChild(cap);
       }
-      // пиксельный переключатель без подписи: смысл - в подсказке и в aria
+      // пиксельный переключатель без подписи: смысл - в подсказке и в aria.
+      // Внутри div, а не <label>, поэтому клик по тумблеру переключает сам
+      // (клик по спрятанному чекбоксу и так работает - его не трогаем).
       if (spec.pixel) {
-        var px = el("svg", "px", {viewBox: "0 0 40 20", width: "44", height: "22",
+        var px = el("svg", "px", {viewBox: "0 0 40 20", width: "40", height: "20",
                                   "aria-hidden": "true"});
         px.innerHTML = '<rect class="px-track" x="1" y="1" width="38" height="18"></rect>'
           + '<g class="px-knob">'
-          + '<rect class="px-knob-fill" x="3" y="3" width="12" height="12"></rect>'
-          + '<polyline class="px-check" points="6.5 9.5 9 12 13 6.5"></polyline></g>';
+          + '<rect class="px-knob-fill" x="4" y="4" width="12" height="12"></rect>'
+          + '<polyline class="px-check" points="7 10 10 13 14.5 6.5"></polyline></g>';
         check.appendChild(px);
+        var onPxClick = function(ev) {
+          if (ev.target === box) return;
+          box.checked = !box.checked;
+          box.dispatchEvent(new Event("change"));
+        };
+        check.addEventListener("click", onPxClick);
         check.setAttribute("data-i18n-aria", spec.label);
         check.setAttribute("data-i18n-tip", spec.title || spec.label);
         setTip(check, t(spec.title || spec.label));
@@ -182,6 +184,12 @@
       input.setAttribute("spellcheck", "false");
       if (spec.type === "password") input.setAttribute("autocomplete", "off");
       if (spec.placeholder) input.placeholder = spec.placeholder;
+    }
+    // подсказка поля-ввода живёт на самом поле, а не на подписи: наведение на
+    // «Перекодировка:» не должно показывать её
+    if (spec.title) {
+      input.setAttribute("data-i18n-tip", spec.title);
+      setTip(input, t(spec.title));
     }
     nodes.push(input);
     var range = null;
@@ -392,10 +400,14 @@
     if (note) {
       if (!transAvailability.ffmpeg) {
         note.textContent = t("trans.note.noffmpeg");
+        note.hidden = false;
       } else if (missing.length) {
         note.textContent = t("trans.note.missing") + missing.join(", ") + ".";
+        note.hidden = false;
       } else {
+        // всё доступно: пустой контейнер не должен занимать место под списком
         note.textContent = "";
+        note.hidden = true;
       }
     }
   }
