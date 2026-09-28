@@ -148,6 +148,14 @@ def main() -> int:
     ok(debug.wait_for_window(999999, 0.6) is False,
        "wait_for_window: несуществующий PID дожидается таймаута",
        f"{time.time() - t0:.1f}s")
+    ok(debug.webview_child_running(999999) is False,
+       "webview_child_running: у несуществующего PID потомков нет")
+    t0 = time.time()
+    ok(debug.wait_for_ready(999999, 0.6) is False,
+       "wait_for_ready: нет окна и WebView2 - таймаут",
+       f"{time.time() - t0:.1f}s")
+    ok(debug.stop_app([{"ProcessId": 999999}]) == [],
+       "stop_app: несуществующий PID не попадает в закрытые")
 
     section("6. меню (смоук)")
     run = subprocess.run(

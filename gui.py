@@ -1,6 +1,7 @@
 """Web-интерфейс (pywebview/EdgeChromium) для Synfronia. Модульные темы."""
 
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -37,7 +38,7 @@ from core import (
 from core import _file_log as file_log
 from core import _fonts_root as fonts_root
 from core import _themes_root as themes_root
-from paths import logs_dir
+from paths import logs_dir, webview_child_running
 
 seed_bundled_fonts()   # вшитые шрифты в папку шрифтов: первый запуск работает без сети
 load_languages()
@@ -548,23 +549,44 @@ def main() -> None:
     # завис, окно не появится вообще («тёмный экран»), а процесс будет жив.
     # Через 20 с без окна пишем след в gui_diag.log и stderr (в logs\launcher.log,
     # если запуск шёл из debug.py).
+    def _report_start_problem(msg: str) -> None:
+        line = (f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] сторож: {msg} "
+                "(см. python gui.py --diagnose-freeze)")
+        print(line, file=sys.stderr, flush=True)
+        try:
+            with open(base_dir() / "gui_diag.log", "a", encoding="utf-8") as fh:
+                fh.write(line + "\n")
+        except OSError:
+            pass
+        try:
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(
+                0,
+                f"{msg}\n\nЗакройте окно и запустите приложение заново.",
+                "Synfronia",
+                0x30,   # MB_ICONWARNING
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
     def _guard() -> None:
         win = webview.windows[-1] if webview.windows else None
         if win is None:
             # окно не создавалось - так бывает в тестах с подменённым webview
             return
-        if win.events.shown.wait(20):
+        if not win.events.shown.wait(20):
+            _report_start_problem("окно не появилось за 20 с - WebView2 завис при старте")
             return
-        msg = (
-            f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] сторож: окно не появилось "
-            "за 20 с - WebView2 завис при старте (см. python gui.py --diagnose-freeze)"
-        )
-        print(msg, file=sys.stderr, flush=True)
-        try:
-            with open(base_dir() / "gui_diag.log", "a", encoding="utf-8") as fh:
-                fh.write(msg + "\n")
-        except OSError:
-            pass
+        # Окно есть - но WebView2 мог упасть сразу после показа (краш в первые
+        # секунды): окно остаётся тёмным, страница не отрисуется. Ловим в
+        # течение 20 с после показа окна.
+        for _ in range(40):
+            if webview_child_running(os.getpid()):
+                return
+            time.sleep(0.5)
+        _report_start_problem(
+            "окно показано, но WebView2 не запустился или упал - "
+            "страница не отрисуется (тёмное окно)")
 
     threading.Thread(target=_guard, daemon=True, name="start-guard").start()
     # storage_path: pywebview по умолчанию (private_mode=True) кладёт WebView2

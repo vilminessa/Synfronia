@@ -32,7 +32,7 @@ import utf8_console  # noqa: E402
 
 utf8_console.force_utf8()
 
-from paths import logs_dir  # noqa: E402
+from paths import logs_dir, webview_child_running  # noqa: E402
 from settings import settings_path  # noqa: E402
 
 # PowerShell ищет процессы приложения: exe и запуск из исходников (gui.py).
@@ -178,12 +178,56 @@ def run_app(base: Path) -> int:
         fh.close()
 
 
+def _close_windows(pid: int) -> bool:
+    """Отправить WM_CLOSE видимым окнам процесса. True - если отправлено."""
+    sent: list[int] = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def _cb(hwnd, _lparam):
+        if _user32.IsWindowVisible(hwnd):
+            wpid = wintypes.DWORD()
+            _user32.GetWindowThreadProcessId(hwnd, ctypes.byref(wpid))
+            if wpid.value == pid:
+                _user32.PostMessageW(hwnd, 0x0010, 0, 0)  # WM_CLOSE
+                sent.append(hwnd)
+        return True
+
+    _user32.EnumWindows(_cb, 0)
+    return bool(sent)
+
+
+def _process_alive(pid: int) -> bool:
+    """Проверка через OpenProcess: процесс есть и не завершился."""
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    STILL_ACTIVE = 259
+    k32 = ctypes.windll.kernel32
+    h = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not h:
+        return False
+    try:
+        code = wintypes.DWORD()
+        k32.GetExitCodeProcess(h, ctypes.byref(code))
+        return code.value == STILL_ACTIVE
+    finally:
+        k32.CloseHandle(h)
+
+
 def stop_app(procs: list[dict]) -> list[int]:
-    """Завершить найденные процессы (taskkill с деревом). Возвращает закрытые PID."""
+    """Закрыть приложение: сначала мягко (WM_CLOSE - pywebview закрывает
+    WebView2 и убирает его каталог, следующий старт стартует со свежего
+    профиля), при неудаче - taskkill с деревом. Возвращает закрытые PID."""
     stopped: list[int] = []
     for p in procs:
         pid = int(p.get("ProcessId") or 0)
-        if not pid:
+        if not pid or not _process_alive(pid):
+            continue
+        if _close_windows(pid):
+            for _ in range(10):              # ждём завершения до 5 с
+                time.sleep(0.5)
+                if not _process_alive(pid):
+                    break
+        if not _process_alive(pid):
+            stopped.append(pid)
             continue
         try:
             r = subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
@@ -221,6 +265,20 @@ def wait_for_window(pid: int, seconds: float = 15) -> bool:
     deadline = time.time() + seconds
     while time.time() < deadline:
         if window_visible(pid):
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def wait_for_ready(pid: int, seconds: float = 15) -> bool:
+    """Ждать ЖИВОЕ содержимое: видимое окно И дочерний msedgewebview2.
+
+    Окно появляется раньше и переживает краш WebView2: при умершем
+    WebView2 пользователь видит тёмное окно без страницы - одного окна
+    как признака запуска недостаточно."""
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        if window_visible(pid) and webview_child_running(pid):
             return True
         time.sleep(0.5)
     return False
@@ -385,19 +443,22 @@ def op_run(base: Path) -> None:
         pause()
         return
     src = "Synfronia.exe" if (base / "Synfronia.exe").is_file() else "gui.py"
-    # Сторож: WebView2 при старте может зависнуть без окна («тёмный экран») -
-    # убиваем и пробуем ещё раз, потом отдаём диагностику.
+    # Сторож: WebView2 при старте может зависнуть без окна или умереть после
+    # показа окна (тёмное окно без страницы) - убиваем и пробуем ещё раз,
+    # потом отдаём диагностику.
     for attempt in (1, 2):
         pid = run_app(base)
         if not pid:
             break
         print(f"  запущен {src}, PID {pid} (вывод - logs\\launcher.log); "
-              f"жду окно 15 с, попытка {attempt}/2...")
-        if wait_for_window(pid, 15):
-            print(f"  окно появилось - запущен PID {pid}")
+              f"жду окно и WebView2 (15 с), попытка {attempt}/2...")
+        if wait_for_ready(pid, 15):
+            print(f"  окно с содержимым готово - запущен PID {pid}")
             pause()
             return
-        print("  окно не появилось - WebView2 завис при старте; завершаю и повторяю")
+        state = f"окно={'есть' if window_visible(pid) else 'нет'}, " \
+                f"WebView2={'есть' if webview_child_running(pid) else 'нет'}"
+        print(f"  не запустилось ({state}) - завершаю и повторяю")
         stop_app([{"ProcessId": pid}])
         time.sleep(1)
     else:
