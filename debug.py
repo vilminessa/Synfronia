@@ -15,13 +15,16 @@ r"""Отладочная консоль Synfronia: интерактивное ц
 
 from __future__ import annotations
 
+import ctypes
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
+from ctypes import wintypes
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "tools"))
@@ -35,13 +38,14 @@ from settings import settings_path  # noqa: E402
 # PowerShell ищет процессы приложения: exe и запуск из исходников (gui.py).
 # JSON складывается в файл UTF-8 - конвейер powershell.exe отдаёт байты в
 # OEM-кодировке, из-за чего кириллица в путях превращалась бы в кракозябры.
+# Файл живёт в %LOCALAPPDATA%\Synfronia\logs (в %TEMP% ничего не пишем).
 _PS_FIND = (
     "$p = Get-CimInstance Win32_Process | "
     "Where-Object { $_.Name -eq 'Synfronia.exe' -or $_.CommandLine -match 'gui\\.py' } | "
     "Select-Object ProcessId, Name, CreationDate, CommandLine; "
     "$p | ConvertTo-Json -Compress | Set-Content -Encoding UTF8 '%s'"
 )
-_PS_TMP = Path(os.environ.get("TEMP", ".")) / "synf_debug_ps.json"
+_PS_TMP = logs_dir() / "debug_ps.json"
 
 MENU = """\
 === Synfronia: отладочная консоль ===
@@ -57,6 +61,8 @@ MENU = """\
  8. Показать файл лога целиком (выбор по номеру)
  9. Удалить логи
 10. Следить за логом в реальном времени (Ctrl+C - назад в меню)
+ --- служебное ---
+11. Очистить служебные файлы Synfronia в %TEMP%
  0. Выход"""
 
 
@@ -117,7 +123,9 @@ def clean_root(root: Path, keep_bin: bool) -> tuple[int, list[str]]:
 # -- процессы приложения ------------------------------------------------------
 def find_app_processes() -> list[dict]:
     """Процессы приложения (Synfronia.exe или python ... gui.py). Только чтение."""
-    if not _PS_TMP.parent.is_dir():
+    try:
+        _PS_TMP.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
         return []
     try:
         subprocess.run(
@@ -185,6 +193,101 @@ def stop_app(procs: list[dict]) -> list[int]:
         except OSError:
             pass
     return stopped
+
+
+# -- окна и служебные файлы в %TEMP% ------------------------------------------
+_user32 = ctypes.windll.user32
+
+
+def window_visible(pid: int) -> bool:
+    """Есть ли у процесса видимое окно (user32.EnumWindows)."""
+    found: list[int] = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def _cb(hwnd, _lparam):
+        if _user32.IsWindowVisible(hwnd):
+            wpid = wintypes.DWORD()
+            _user32.GetWindowThreadProcessId(hwnd, ctypes.byref(wpid))
+            if wpid.value == pid:
+                found.append(hwnd)
+        return True
+
+    _user32.EnumWindows(_cb, 0)
+    return bool(found)
+
+
+def wait_for_window(pid: int, seconds: float = 15) -> bool:
+    """Ждать появления окна процесса (WebView2 может зависнуть при старте)."""
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        if window_visible(pid):
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def live_webview_dirs() -> set[str]:
+    """--user-data-dir живых процессов WebView2: их каталоги трогать нельзя."""
+    cmd = (
+        "Get-CimInstance Win32_Process -Filter \"Name='msedgewebview2.exe'\" | "
+        "ForEach-Object { $_.CommandLine }"
+    )
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-Command", cmd],
+                           capture_output=True, timeout=25, check=False)
+        text = r.stdout.decode("utf-8", errors="replace")
+        return {os.path.normcase(p.rstrip("\\/"))
+                for p in re.findall(r'--user-data-dir="?([^"\s]+)"?', text)}
+    except OSError:
+        return set()
+
+
+# Артефакты пробников/диагностики и каталоги pywebview (tmp*\EBWebView):
+# всё, что раньше копилось в %TEMP% вместо %LOCALAPPDATA%\Synfronia.
+_TEMP_JUNK = re.compile(
+    r"^(synf|px.*\.txt$|crop_.*\.png$|ring_.*\.png$|red_.*\.png$|"
+    r"pair_.*\.png$|after_nudge\.png$|final_state\.png$|sweep_.*\.py$)"
+)
+
+
+def _is_temp_junk(path: Path) -> bool:
+    """Каталог pywebview (внутри EBWebView), старый каталог пробников
+    или файл-артефакт."""
+    if _TEMP_JUNK.match(path.name):
+        return True
+    return path.is_dir() and (path / "EBWebView").is_dir()
+
+
+def _held_by_live(path: Path, live: set[str]) -> bool:
+    """Каталог занят живым процессом WebView2 (live хранит пути до EBWebView)."""
+    prefix = os.path.normcase(str(path) + os.sep)
+    return any(d.startswith(prefix) for d in live)
+
+
+def list_temp_junk(root: Path) -> list[Path]:
+    """Служебные файлы Synfronia в %TEMP% (без учёта занятых)."""
+    if not root.is_dir():
+        return []
+    return [c for c in sorted(root.iterdir()) if _is_temp_junk(c)]
+
+
+def clean_temp(root: Path, live: set[str]) -> tuple[int, list[str], list[str]]:
+    """Удалить служебные файлы Synfronia из root; занятые живыми процессами
+    пропускаются. Возвращает (удалено, ошибки, пропущено)."""
+    removed, errors, skipped = 0, [], []
+    for child in list_temp_junk(root):
+        if _held_by_live(child, live):
+            skipped.append(child.name)
+            continue
+        try:
+            if child.is_dir():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
+            removed += 1
+        except OSError as exc:
+            errors.append(f"{child.name}: {exc}")
+    return removed, errors, skipped
 
 
 # -- логи ---------------------------------------------------------------------
@@ -273,10 +376,33 @@ def op_clean(root: Path, keep_bin: bool) -> None:
 
 
 def op_run(base: Path) -> None:
-    pid = run_app(base)
-    if pid:
-        src = "Synfronia.exe" if (base / "Synfronia.exe").is_file() else "gui.py"
-        print(f"  запущен {src}, PID {pid} (вывод - logs\\launcher.log)")
+    busy = find_app_processes()
+    if busy:
+        print("  приложение уже запущено:")
+        for p in busy:
+            print(f"    PID {p.get('ProcessId')}  {p.get('Name')}")
+        print("  сначала завершите его (пункт 4)")
+        pause()
+        return
+    src = "Synfronia.exe" if (base / "Synfronia.exe").is_file() else "gui.py"
+    # Сторож: WebView2 при старте может зависнуть без окна («тёмный экран») -
+    # убиваем и пробуем ещё раз, потом отдаём диагностику.
+    for attempt in (1, 2):
+        pid = run_app(base)
+        if not pid:
+            break
+        print(f"  запущен {src}, PID {pid} (вывод - logs\\launcher.log); "
+              f"жду окно 15 с, попытка {attempt}/2...")
+        if wait_for_window(pid, 15):
+            print(f"  окно появилось - запущен PID {pid}")
+            pause()
+            return
+        print("  окно не появилось - WebView2 завис при старте; завершаю и повторяю")
+        stop_app([{"ProcessId": pid}])
+        time.sleep(1)
+    else:
+        print("  повтор не помог: запустите python gui.py --diagnose-freeze "
+              "и посмотрите gui_diag.log")
     pause()
 
 
@@ -402,6 +528,31 @@ def op_logs_follow() -> None:
         print("\n  прервано")
 
 
+def op_temp_clean() -> None:
+    root = Path(tempfile.gettempdir())
+    print(f"\n--- служебные файлы Synfronia в {root} ---")
+    junk = list_temp_junk(root)
+    if not junk:
+        print("  чисто - удалять нечего")
+        pause()
+        return
+    live = live_webview_dirs()
+    for c in junk:
+        note = " (занят живым процессом - пропускаю)" if _held_by_live(c, live) else ""
+        print(f"  {c.name}{note}")
+    if not confirm("Удалить перечисленное?"):
+        print("  отмена")
+        pause()
+        return
+    removed, errors, skipped = clean_temp(root, live)
+    print(f"  удалено: {removed}")
+    for s in skipped:
+        print(f"  пропущено (занято): {s}")
+    for e in errors:
+        print(f"  ошибка: {e}")
+    pause()
+
+
 def main() -> int:
     base = Path(__file__).resolve().parent
     root = app_root()
@@ -416,6 +567,7 @@ def main() -> int:
         "8": op_logs_show,
         "9": op_logs_clear,
         "10": op_logs_follow,
+        "11": op_temp_clean,
     }
     while True:
         print()

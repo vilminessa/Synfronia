@@ -15,6 +15,7 @@ Synfronia/
 # Локальные настройки и служебные файлы
 settings.json
 selftest.log
+gui_diag.log
 out*.txt
 
 # Временные хелперы и артефакты правок (opencode)

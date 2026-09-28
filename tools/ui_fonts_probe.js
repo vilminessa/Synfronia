@@ -23,7 +23,10 @@ const os = require("os");
 const path = require("path");
 
 const EDGE = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
-const PAGE = process.argv[2] || path.join(os.tmpdir(), "synf_probe_page.html");
+// Всё служебное пробника - в %LOCALAPPDATA%\Synfronia\probe, в %TEMP% ничего
+// не пишем (страница и профили headless Edge).
+const PROBE_DIR = path.join(process.env.LOCALAPPDATA, "Synfronia", "probe");
+const PAGE = process.argv[2] || path.join(PROBE_DIR, "page.html");
 const PORT = 9337;
 const LANGS = ["ru", "en", "ja", "zh-CN", "es", "de"];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -345,7 +348,7 @@ async function waitForPage() {
 
 (async () => {
   if (!fs.existsSync(PAGE)) throw new Error(`нет страницы: ${PAGE} (сначала tools/ui_probe_page.py)`);
-  const profile = path.join(os.tmpdir(), "synf-probe-" + Date.now());
+  const profile = path.join(PROBE_DIR, "profiles", "probe-" + Date.now());
   fs.mkdirSync(profile, { recursive: true });
   const edge = spawn(EDGE, ["--headless=new", "--disable-gpu", "--no-first-run",
     "--no-default-browser-check", "--hide-scrollbars", `--remote-debugging-port=${PORT}`,

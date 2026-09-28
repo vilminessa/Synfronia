@@ -37,6 +37,7 @@ from core import (
 from core import _file_log as file_log
 from core import _fonts_root as fonts_root
 from core import _themes_root as themes_root
+from paths import logs_dir
 
 seed_bundled_fonts()   # вшитые шрифты в папку шрифтов: первый запуск работает без сети
 load_languages()
@@ -542,7 +543,34 @@ def main() -> None:
         min_size=(780, 560),
         background_color="#0c1622",
     ))
-    webview.start()
+
+    # Сторож старта: WebView2 создаётся без дефолтного таймаута - если loader
+    # завис, окно не появится вообще («тёмный экран»), а процесс будет жив.
+    # Через 20 с без окна пишем след в gui_diag.log и stderr (в logs\launcher.log,
+    # если запуск шёл из debug.py).
+    def _guard() -> None:
+        win = webview.windows[-1] if webview.windows else None
+        if win is None:
+            # окно не создавалось - так бывает в тестах с подменённым webview
+            return
+        if win.events.shown.wait(20):
+            return
+        msg = (
+            f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] сторож: окно не появилось "
+            "за 20 с - WebView2 завис при старте (см. python gui.py --diagnose-freeze)"
+        )
+        print(msg, file=sys.stderr, flush=True)
+        try:
+            with open(base_dir() / "gui_diag.log", "a", encoding="utf-8") as fh:
+                fh.write(msg + "\n")
+        except OSError:
+            pass
+
+    threading.Thread(target=_guard, daemon=True, name="start-guard").start()
+    # storage_path: pywebview по умолчанию (private_mode=True) кладёт WebView2
+    # в tempfile.TemporaryDirectory() - после taskkill каталоги копились в
+    # %TEMP% (35 штук). Всё содержимое приложения живёт в %LOCALAPPDATA%\Synfronia.
+    webview.start(storage_path=str(logs_dir().parent / "webview"))
 
 
 def diagnose_freeze() -> None:

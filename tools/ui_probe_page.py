@@ -7,7 +7,7 @@ r"""Собирает страницу Synfronia со стабом pywebview дл
 настроек лежит в ней оверлеем, поэтому сценарий открывает её сам (--settings
 или клик по шестерёнке).
 
-    python tools/ui_probe_page.py                      -> %TEMP%\synf_probe_page.html
+    python tools/ui_probe_page.py     -> %LOCALAPPDATA%\Synfronia\probe\page.html
     python tools/ui_probe_page.py out.html             -> свой путь
     python tools/ui_probe_page.py --settings           -> карточка настроек открыта
     python tools/ui_probe_page.py --theme liquid_glass --lang de
@@ -15,7 +15,6 @@ r"""Собирает страницу Synfronia со стабом pywebview дл
 
 import json
 import sys
-import tempfile
 from pathlib import Path
 
 import utf8_console  # локальный помощник tools/, доступен по sys.path[0] скрипта
@@ -26,7 +25,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import settings_schema  # noqa: E402
 import i18n  # noqa: E402
+from paths import logs_dir  # noqa: E402
 from themes import build_page  # noqa: E402
+
+# Страница пробника - в %LOCALAPPDATA%\Synfronia\probe: в %TEMP% ничего не пишем.
+PROBE_DIR = logs_dir().parent / "probe"
 
 # Настройки в стабе берём из схемы: так пробник проверяет настоящие умолчания,
 # а не отдельный список (он уже расходился с приложением).
@@ -132,7 +135,7 @@ def main(argv: list[str]) -> int:
         else:
             out = Path(args[i])
             i += 1
-    out = out or Path(tempfile.gettempdir()) / "synf_probe_page.html"
+    out = out or PROBE_DIR / "page.html"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(build_page_with_stub(theme=theme, lang=lang, settings_open=settings_open),
                    encoding="utf-8")

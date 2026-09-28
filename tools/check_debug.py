@@ -118,7 +118,38 @@ def main() -> int:
     ok(debug.fmt_ps_date("2026-09-28T10:00:00") == "2026-09-28T10:00:00",
        "fmt_ps_date: ISO остаётся как есть")
 
-    section("5. меню (смоук)")
+    section("5. служебные файлы %TEMP% и окна")
+    with tempfile.TemporaryDirectory(prefix="synf_temptest_") as tmp:
+        root = Path(tmp)
+        (root / "tmpAAAA" / "EBWebView").mkdir(parents=True)
+        (root / "tmpBBBB" / "EBWebView").mkdir(parents=True)
+        (root / "random_dir").mkdir()
+        (root / "synf_probe_page.html").write_text("x", encoding="utf-8")
+        (root / "synfronia_old_test").mkdir()      # старый каталог пробников
+        (root / "px7.txt").write_text("x", encoding="utf-8")
+        (root / "px_full.txt").write_text("x", encoding="utf-8")
+        (root / "after_nudge.png").write_bytes(b"\x89PNG")
+        (root / "random.txt").write_text("x", encoding="utf-8")
+        live = {os.path.normcase(str(root / "tmpBBBB" / "EBWebView"))}
+        names = [p.name for p in debug.list_temp_junk(root)]
+        ok(set(names) == {"tmpAAAA", "tmpBBBB", "synf_probe_page.html",
+                          "synfronia_old_test", "px7.txt", "px_full.txt",
+                          "after_nudge.png"},
+           "list_temp_junk: pywebview-каталоги, каталоги и артефакты пробников",
+           str(names))
+        removed, errors, skipped = debug.clean_temp(root, live)
+        ok(not errors, "clean_temp без ошибок", str(errors))
+        ok(skipped == ["tmpBBBB"], "занятый живым процессом каталог пропущен", str(skipped))
+        left = sorted(p.name for p in root.iterdir())
+        ok(left == ["random.txt", "random_dir", "tmpBBBB"],
+           "удалено только служебное, живой каталог остался", str(left))
+    ok(debug.window_visible(999999) is False, "window_visible: несуществующий PID -> False")
+    t0 = time.time()
+    ok(debug.wait_for_window(999999, 0.6) is False,
+       "wait_for_window: несуществующий PID дожидается таймаута",
+       f"{time.time() - t0:.1f}s")
+
+    section("6. меню (смоук)")
     run = subprocess.run(
         [sys.executable, str(ROOT / "debug.py")],
         input="x\n7\n\n0\n", capture_output=True, timeout=60, cwd=str(ROOT),
@@ -128,6 +159,7 @@ def main() -> int:
     ok(run.returncode == 0, "меню выходит с кодом 0", str(run.returncode))
     ok("Synfronia" in out and "Выбор" in out, "меню печатает заголовок и приглашение")
     ok("неизвестный пункт" in out, "некорректный ввод отклонён", out[-300:])
+    ok("Очистить служебные файлы Synfronia" in out, "пункт 11 присутствует в меню")
     ok("список файлов логов" not in out or "нет" in out or "app_" in out,
        "пункт 7 отработал (логи есть или пусто)")
 
