@@ -64,15 +64,35 @@
   }
 
   // ---- подсказки -----------------------------------------------------------
-  // Один элемент на страницу. Появляется с задержкой, догоняет курсор
-  // (инерция), стрелка идёт от края подсказки к краю того элемента, к
-  // которому подсказка относится.
-  var TIP = {node: null, text: null, arrow: null, target: null, shown: false,
-             x: 0, y: 0, tx: 0, ty: 0, raf: 0, timer: 0};
-  var TIP_GAP = 10;      // отступ подсказки от элемента
+  // Один элемент на страницу (см. initTooltips). В режиме hover догоняет курсор
+  // с инерцией и держится снаружи рамки элемента, чтобы не накрывать его; между
+  // краем подсказки и краем элемента рисуется «нить» (SVG) с наконечником-
+  // стрелкой у элемента. В режиме focus (клавиатура) курсора нет - подсказка
+  // встаёт над/под элементом, нить та же. Скрывается, как только элемент
+  // пропал из-под курсора, узел отсоединён или курсор ушёл из окна, - потому
+  // что pointerout после перерисовки карточки настроек не приходит.
+  var TIP = {node: null, text: null, thread: null, line: null, head: null,
+             target: null, pending: null, mode: "hover",
+             cx: 0, cy: 0, x: 0, y: 0, tx: 0, ty: 0,
+             raf: 0, timer: 0, shown: false, lastT: 0};
+  var SVG_NS = "http://www.w3.org/2000/svg";
+  var TIP_GAP = 10;      // минимальный зазор до элемента
   var TIP_MARGIN = 8;    // минимальный отступ от края окна
   var TIP_DELAY = 220;   // задержка появления, чтобы не мигало при проносе
-  var TIP_K = 0.18;      // коэффициент инерции: меньше - длиннее «хвост»
+  var TIP_OFF_X = 16;    // смещение подсказки от курсора
+  var TIP_OFF_Y = 20;
+  var TIP_TAU = 70;      // постоянная времени инерции (мс): меньше - короче хвост
+  var TIP_HEAD_LEN = 7;  // длина наконечника-стрелки
+  var TIP_HEAD_W = 3.5;  // половина ширины наконечника
+
+  function reducedMotion() {
+    return window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  }
+
+  function tipAnchor(el) {
+    if (!el || !el.closest) return null;
+    return el.closest("[data-tip]");
+  }
 
   function tipParts() {
     if (TIP.node) return;
@@ -81,49 +101,96 @@
     node.className = "tip";
     node.hidden = true;
     node.setAttribute("role", "tooltip");
-    var arrow = document.createElement("i");
-    arrow.className = "tip-arrow";
     var text = document.createElement("span");
     text.className = "tip-text";
-    node.appendChild(arrow);
     node.appendChild(text);
     document.body.appendChild(node);
     TIP.node = node;
-    TIP.arrow = arrow;
     TIP.text = text;
   }
 
-  function reducedMotion() {
-    return window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  function threadParts() {
+    if (TIP.thread) return;
+    var svg = document.createElementNS(SVG_NS, "svg");
+    svg.id = "tip-thread";
+    var line = document.createElementNS(SVG_NS, "path");
+    line.setAttribute("class", "tip-thread-line");
+    var head = document.createElementNS(SVG_NS, "path");
+    head.setAttribute("class", "tip-thread-head");
+    svg.appendChild(line);
+    svg.appendChild(head);
+    document.body.appendChild(svg);
+    TIP.thread = svg;
+    TIP.line = line;
+    TIP.head = head;
   }
 
-  function tipAnchor(el) {
-    if (!el) return null;
-    return el.closest("[data-tip]");
+  // Куда поставить подсказку. hover: курсор + смещение, но снаружи раздутой
+  // рамки элемента (подсказка не должна накрывать то, на что указывает).
+  // focus: над элементом, если есть место, иначе под ним.
+  function tipTarget() {
+    var el = TIP.target;
+    var w = TIP.node.offsetWidth;
+    var h = TIP.node.offsetHeight;
+    var r = el.getBoundingClientRect();
+    var dx, dy;
+    if (TIP.mode === "focus") {
+      var below = r.top - h - TIP_GAP < TIP_MARGIN;
+      dy = below ? r.bottom + TIP_GAP : r.top - h - TIP_GAP;
+      dx = r.left + r.width / 2 - w / 2;
+    } else {
+      dx = TIP.cx + TIP_OFF_X;
+      dy = TIP.cy + TIP_OFF_Y;
+      // вытолкнуть из раздутой рамки элемента по наименьшей грани - тогда нить
+      // всегда короткая и указывает на бордюр, а подсказка не перекрывает его
+      var left = r.left - TIP_GAP, top = r.top - TIP_GAP;
+      var right = r.right + TIP_GAP, bottom = r.bottom + TIP_GAP;
+      if (dx < right && dx + w > left && dy < bottom && dy + h > top) {
+        var pushL = right - dx, pushR = dx + w - left;
+        var pushT = bottom - dy, pushB = dy + h - top;
+        var m = Math.min(pushL, pushR, pushT, pushB);
+        if (m === pushL) dx = right;
+        else if (m === pushR) dx = left - w;
+        else if (m === pushT) dy = bottom;
+        else dy = top - h;
+      }
+    }
+    dx = Math.max(TIP_MARGIN, Math.min(dx, window.innerWidth - w - TIP_MARGIN));
+    dy = Math.max(TIP_MARGIN, Math.min(dy, window.innerHeight - h - TIP_MARGIN));
+    return {x: dx, y: dy};
   }
 
-  function showTip(el) {
+  function showTip(el, mode) {
+    if (el.id === "tip") return;
+    TIP.mode = mode === "focus" ? "focus" : "hover";
     var text = (el.getAttribute("data-tip") || "").trim();
     if (!text) return;
-    if (el.id === "tip") return;
     tipParts();
+    threadParts();
     TIP.target = el;
+    TIP.pending = null;
+    TIP.shown = false;
     TIP.text.textContent = text;
     el.setAttribute("aria-describedby", "tip");
     TIP.node.hidden = false;
     TIP.node.classList.add("tip-on");
-    placeTip(true);
+    TIP.thread.classList.add("tip-on");
+    var t0 = tipTarget();
+    TIP.tx = t0.x;
+    TIP.ty = t0.y;
+    TIP.x = TIP.tx;
+    TIP.y = TIP.ty;
+    TIP.lastT = 0;
     if (reducedMotion()) {
-      TIP.x = TIP.tx;
-      TIP.y = TIP.ty;
-      tipFrame();
-    } else {
+      paintTip();
+    } else if (!TIP.raf) {
       TIP.raf = requestAnimationFrame(tipFrame);
     }
   }
 
   function hideTip() {
     clearTimeout(TIP.timer);
+    TIP.pending = null;
     if (TIP.raf) { cancelAnimationFrame(TIP.raf); TIP.raf = 0; }
     if (TIP.target) {
       TIP.target.removeAttribute("aria-describedby");
@@ -132,86 +199,156 @@
     if (!TIP.node || TIP.node.hidden) return;
     TIP.node.classList.remove("tip-on");
     TIP.node.hidden = true;
+    if (TIP.thread) {
+      TIP.thread.classList.remove("tip-on");
+      TIP.line.setAttribute("d", "");
+      TIP.head.setAttribute("d", "");
+    }
     TIP.shown = false;
   }
 
-  // Куда поставить подсказку: над элементом, если есть место, иначе под ним.
-  // Горизонталь - по центру элемента с прижимкой к краям окна.
-  function placeTip(first) {
+  function tipFrame(now) {
+    TIP.raf = 0;
+    if (!TIP.target || !TIP.target.isConnected) { hideTip(); return; }
+    if (TIP.mode === "hover" && !TIP.target.matches(":hover")) { hideTip(); return; }
+    var t = tipTarget();
+    TIP.tx = t.x;
+    TIP.ty = t.y;
+    if (!TIP.lastT) TIP.lastT = now;
+    var dt = Math.min(50, Math.max(1, now - TIP.lastT));
+    TIP.lastT = now;
+    var k = 1 - Math.exp(-dt / TIP_TAU);
+    TIP.x += (TIP.tx - TIP.x) * k;
+    TIP.y += (TIP.ty - TIP.y) * k;
+    var settled = Math.abs(TIP.tx - TIP.x) < 0.5 && Math.abs(TIP.ty - TIP.y) < 0.5;
+    if (settled) { TIP.x = TIP.tx; TIP.y = TIP.ty; }
+    paintTip();
+    if (!settled) TIP.raf = requestAnimationFrame(tipFrame);
+    else TIP.shown = true;
+  }
+
+  function paintTip() {
+    TIP.node.style.left = TIP.x.toFixed(1) + "px";
+    TIP.node.style.top = TIP.y.toFixed(1) + "px";
+    paintThread();
+  }
+
+  // Нить: линия от края подсказки до ближайшей точки бордюра элемента плюс
+  // наконечник-стрелка, носик которой упирается в сам элемент.
+  function paintThread() {
     var el = TIP.target;
-    if (!el || !el.isConnected) return;
+    if (!el) return;
     var r = el.getBoundingClientRect();
     if (!r.width && !r.height) return;
     var w = TIP.node.offsetWidth;
     var h = TIP.node.offsetHeight;
-    var vw = window.innerWidth;
-    var vh = window.innerHeight;
-    var below = r.top - h - TIP_GAP < TIP_MARGIN;
-    var y = below ? r.bottom + TIP_GAP : r.top - h - TIP_GAP;
-    if (y + h > vh - TIP_MARGIN) y = Math.max(TIP_MARGIN, vh - h - TIP_MARGIN);
-    if (y < TIP_MARGIN) y = TIP_MARGIN;
-    var x = r.left + r.width / 2 - w / 2;
-    x = Math.max(TIP_MARGIN, Math.min(x, vw - w - TIP_MARGIN));
-    TIP.tx = x;
-    TIP.ty = y;
-    // сторона, на которой стоит подсказка, задаёт вид стрелки
-    TIP.node.classList.toggle("tip-below", below);
-    // стрелка у края подсказки, направленного к элементу, но не ближе угла;
-    // сторону (низ/верх) задаёт CSS, сюда - только положение по горизонтали
-    var cx = r.left + r.width / 2;
-    var ax = Math.max(14, Math.min(cx - x, w - 14));
-    TIP.arrow.style.left = ax + "px";
-    if (first) {
-      // стартовая точка инерции: подсказка «догоняет» нужное место
-      TIP.x = x;
-      TIP.y = below ? y - 10 : y + 10;
+    var cx = TIP.x + w / 2;
+    var cy = TIP.y + h / 2;
+    // ближайшая к центру подсказки точка рамки элемента
+    var px = Math.max(r.left, Math.min(cx, r.right));
+    var py = Math.max(r.top, Math.min(cy, r.bottom));
+    if (px > r.left && px < r.right && py > r.top && py < r.bottom) {
+      var dl = cx - r.left, dr = r.right - cx, dt = cy - r.top, db = r.bottom - cy;
+      var m = Math.min(dl, dr, dt, db);
+      if (m === dl) px = r.left; else if (m === dr) px = r.right;
+      else if (m === dt) py = r.top; else py = r.bottom;
     }
+    var dx = px - cx, dy = py - cy;
+    var len = Math.hypot(dx, dy);
+    if (len < 1) {
+      TIP.line.setAttribute("d", "");
+      TIP.head.setAttribute("d", "");
+      return;
+    }
+    // выход луча из рамки подсказки (старт нити)
+    var sx, sy;
+    if (dx === 0) { sx = cx; sy = cy + (dy < 0 ? -h / 2 : h / 2); }
+    else if (dy === 0) { sx = cx + (dx < 0 ? -w / 2 : w / 2); sy = cy; }
+    else {
+      var tx0 = (w / 2) / Math.abs(dx), ty0 = (h / 2) / Math.abs(dy);
+      var t0 = Math.min(tx0, ty0);
+      sx = cx + dx * t0;
+      sy = cy + dy * t0;
+    }
+    TIP.line.setAttribute("d", "M " + sx.toFixed(1) + " " + sy.toFixed(1)
+      + " L " + px.toFixed(1) + " " + py.toFixed(1));
+    var nx = -dy / len, ny = dx / len;
+    var bx = px - dx / len * TIP_HEAD_LEN;
+    var by = py - dy / len * TIP_HEAD_LEN;
+    TIP.head.setAttribute("d", "M " + (bx + nx * TIP_HEAD_W).toFixed(1) + " " + (by + ny * TIP_HEAD_W).toFixed(1)
+      + " L " + px.toFixed(1) + " " + py.toFixed(1)
+      + " L " + (bx - nx * TIP_HEAD_W).toFixed(1) + " " + (by - ny * TIP_HEAD_W).toFixed(1) + " Z");
   }
 
-  function tipFrame() {
-    TIP.raf = 0;
-    if (!TIP.target) return;
-    TIP.x += (TIP.tx - TIP.x) * TIP_K;
-    TIP.y += (TIP.ty - TIP.y) * TIP_K;
-    TIP.node.style.left = TIP.x.toFixed(1) + "px";
-    TIP.node.style.top = TIP.y.toFixed(1) + "px";
-    if (Math.abs(TIP.tx - TIP.x) > 0.4 || Math.abs(TIP.ty - TIP.y) > 0.4) {
-      TIP.raf = requestAnimationFrame(tipFrame);
-    } else {
-      TIP.x = TIP.tx;
-      TIP.y = TIP.ty;
-      TIP.node.style.left = TIP.x + "px";
-      TIP.node.style.top = TIP.y + "px";
-      TIP.shown = true;
-    }
+  function snapTip() {
+    var t = tipTarget();
+    TIP.tx = t.x;
+    TIP.ty = t.y;
+    TIP.x = TIP.tx;
+    TIP.y = TIP.ty;
+    paintTip();
   }
 
   function initTooltips() {
     tipParts();
-    function over(ev) {
+    document.addEventListener("pointerover", function(ev) {
       var el = tipAnchor(ev.target);
+      if (!el) return;
       if (el === TIP.target) return;
       if (TIP.target) hideTip();
-      if (!el) return;
+      if (TIP.pending === el) return;
+      TIP.pending = el;
       clearTimeout(TIP.timer);
-      TIP.timer = setTimeout(function() { if (!TIP.target) showTip(el); }, TIP_DELAY);
-    }
-    function out(ev) {
-      if (ev.relatedTarget && tipAnchor(ev.relatedTarget) === TIP.target) return;
+      TIP.timer = setTimeout(function() {
+        if (TIP.pending === el && !TIP.target) showTip(el, "hover");
+      }, TIP_DELAY);
+    }, true);
+    document.addEventListener("pointerout", function(ev) {
+      if (ev.relatedTarget && (tipAnchor(ev.relatedTarget) === TIP.target ||
+                               tipAnchor(ev.relatedTarget) === TIP.pending)) return;
+      TIP.pending = null;
+      clearTimeout(TIP.timer);
       hideTip();
-    }
-    document.addEventListener("pointerover", over, true);
-    document.addEventListener("pointerout", out, true);
+    }, true);
+    // Живость: элемент перерисовали или убрали (карточка настроек, смена
+    // темы) - pointerout не придёт, а подсказка обязана исчезнуть. Заодно
+    // помним курсор, за которым подсказка тянется с инерцией.
+    document.addEventListener("pointermove", function(ev) {
+      TIP.cx = ev.clientX;
+      TIP.cy = ev.clientY;
+      if (!TIP.target || TIP.mode !== "hover") return;
+      if (!TIP.target.isConnected || !TIP.target.matches(":hover")) { hideTip(); return; }
+      if (reducedMotion()) {
+        if (!TIP.raf) snapTip();
+      } else if (!TIP.raf) {
+        TIP.raf = requestAnimationFrame(tipFrame);
+      }
+    }, true);
+    document.documentElement.addEventListener("pointerleave", function() {
+      hideTip();
+    });
     document.addEventListener("focusin", function(ev) {
       var el = tipAnchor(ev.target);
-      if (el) { if (TIP.target) hideTip(); showTip(el); }
+      if (el) { if (TIP.target) hideTip(); showTip(el, "focus"); }
     });
-    document.addEventListener("focusout", hideTip);
+    document.addEventListener("focusout", function(ev) {
+      if (ev.relatedTarget && (tipAnchor(ev.relatedTarget) === TIP.target ||
+                               tipAnchor(ev.relatedTarget) === TIP.pending)) return;
+      hideTip();
+    });
     document.addEventListener("keydown", function(ev) {
       if (ev.key === "Escape") hideTip();
     });
-    window.addEventListener("resize", function() { if (TIP.target) placeTip(false); });
-    document.addEventListener("scroll", function() { if (TIP.target) placeTip(false); }, true);
+    var relayout = function() {
+      if (!TIP.target || !TIP.target.isConnected) return;
+      if (reducedMotion()) snapTip();
+      else if (!TIP.raf) TIP.raf = requestAnimationFrame(tipFrame);
+    };
+    window.addEventListener("resize", relayout);
+    document.addEventListener("scroll", function() {
+      if (TIP.target && !TIP.target.isConnected) { hideTip(); return; }
+      relayout();
+    }, true);
   }
 
   function applyTheme(key) {

@@ -52,7 +52,8 @@
 
   /* ---- подсказки ----
      Один элемент на страницу (см. initTooltips в common.js): показывается с
-     задержкой, догоняет курсор из-за инерции, стрелка указывает на край
+     задержкой, догоняет курсор из-за инерции и держится снаружи рамки
+     элемента; «нить»-SVG с наконечником соединяет край подсказки с краем
      элемента. Ни одного нативного title в интерфейсе - иначе браузер
      нарисовал бы вторую подсказку поверх. */
   .tip {
@@ -66,19 +67,15 @@
     transition: opacity .12s ease-out;
   }
   .tip.tip-on { opacity: 1; }
-  .tip-arrow {
-    position: absolute; width: 9px; height: 9px;
-    background: var(--surface);
-    transform: rotate(45deg);
-  }
-  /* подсказка сверху: стрелка на её нижней грани и смотрит вниз, поэтому
-     видны только правая и нижняя стороны квадрата. Снизу - зеркально. */
-  .tip-arrow {
-    bottom: -5px;
-    border: none; border-right: 1px solid var(--widget); border-bottom: 1px solid var(--widget);
-  }
-  .tip.tip-below .tip-arrow {
-    top: -5px; bottom: auto;
-    border: none; border-top: 1px solid var(--widget); border-left: 1px solid var(--widget);
-  }
   .tip .tip-text { display: block; }
+  /* Нить между подсказкой и элементом: полноэкранный SVG под подсказкой,
+     сам не кликается и не читается скринридером. */
+  #tip-thread {
+    position: fixed; inset: 0; width: 100%; height: 100%;
+    z-index: 89; pointer-events: none;
+    color: var(--accent); opacity: 0;
+    transition: opacity .12s ease-out;
+  }
+  #tip-thread.tip-on { opacity: 1; }
+  .tip-thread-line { stroke: currentColor; stroke-width: 1; fill: none; opacity: .65; }
+  .tip-thread-head { fill: currentColor; stroke: currentColor; stroke-width: 1; }

@@ -4,7 +4,9 @@
 //
 // Карточка: лежит по центру, разделы переключаются кликом, поля не вылезают
 // по ширине, кнопки с иконками без подписи (смысл в подсказке), подсказки
-// появляются с инерцией и стрелкой, нативных title нет, флажок FTP открывает
+// появляются с задержкой, тянутся за курсором с инерцией, «нить»-SVG с
+// наконечником соединяет их с краем элемента и подсказка не накрывает его,
+// после перерисовки карточки висящих подсказок не бывает, флажок FTP открывает
 // блок полей и убирает его обратно, режим выгрузки - переключатель, значения
 // сохраняются по change, папка уходит в Python через set_dest, элементы не
 // сливаются с фоном (контраст), карточка переживает минимальный размер окна.
@@ -416,51 +418,148 @@ async function waitForPage() {
     }
 
     console.log("--- подсказки ---");
-    const tipProbe = `(function () {
-      var btn = document.getElementById("reload-themes");
-      btn.dispatchEvent(new PointerEvent("pointerover", {bubbles: true}));
-      return {tip: !!document.getElementById("tip"), hidden: document.getElementById("tip").hidden};
-    })()`;
     await evaluate('curLang = "ru"; applyI18n(); true');
-    await evaluate(tipProbe);
+    // Подсказки живут от настоящего указателя: живость по :hover и pointermove.
+    // Синтетический pointerover курсор не двигает, поэтому мышь водим через CDP.
+    const tipBtn = await evaluate(`(function () {
+      var b = document.getElementById("reload-themes");
+      b.scrollIntoView({block: "center"});
+      var r = b.getBoundingClientRect();
+      return {cx: Math.round(r.left + r.width / 2), cy: Math.round(r.top + r.height / 2),
+              left: r.left, top: r.top, w: r.width, h: r.height};
+    })()`);
+    const mouseMove = (x, y) => send("Input.dispatchMouseEvent",
+      {type: "mouseMoved", x: Math.round(x), y: Math.round(y)});
+    await mouseMove(6, 6);                                // на фон - чистая база
+    await sleep(120);
+    await mouseMove(tipBtn.cx, tipBtn.cy);                // наводимся на кнопку
     await sleep(120);
     const tipEarly = await evaluate(
       '(function () { var t = document.getElementById("tip");' +
       ' return {hidden: t.hidden, x: Math.round(TIP.x), tx: Math.round(TIP.tx)}; })()');
-    await sleep(700);
+    await sleep(900);
     const tip = await evaluate(`(function () {
       var t = document.getElementById("tip");
-      var a = t.querySelector(".tip-arrow");
       var b = document.getElementById("reload-themes").getBoundingClientRect();
       var r = t.getBoundingClientRect();
-      var ax = parseFloat(a.style.left) + r.left + a.getBoundingClientRect().width / 2;
+      var head = document.querySelector(".tip-thread-head");
+      var line = document.querySelector(".tip-thread-line");
+      var thread = document.getElementById("tip-thread");
+      var d = head ? head.getAttribute("d") : "";
+      // носик наконечника должен сидеть на бордюре элемента (запас на штрих)
+      var m = d.match(/L\\s*(-?[\\d.]+)\\s+(-?[\\d.]+)\\s+L/);
+      var onBorder = !!m && (Math.abs(parseFloat(m[1]) - b.left) < 1.5 ||
+                             Math.abs(parseFloat(m[1]) - b.right) < 1.5 ||
+                             Math.abs(parseFloat(m[2]) - b.top) < 1.5 ||
+                             Math.abs(parseFloat(m[2]) - b.bottom) < 1.5);
+      // подсказка держится снаружи раздутой рамки элемента, не накрывая его
+      var inflated = {left: b.left - 9, right: b.right + 9, top: b.top - 9, bottom: b.bottom + 9};
+      var overlap = !(r.right <= inflated.left || r.left >= inflated.right ||
+                      r.bottom <= inflated.top || r.top >= inflated.bottom);
       return {hidden: t.hidden, on: t.classList.contains("tip-on"),
               text: t.querySelector(".tip-text").textContent,
               described: document.getElementById("reload-themes").getAttribute("aria-describedby"),
               settled: Math.abs(TIP.x - TIP.tx) < 0.5 && Math.abs(TIP.y - TIP.ty) < 0.5,
-              arrowAtTarget: Math.abs(ax - (b.left + b.width / 2)) < 18,
-              above: r.bottom <= b.top + 1, x: Math.round(r.left), y: Math.round(r.top),
-              w: Math.round(r.width), h: Math.round(r.height),
+              thread: !!thread && !thread.hidden && thread.classList.contains("tip-on") &&
+                      !!line && line.getAttribute("d").length > 0 && d.length > 0,
+              onBorder: onBorder, overlap: overlap,
+              x: Math.round(r.left), y: Math.round(r.top),
               inView: r.left >= 0 && r.right <= window.innerWidth + 1 && r.top >= 0};
     })()`);
     const tipChecks = [
       ["появляется не сразу (задержка)", tipEarly.hidden === true],
       ["показывается по наведению", tip.hidden === false && tip.on === true],
       ["текст подсказки совпадает с подписью", tip.text.length > 0],
-      ["плавно доезжает до места (инерция)", tip.settled === true && tipEarly.tx !== Math.round(tip.x)],
-      ["стрелка у края элемента", tip.arrowAtTarget],
-      ["подсказка не перекрывает элемент", tip.above],
+      ["доезжает до места и встаёт", tip.settled === true],
+      ["нить видна (линия + наконечник)", tip.thread],
+      ["носик наконечника на бордюре элемента", tip.onBorder],
+      ["подсказка не накрывает элемент", !tip.overlap],
       ["подсказка помещается в окно", tip.inView],
       ["элемент связан с подсказкой", tip.described === "tip"],
     ];
     tipChecks.forEach(([name, okFlag]) => { if (!okFlag) fail(name); });
-    await evaluate('document.getElementById("reload-themes")' +
-      '.dispatchEvent(new PointerEvent("pointerout", {bubbles: true, relatedTarget: document.body})); true');
+    // курсор ушёл с кнопки - подсказка обязана исчезнуть вместе с нитью
+    await mouseMove(6, 6);
+    await sleep(250);
+    const tipGone = await evaluate(`(function () {
+      var t = document.getElementById("tip");
+      var b = document.getElementById("reload-themes");
+      return {hidden: t.hidden, described: b.getAttribute("aria-describedby"),
+              line: document.querySelector(".tip-thread-line").getAttribute("d").length === 0,
+              head: document.querySelector(".tip-thread-head").getAttribute("d").length === 0};
+    })()`);
+    const goneOk = tipGone.hidden && !tipGone.described && tipGone.line && tipGone.head;
+    if (!goneOk) fail("подсказка не скрылась после ухода курсора");
+    // За крупным элементом подсказка тянется с инерцией: временная кнопка,
+    // курсор гуляет внутри неё - подсказка ездит по бордюру, нить не срывается.
+    await evaluate(`(function () {
+      var b = document.createElement("button");
+      b.id = "probe-tip-big";
+      b.setAttribute("data-tip", "временная кнопка");
+      b.style.cssText = "position:fixed;left:40px;top:160px;width:280px;height:80px;z-index:2147483000;";
+      document.body.appendChild(b);
+      return true;
+    })()`);
+    const bigBtn = await evaluate(`(function () {
+      var b = document.getElementById("probe-tip-big").getBoundingClientRect();
+      return {cx: Math.round(b.left + b.width / 2), cy: Math.round(b.top + b.height / 2)};
+    })()`);
+    await mouseMove(bigBtn.cx, bigBtn.cy);
+    await sleep(900);
+    const bigBefore = await evaluate(`(function () {
+      var t = document.getElementById("tip");
+      return {shown: !t.hidden && t.classList.contains("tip-on"), x: TIP.x, y: TIP.y, tx: TIP.tx, ty: TIP.ty};
+    })()`);
+    if (!bigBefore.shown) fail("подсказка не появилась на временной кнопке");
+    await mouseMove(bigBtn.cx + 25, bigBtn.cy + 30);
+    await sleep(110);
+    const bigMid = await evaluate('({x: TIP.x, tx: TIP.tx, rm: reducedMotion()})');
+    await sleep(600);
+    const bigEnd = await evaluate(`(function () {
+      var t = document.getElementById("tip");
+      var b = document.getElementById("probe-tip-big").getBoundingClientRect();
+      var r = t.getBoundingClientRect();
+      var head = document.querySelector(".tip-thread-head");
+      var d = head ? head.getAttribute("d") : "";
+      var m = d.match(/L\\s*(-?[\\d.]+)\\s+(-?[\\d.]+)\\s+L/);
+      var onBorder = !!m && (Math.abs(parseFloat(m[1]) - b.left) < 1.5 ||
+                             Math.abs(parseFloat(m[1]) - b.right) < 1.5 ||
+                             Math.abs(parseFloat(m[2]) - b.top) < 1.5 ||
+                             Math.abs(parseFloat(m[2]) - b.bottom) < 1.5);
+      return {x: TIP.x, y: TIP.y, tx: TIP.tx, ty: TIP.ty,
+              moved: Math.hypot(TIP.x - ${bigBefore.x}, TIP.y - ${bigBefore.y}) > 3,
+              settled: Math.abs(TIP.x - TIP.tx) < 0.5 && Math.abs(TIP.y - TIP.ty) < 0.5,
+              onBorder: onBorder,
+              inView: r.left >= 0 && r.right <= window.innerWidth + 1 && r.top >= 0};
+    })()`);
+    const bigMoved = Math.hypot(bigEnd.tx - bigBefore.x, bigEnd.ty - bigBefore.y) > 3;
+    if (bigMid.rm) {
+      if (!(bigMoved && bigEnd.moved && bigEnd.settled && bigEnd.onBorder && bigEnd.inView)) {
+        fail("подсказка не следует за курсором (reduced motion)");
+      }
+    } else if (bigMoved && bigEnd.moved && bigEnd.settled) {
+      if (Math.abs(bigMid.tx - bigMid.x) < 1) fail("инерция не видна: подсказка подскочила мгновенно");
+      if (!(bigEnd.onBorder && bigEnd.inView)) fail("нить или подсказка уехали от элемента");
+    } else {
+      fail("подсказка не потянулась за курсором");
+    }
+    // Перерисовка карточки: элемент исчезает из-под курсора без pointerout,
+    // подсказка не имеет права висеть на мёртвом узле.
+    await evaluate('var b = document.getElementById("probe-tip-big"); if (b) b.remove(); true');
+    await mouseMove(12, bigBtn.cy + 5);
     await sleep(200);
-    const tipGone = await evaluate('document.getElementById("tip").hidden');
-    if (!tipGone) fail("подсказка не скрылась после ухода курсора");
+    const tempGone = await evaluate(`(function () {
+      var t = document.getElementById("tip");
+      return {hidden: t.hidden,
+              line: document.querySelector(".tip-thread-line").getAttribute("d").length === 0,
+              head: document.querySelector(".tip-thread-head").getAttribute("d").length === 0};
+    })()`);
+    await evaluate('var b = document.getElementById("probe-tip-big"); if (b) b.remove(); true');
+    const detachOk = tempGone.hidden && tempGone.line && tempGone.head;
+    if (!detachOk) fail("подсказка висит после перерисовки элемента");
     console.log(`  задержка=${tipEarly.hidden ? "есть" : "нет"} текст="${tip.text}" ` +
-      `инерция=${tip.settled} стрелка_у_элемента=${tip.arrowAtTarget} скрыта_после_ухода=${tipGone}`);
+      `нить=${tip.thread} наконечник_у_элемента=${tip.onBorder} ` +
+      `следует_за_курсором=${bigMoved && bigEnd.settled} скрыта_после_ухода=${goneOk}`);
 
     console.log("--- раздел FTP ---");
     const ftp = await evaluate(FTP_VIS);

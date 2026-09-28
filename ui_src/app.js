@@ -295,6 +295,7 @@
     } else {
       // ловушка фокуса: пока карточка открыта, Tab не должен уходить на вкладки
       // и поля главного окна - они inert и всё равно не получают фокус.
+      hideTip();
       if (settingsOpener && settingsOpener.focus) settingsOpener.focus();
       settingsOpener = null;
     }

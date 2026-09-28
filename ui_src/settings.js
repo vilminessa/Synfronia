@@ -199,6 +199,7 @@
   // поля одного блока (box) попадают в одну карточку, поля с одинаковым row -
   // в одну строку.
   function renderWindow() {
+    hideTip();
     var nav = document.getElementById("settings-nav");
     var host = document.getElementById("settings-sections");
     if (!nav || !host) return;
@@ -299,6 +300,7 @@
   }
 
   function switchSection(name) {
+    hideTip();
     SETTINGS_SCHEMA.groups.forEach(function(group) {
       var sec = document.getElementById("section-" + group.id);
       var item = document.getElementById("nav-" + group.id);
