@@ -215,6 +215,20 @@ const FTP_VIS = `(function () {
     var n = pxNode ? pxNode.querySelector(sel) : null;
     return n ? (getComputedStyle(n).getPropertyValue(prop) || "").trim() : "";
   }
+  function pxRect(sel) {
+    var n = pxNode ? pxNode.querySelector(sel) : null;
+    if (!n) return [0, 0];
+    var r = n.getBoundingClientRect();
+    return [Math.round(r.width), Math.round(r.height)];
+  }
+  // Невидимый тумблер ловился только на пикселях: если svg создан через
+  // createElement (HTML-namespace), его innerHTML парсится как HTML, фигуры
+  // получают box 0x0 и ничего не рисуют, а computed-стили остаются «верными».
+  // Поэтому меряем namespace и геометрию самих фигур.
+  var SVG_NS = "http://www.w3.org/2000/svg";
+  var pxNs = pxNode ? pxNode.namespaceURI : "";
+  var pxKidsNs = pxNode ? [].slice.call(pxNode.querySelectorAll("*"))
+    .map(function(n) { return n.namespaceURI; }) : [];
   var trackFill = pxView(".px-track", "fill"), trackStroke = pxView(".px-track", "stroke"),
       knobOff = pxView(".px-knob-fill", "fill"), checkStroke = pxView(".px-check", "stroke");
   flag.checked = true;
@@ -230,6 +244,8 @@ const FTP_VIS = `(function () {
     activeTip: active ? active.getAttribute("data-tip") || "" : "",
     activePixel: active ? active.classList.contains("pixel-toggle") : false,
     activeText: active ? active.textContent.trim() : "",
+    pxNs: pxNs, pxKidsNs: pxKidsNs, trackRect: pxRect(".px-track"),
+    knobRect: pxRect(".px-knob-fill"),
     trackFill: trackFill, trackStroke: trackStroke, knobOff: knobOff,
     knobOn: knobOn, checkStroke: checkStroke, checkOpacity: checkOpacity
   };
@@ -615,6 +631,12 @@ async function waitForPage() {
       ["выгрузка: пиксельный переключатель без подписи",
         ftp.hints.activePixel && !ftp.hints.activeText &&
         ftp.hints.activeAria.length > 0 && ftp.hints.activeTip.length > 0],
+      ["тумблер рисуется: SVG-namespace и размеры фигур > 0",
+        ftp.hints.pxNs === "http://www.w3.org/2000/svg" &&
+        ftp.hints.pxKidsNs.length === 4 &&
+        ftp.hints.pxKidsNs.every(function(n) { return n === "http://www.w3.org/2000/svg"; }) &&
+        ftp.hints.trackRect[0] > 0 && ftp.hints.trackRect[1] > 0 &&
+        ftp.hints.knobRect[0] > 0 && ftp.hints.knobRect[1] > 0],
       ["тумблер виден: цвета из темы, не прозрачные",
         /^rgba?\(/.test(ftp.hints.trackFill) && ftp.hints.trackFill !== "rgb(0, 0, 0)" &&
         ftp.hints.trackStroke !== "none" && ftp.hints.trackStroke !== "" &&
@@ -633,6 +655,8 @@ async function waitForPage() {
       ` -> клик "${ftp.clicked.value}" сохранено=${JSON.stringify(ftp.saved)}`);
     console.log(`  выгрузка: пиксельный=${ftp.hints.activePixel} подпись="${ftp.hints.activeText}" ` +
       `aria="${ftp.hints.activeAria}" подсказка=${ftp.hints.activeTip.length > 0}; ` +
+      `svg-ns=${ftp.hints.pxNs === "http://www.w3.org/2000/svg" ? "ok" : "BAD"} ` +
+      `дорожка=${ftp.hints.trackRect.join("x")} ползунок=${ftp.hints.knobRect.join("x")}; ` +
       `цвета: дорожка=${ftp.hints.trackFill}/${ftp.hints.trackStroke} ползунок ${ftp.hints.knobOff}->${ftp.hints.knobOn}` +
       ` галочка=${ftp.hints.checkOpacity}; ` +
       `подсказки: FTPS=${!!ftp.hints.tls.length} сертификат=${!!ftp.hints.tlsVerify.length} PASV=${!!ftp.hints.pasv.length}`);

@@ -24,9 +24,20 @@
   // FTP остаётся рамка «Подключение» с пустым содержимым
   var panelWrappers = [];  // [{el, keys}]
 
+  // SVG-теги создаются в SVG-namespace: document.createElement("svg") даёт
+  // HTML-элемент (HTMLUnknownElement), его innerHTML парсится как HTML, фигуры
+  // получают box 0x0 и ничего не рисуют - тумблер был «невидим», хотя
+  // computed-стили работали. У SVG className read-only, поэтому class -
+  // только через setAttribute.
+  var SVG_TAGS = {svg: 1, g: 1, rect: 1, path: 1, polyline: 1, circle: 1, line: 1};
   function el(tag, cls, attrs) {
-    var node = document.createElement(tag);
-    if (cls) node.className = cls;
+    var isSvg = !!SVG_TAGS[tag];
+    var node = isSvg ? document.createElementNS("http://www.w3.org/2000/svg", tag)
+                     : document.createElement(tag);
+    if (cls) {
+      if (isSvg) node.setAttribute("class", cls);
+      else node.className = cls;
+    }
     if (Array.isArray(attrs)) {
       attrs.forEach(function(n) { node.appendChild(n); });
     } else if (attrs) {
