@@ -240,9 +240,11 @@
     z-index: 10; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
   }
 
-  /* прогресс-кольцо: заполняется по мере скачивания */
+  /* прогресс-кольцо: заполняется по мере скачивания. overflow: visible -
+     свечение drop-shadow выходит за пределы 170x170, а вьюпорт SVG по
+     умолчанию обрезает всё за своими краями (r 52 + обводка + glow > 60) */
   #ffmpeg-progress { position: relative; width: 170px; height: 170px; margin: 0 auto; }
-  #ffmpeg-ring { width: 170px; height: 170px; transform: rotate(-90deg); display: block; }
+  #ffmpeg-ring { width: 170px; height: 170px; transform: rotate(-90deg); display: block; overflow: visible; }
   #ffmpeg-ring circle { fill: none; stroke-width: 9; }
   #ffmpeg-ring .ring-bg { stroke: rgba(255, 255, 255, .15); }
   #ffmpeg-ring .ring-fg {
