@@ -89,12 +89,22 @@ ENCODER_NAMES = {
 
 
 FFMPEG_DOWNLOAD_URL = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+# gyan.dev периодически отдаёт 503 (вспышки на CDN), поэтому у источника есть
+# повторы с бэкоффом; если он так и не поднялся - берём зеркало BtbN: zip
+# с теми же ffmpeg.exe/ffprobe.exe внутри, распаковка по имени файла общая.
+FFMPEG_SOURCES = (
+    ("gyan.dev", FFMPEG_DOWNLOAD_URL),
+    ("github.com/BtbN", "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"),
+)
+FFMPEG_ATTEMPTS = 4        # попыток на один источник
+FFMPEG_RETRY_DELAY = 2.0   # пауза перед повтором, растёт: 2, 4, 8 с
 
 
 def download_ffmpeg(on_progress=None, on_log=None) -> str | None:
-    """Скачивает ffmpeg-release-essentials.zip и распаковывает ffmpeg.exe/ffprobe.exe
-    в ffmpeg_local_dir(). Возвращает путь к ffmpeg.exe или None при ошибке.
-    on_progress(percent: float) вызывается по мере скачивания (0..100)."""
+    """Скачивает ffmpeg zip и распаковывает ffmpeg.exe/ffprobe.exe
+    в ffmpeg_local_dir(). Источники перебираются с повторами: однократный
+    обрыв (503, таймаут) не должен ронять установку. Прогресс 0..100
+    обнуляется на каждой попытке. Возвращает путь к ffmpeg.exe или None."""
     dest = ffmpeg_local_dir()
     exe_path = dest / "ffmpeg.exe"
     if exe_path.is_file():
@@ -102,41 +112,53 @@ def download_ffmpeg(on_progress=None, on_log=None) -> str | None:
 
     dest.mkdir(parents=True, exist_ok=True)
     zip_path = dest / "ffmpeg.zip"
-    try:
-        if on_log:
-            on_log("info", "Скачиваю ffmpeg…")
-        req = urllib.request.Request(
-            FFMPEG_DOWNLOAD_URL,
-            headers={"User-Agent": "Synfronia/1.3 (auto-installer)"},
-        )
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            total = int(resp.headers.get("Content-Length") or 0)
-            received = 0
-            with open(zip_path, "wb") as fh:
-                while True:
-                    chunk = resp.read(1 << 16)
-                    if not chunk:
-                        break
-                    fh.write(chunk)
-                    received += len(chunk)
-                    if on_progress and total:
-                        on_progress(received / total * 100.0)
+    last_error: Exception | None = None
+    for source, url in FFMPEG_SOURCES:
+        for attempt in range(1, FFMPEG_ATTEMPTS + 1):
+            if on_log:
+                on_log("info", f"Скачиваю ffmpeg: {source} (попытка {attempt} из {FFMPEG_ATTEMPTS})…")
+            try:
+                req = urllib.request.Request(
+                    url,
+                    headers={"User-Agent": "Synfronia/1.3 (auto-installer)"},
+                )
+                with urllib.request.urlopen(req, timeout=120) as resp:
+                    total = int(resp.headers.get("Content-Length") or 0)
+                    received = 0
+                    with open(zip_path, "wb") as fh:
+                        while True:
+                            chunk = resp.read(1 << 16)
+                            if not chunk:
+                                break
+                            fh.write(chunk)
+                            received += len(chunk)
+                            if on_progress and total:
+                                on_progress(received / total * 100.0)
 
-        with zipfile.ZipFile(zip_path) as zf:
-            for name in zf.namelist():
-                base = Path(name).name
-                if base in ("ffmpeg.exe", "ffprobe.exe"):
-                    target = dest / base
-                    with zf.open(name) as src, open(target, "wb") as dst:
-                        shutil.copyfileobj(src, dst)
+                with zipfile.ZipFile(zip_path) as zf:
+                    for name in zf.namelist():
+                        base = Path(name).name
+                        if base in ("ffmpeg.exe", "ffprobe.exe"):
+                            target = dest / base
+                            with zf.open(name) as src, open(target, "wb") as dst:
+                                shutil.copyfileobj(src, dst)
 
-        zip_path.unlink(missing_ok=True)
-        return str(exe_path) if exe_path.is_file() else None
-    except Exception as exc:  # noqa: BLE001
-        if on_log:
-            on_log("error", f"ffmpeg download failed: {exc}")
-        zip_path.unlink(missing_ok=True)
-        return None
+                zip_path.unlink(missing_ok=True)
+                if exe_path.is_file():
+                    if on_log and source != FFMPEG_SOURCES[0][0]:
+                        on_log("info", f"ffmpeg скачан из зеркала {source}")
+                    return str(exe_path)
+                raise RuntimeError("в архиве нет ffmpeg.exe")
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                zip_path.unlink(missing_ok=True)
+                if on_log:
+                    on_log("error", f"ffmpeg: {source}, попытка {attempt} не удалась: {exc}")
+                if attempt < FFMPEG_ATTEMPTS:
+                    time.sleep(FFMPEG_RETRY_DELAY * (2 ** (attempt - 1)))
+    if on_log:
+        on_log("error", f"ffmpeg download failed: {last_error}")
+    return None
 
 
 def find_ffmpeg() -> str | None:
