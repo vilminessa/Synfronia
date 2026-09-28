@@ -16,7 +16,6 @@ from core import (
     available_transcoders,
     base_dir,
     build_page,
-    build_settings_page,
     default_download_dir,
     download_ffmpeg,
     download_test_fonts,
@@ -28,6 +27,7 @@ from core import (
     load_languages,
     load_settings,
     load_themes,
+    restore_builtin_themes,
     save_settings,
     seed_bundled_fonts,
     test_connection,
@@ -49,12 +49,6 @@ HTML = build_page(_settings.get("theme", "scarred_mind"))
 # самые старые строки вытесняются, а курсор log_cursor сообщает фронтенду, с
 # какого места продолжать (см. Api.poll).
 LOG_BUFFER = 2000
-
-# Окно настроек: размер под поля схемы (три раздела, из которых FTP — самый
-# длинный) и минимум, ниже которого подписи и строки ломаются. Геометрию не
-# запоминаем: окно каждый раз открывается одинаковым.
-SETTINGS_SIZE = (880, 640)
-SETTINGS_MIN_SIZE = (720, 520)
 
 # Итог загрузки -> строка статуса. «Часть файлов» годится только для плейлиста,
 # где что-то скачалось, а что-то нет; обрыв связи на одном видео - это
@@ -101,89 +95,44 @@ class Api:
         self._fonts_dl = {"downloading": False, "pct": 0.0, "error": None}
         self._fonts_rev = 0
         self._page_gen = 0
-        # окна: главное и (необязательное) окно настроек
+        # единственное окно приложения: главное, с карточкой настроек поверх
         self._win_main: webview.Window | None = None
-        self._win_settings: webview.Window | None = None
-        self._bridge: "SettingsApi | None" = None
+        # открыта ли карточка настроек. Состояние живёт во фронтенде, но
+        # Python помнит его, чтобы вернуть карточку после пересборки страницы
+        # (тема со своим entry перезагружает всю страницу - см. set_theme)
+        self._settings_open = False
         # папка загрузки - не настройка (см. settings_schema): помним её на
-        # время сеанса, окно настроек присылает значение через set_dest
+        # время сеанса, карточка настроек присылает значение через set_dest
         self._dest = ""
-        # счётчик, по которому оба окна узнают о смене языка/темы/шрифтов
+        # счётчик, по которому страница узнаёт о смене языка/темы/шрифтов
         self._ui_rev = 0
 
-    # -- окна -----------------------------------------------------------------
+    # -- окно -----------------------------------------------------------------
     def bind_main_window(self, win) -> None:
         """Запоминает окно главной страницы (его пересобирает set_theme)."""
         self._win_main = win
 
-    def _live_windows(self) -> list:
-        """Существующие окна: главное и окно настроек (если ещё открыто)."""
-        out = []
-        for win in (self._win_main, self._win_settings):
-            if win is not None:
-                out.append(win)
-        return out
+    def synf_settings_state(self, is_open) -> None:
+        """Фронтенд сообщает, открыта ли карточка настроек.
 
-    def settings_open(self) -> bool:
-        return self._win_settings is not None
-
-    def open_settings(self) -> str:
-        """Открывает окно настроек (одно на всё приложение).
-
-        Повторное нажатие не плодит окна, а поднимает уже открытое: у
-        WebView2 нет штатной «модальности», поэтому главное окно просто
-        приглушается оверлеем (см. app.js setBlocked).
+        Отдельного вызова "открыть/закрыть" больше нет: карточка - часть
+        страницы, поэтому и состояние, и фокус живут в JS. Pythonу нужно
+        только это значение, чтобы после пересборки страницы (тема со своим
+        entry) вернуть карточку туда же, где она была.
         """
-        win = self._win_settings
-        if win is not None:
-            try:
-                win.restore()
-                win.show()
-                return "shown"
-            except Exception:  # noqa: BLE001 - окно могло умереть между проверкой и вызовом
-                self._win_settings = None
-        html = build_settings_page(self.settings.get("theme", "scarred_mind"))
-        self._bridge = SettingsApi(self)
-        win = webview.create_window(
-            "Synfronia — настройки",
-            html=html,
-            js_api=self._bridge,
-            width=SETTINGS_SIZE[0],
-            height=SETTINGS_SIZE[1],
-            min_size=SETTINGS_MIN_SIZE,
-            background_color="#0c1622",
-        )
-        self._bridge.bind_window(win)
-        self._win_settings = win
-        win.events.closed += self._on_settings_closed
-        return "created"
-
-    def close_settings(self) -> None:
-        win = self._win_settings
-        if win is not None:
-            win.destroy()
-
-    def _on_settings_closed(self) -> None:
-        """Окно настроек закрыли (крестиком ОС или из окна) - забываем его.
-
-        Главное окно снимает оверлей по poll(): флаг settings_open идёт
-        в каждом ответе, поэтому отдельного вызова не нужно.
-        """
-        self._win_settings = None
-        self._bridge = None
+        self._settings_open = bool(is_open)
 
     def _bump_ui(self) -> None:
-        """Отметить, что язык/тема/шрифты изменились: оба окна это подхватят."""
+        """Отметить, что язык/тема/шрифты изменились: страница это подхватит."""
         with self._lock:
             self._ui_rev += 1
 
     def _ui_state(self) -> dict:
-        """Общая часть ответа poll(): что окна должны синхронизировать."""
+        """Общая часть ответа poll(): что страница должна синхронизировать."""
         return {
             "ui_rev": self._ui_rev,
             "lang": self._lang,
             "theme": self.settings.get("theme", "scarred_mind"),
-            "settings_open": self.settings_open(),
         }
 
     # -- подмена страницы ----------------------------------------------------
@@ -209,19 +158,6 @@ class Api:
 
         threading.Thread(target=worker, daemon=True, name="page-swap").start()
 
-    def _swap_settings_page(self, html: str, delay: float = 0.35) -> None:
-        """То же для окна настроек: своя страница собирается отдельно."""
-        self._page_gen += 1
-        gen = self._page_gen
-
-        def worker() -> None:
-            time.sleep(delay)
-            if gen != self._page_gen or self._win_settings is None:
-                return
-            self._win_settings.load_html(html)
-
-        threading.Thread(target=worker, daemon=True, name="settings-swap").start()
-
     # -- состояние (poll из JS) ----------------------------------------------
     def poll(self, since: int = 0) -> dict:
         with self._lock:
@@ -238,29 +174,15 @@ class Api:
                 "logs": lines[start - oldest:],
                 "log_cursor": self._log_total,
                 "ffmpeg": dict(self._ffmpeg),
+                "fonts_dl": dict(self._fonts_dl),
                 "fonts_rev": self._fonts_rev,
+                # значения для карточки настроек: тот же словарь, что и на
+                # диске, поэтому поля не могут разойтись с настройками, по
+                # которым идёт загрузка
+                "settings": dict(self.settings),
                 **self._ui_state(),
             }
         return state
-
-    def poll_settings(self, since: int = 0) -> dict:
-        """Состояние для окна настроек: журнал, докачка шрифтов, ui_rev.
-
-        Журнал общий с главным окном, но у каждого окна свой курсор, поэтому
-        строки не теряются и не дублируются. Прогресса загрузки здесь нет:
-        окно настроек модальное, во время загрузки его не открывают.
-        """
-        with self._lock:
-            lines = list(self._logs)
-            oldest = self._log_total - len(lines)
-            start = max(since, oldest)
-            return {
-                "logs": lines[start - oldest:],
-                "log_cursor": self._log_total,
-                "fonts_dl": dict(self._fonts_dl),
-                "fonts_rev": self._fonts_rev,
-                **self._ui_state(),
-            }
 
     def get_initial(self) -> dict:
         if self._transcoders is None:
@@ -271,6 +193,8 @@ class Api:
             "default_dir": self._dest or str(default_download_dir()),
             "transcoders": list(self._transcoders),
             "fonts": fonts_embed(),
+            # карточка открыта? после пересборки страницы её надо вернуть
+            "settings_open": self._settings_open,
         }
 
     # -- автоустановка ffmpeg -------------------------------------------------
@@ -328,17 +252,18 @@ class Api:
         return "ok"
 
     def set_dest(self, path: str) -> None:
-        """Папка загрузки из окна настроек (не сохраняется в settings.json)."""
+        """Папка загрузки из карточки настроек (не сохраняется в settings.json)."""
         self._dest = str(path or "").strip()
 
     # -- темы (модульные) ----------------------------------------------------
     def set_theme(self, theme_id: str) -> str:
-        """Сохраняет выбор темы и перезагружает оба окна из собранного HTML.
+        """Сохраняет выбор темы и перезагружает страницу из собранного HTML.
 
         Используется для полноценных HTML-тем (entry); css-only темы
         переключаются в JS мгновенно через applyTheme() + save_setting.
-        Окно настроек пересобирается своим шаблоном (см. build_settings_page),
-        поэтому его разметка остаётся рабочей при любой теме.
+        Отдельной страницы у настроек больше нет, поэтому пересобирается одна
+        страница, а открытость карточки настроек возвращается через
+        get_initial -> settings_open.
         """
         if theme_id not in themes_embed():
             return "unknown theme"
@@ -349,14 +274,28 @@ class Api:
             return f"error: {exc}"
         self._bump_ui()
         self._swap_page(build_page(theme_id))
-        self._swap_settings_page(build_settings_page(theme_id))
         return "ok"
 
     def reload_themes(self) -> dict:
-        """Пересканивает папку тем и возвращает обновлённый список тем."""
+        """Пересканирует папку тем и возвращает обновлённый список тем."""
         load_themes()
         self._bump_ui()
         return themes_embed()
+
+    def download_themes(self) -> dict:
+        """Дописывает недостающие встроенные темы (кнопка «Докачать темы»).
+
+        Темы вшиты в themes.py, поэтому интернет не нужен: на диск попадают
+        только те файлы, которых ещё нет. Перезаписывать нечего - если тему
+        правили вручную, она останется как есть. Состав папки меняется, так
+        что заодно перечитываем её (load_themes) и поднимаем ui_rev, чтобы
+        список тем в карточке обновился.
+        """
+        result = restore_builtin_themes(on_log=self._log)
+        if result["added"]:
+            load_themes()
+            self._bump_ui()
+        return result
 
     def open_themes_folder(self) -> None:
         """Открывает папку тем в Проводнике."""
@@ -459,9 +398,10 @@ class Api:
             pass
 
     # -- диалог папки --------------------------------------------------------
-    def browse_folder(self, parent=None):
-        """Выбор папки. parent - окно, из которого вызвали (если задан)."""
-        win = parent or self._win_main or (webview.windows[0] if webview.windows else None)
+    def browse_folder(self):
+        """Выбор папки загрузки. Отдельного окна настроек больше нет, поэтому
+        диалог открывает то же окно, в котором лежит карточка."""
+        win = self._win_main or (webview.windows[0] if webview.windows else None)
         if not win:
             return None
         result = win.create_file_dialog(webview.FOLDER_DIALOG)
@@ -589,74 +529,6 @@ class Api:
                 self._progress = {"mode": "indeterminate"}
             elif status == "done":
                 self._progress = {"mode": "determinate", "value": 100.0}
-
-
-class SettingsApi:
-    """Мост для окна настроек: те же настройки, но со своим контекстом.
-
-    Настройки, темы, шрифты и журнал общие с главным окном (тот же Api), но
-    окно настроек не должно уметь запускать загрузку и получать её прогресс,
-    а диалог выбора папки должен открываться от окна настроек, а не от
-    главного. Поэтому методы перечислены явно, а не через __getattr__.
-    """
-
-    def __init__(self, api: Api) -> None:
-        self._api = api
-        self._win: object | None = None
-
-    def bind_window(self, win) -> None:
-        """Окно приходит из open_settings сразу после create_window."""
-        self._win = win
-
-    # -- состояние -----------------------------------------------------------
-    def get_initial(self) -> dict:
-        return self._api.get_initial()
-
-    def poll_settings(self, since: int = 0) -> dict:
-        """Журнал, докачка шрифтов и счётчик ui_rev (см. Api.poll_settings)."""
-        return self._api.poll_settings(since)
-
-    def close_settings(self) -> None:
-        self._api.close_settings()
-
-    # -- настройки -----------------------------------------------------------
-    def save_setting(self, key: str, value) -> str:
-        return self._api.save_setting(key, value)
-
-    def set_dest(self, path: str) -> None:
-        self._api.set_dest(path)
-
-    def browse_folder(self):
-        return self._api.browse_folder(self._win)
-
-    def test_ftp(self) -> dict:
-        return self._api.test_ftp()
-
-    # -- темы ----------------------------------------------------------------
-    def set_theme(self, theme_id: str) -> str:
-        return self._api.set_theme(theme_id)
-
-    def reload_themes(self) -> dict:
-        return self._api.reload_themes()
-
-    def open_themes_folder(self) -> None:
-        self._api.open_themes_folder()
-
-    # -- шрифты --------------------------------------------------------------
-    def font_face_css(self, families) -> str:
-        return self._api.font_face_css(families)
-
-    def set_font(self, key: str, value: str) -> dict:
-        return self._api.set_font(key, value)
-
-    def reload_fonts(self) -> dict:
-        return self._api.reload_fonts()
-
-    def download_fonts(self) -> str:
-        return self._api.download_fonts()
-
-    def open_fonts_folder(self) -> None:
-        self._api.open_fonts_folder()
 
 
 def main() -> None:

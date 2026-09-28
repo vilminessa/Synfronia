@@ -1,24 +1,25 @@
-  /* Окно настроек (ui_src/settings.js).
+  /* Карточка настроек внутри главного окна (ui_src/settings.js).
      Всё содержимое рисуется из схемы (__SETTINGS_SCHEMA__, settings_schema.py):
-     список разделов слева, поля справа. Здесь только то, чего схема знать
-     не может - что делает кнопка, как поле применяется и чем наполняется
+     список разделов слева, карточки полей справа. Здесь только то, чего схема
+     знать не может - что делает кнопка, как поле применяется и чем наполняется
      пояснение. Текстовые поля сохраняются по событию change (потеря фокуса/
-     Enter), чтобы не писать в settings.json на каждый символ. */
+     Enter), чтобы не писать в settings.json на каждый символ.
+     Отдельного окна и своего опроса Python больше нет: значения приходят из
+     того же poll(), что и у главного окна (app.js -> synfSettingsState), так
+     что настройки и интерфейс видят одно и то же состояние. */
   var SETTINGS_SCHEMA = __SETTINGS_SCHEMA__;
   var transAvailability = { ffmpeg: true, avail: [] };
-  var since = 0;           // курсор журнала: с какого места продолжать
-  var LOG_LINES = 2000;    // сколько строк журнала держим
-  var LOG_CHARS = 120000;  // порог обрезки без split на каждом poll
-  var pollTimer = 0;
   var uiRev = -1;          // счётчик смен языка/темы/шрифтов со стороны Python
   var fontsRev = -1;       // счётчик пересканирования шрифтов
+  var langPainted = "";    // язык, под который сейчас нарисованы подписи
+  var extra = {};          // часть get_initial: default_dir, transcoders, ffmpeg
   var activeSection = "";
 
-  var panelFields = {};    // путь настройки -> {spec, nodes, input, range}
+  var panelFields = {};    // путь настройки -> {spec, nodes, input, range, get, set}
   var panelButtons = {};   // id кнопки -> элемент
   var noteFillers = {};    // note_source -> нужно перерисовывать
   var customSave = {};     // путь настройки -> поле со своим обработчиком
-  // обёртки (блок .settings-box, строка .range-row) с полями внутри: если все
+  // обёртки (карточка .field-card, строка .range-row) с полями внутри: если все
   // поля скрыты, пустая рамка и пустая строка тоже убираются, иначе в разделе
   // FTP остаётся рамка «Подключение» с пустым содержимым
   var panelWrappers = [];  // [{el, keys}]
@@ -81,26 +82,22 @@
   function labelNode(spec) {
     var node = el("label", null, {for: spec.dom, "data-i18n": spec.label});
     node.textContent = t(spec.label);
-    if (spec.title) {
-      node.setAttribute("data-i18n-title", spec.title);
-      node.title = t(spec.title);
+    // у режима выгрузки подсказка живёт на кнопках-переключателях, иначе она
+    // продублировалась бы на подписи и на самих кнопках
+    if (spec.title && spec.type !== "choice_buttons") {
+      node.setAttribute("data-i18n-tip", spec.title);
+      setTip(node, t(spec.title));
     }
     return node;
   }
 
   // Одно поле схемы -> узлы и, если поле редактируемое, input (+range-зеркало).
+  // get/set позволяют работать одинаково и с обычным полем, и с переключателем
+  // режима: синхронизация значений не знает, что внутри.
   function renderField(spec) {
     if (spec.type === "actions") {
       var buttons = spec.buttons.map(function(b) {
-        var btn = el("button", null, {type: "button", id: b.dom});
-        if (b.icon) {
-          var ico = el("span", "ta-ico");
-          ico.textContent = b.icon;
-          btn.appendChild(ico);
-        }
-        btn.appendChild(caption(b.label));
-        panelButtons[b.dom] = btn;
-        return btn;
+        return renderButton(b);
       });
       // в строке кнопки не оборачиваем: строку собирает renderWindow
       if (spec.row !== undefined && spec.row !== null) return {nodes: buttons};
@@ -119,14 +116,41 @@
       var box = el("input", null, {type: "checkbox", id: spec.dom});
       check.appendChild(box);
       check.appendChild(caption(spec.label));
-      return {nodes: [check], input: box};
+      return {nodes: [check], input: box, get: function() { return box.checked; },
+              set: function(v) { box.checked = v !== false && !!v; }};
     }
     var nodes = [labelNode(spec)];
     var input;
+    if (spec.type === "choice_buttons") {
+      // Переключатель вместо выпадающего списка: короткие подписи рядом, а
+      // разница между ними - в подсказке. Короткий список всегда на виду.
+      var wrap = el("div", "mode-switch", {id: spec.dom, role: "group",
+                                            "aria-label": t(spec.label)});
+      (spec.options || []).forEach(function(o) {
+        var b = el("button", null, {type: "button", "data-value": o[0], "data-i18n": o[1]});
+        b.textContent = t(o[1]);
+        if (spec.title) {
+          b.setAttribute("data-i18n-tip", spec.title);
+          setTip(b, t(spec.title));
+        }
+        b.addEventListener("click", function() {
+          var key = spec.path || spec.dom;
+          setModeValue(wrap, this.getAttribute("data-value"));
+          saveValue(key, this.getAttribute("data-value"));
+        });
+        wrap.appendChild(b);
+      });
+      var readMode = function() {
+        var on = wrap.querySelector(".on");
+        return on ? on.getAttribute("data-value") : "";
+      };
+      return {nodes: [labelNode(spec), wrap], input: wrap,
+              get: readMode, set: function(v) { setModeValue(wrap, v); }};
+    }
     if (spec.type === "choice") {
       input = el("select", null, {id: spec.dom});
       // опции из схемы наполняем сразу: иначе у поля без своей функции
-      // (например ftp.mode) список остался бы пустым
+      // список остался бы пустым
       fillSelectNode(input, spec.options, true);
     } else if (spec.type === "int") {
       input = el("input", null, {type: "number", id: spec.dom, min: spec.min, max: spec.max, step: spec.step});
@@ -142,84 +166,144 @@
       range = el("input", null, {type: "range", id: spec.dom_range, min: spec.min, max: spec.max, step: spec.step});
       nodes.splice(1, 0, range);
     }
-    return {nodes: nodes, input: input, range: range};
+    return {nodes: nodes, input: input, range: range,
+            get: function() { return spec.type === "bool" ? input.checked : input.value.trim(); },
+            set: function(v) { input.value = v || spec.default || ""; }};
+  }
+  function setModeValue(wrap, value) {
+    [].slice.call(wrap.querySelectorAll("button")).forEach(function(b) {
+      b.classList.toggle("on", b.getAttribute("data-value") === value);
+    });
+  }
+  // Кнопка действия: с иконкой - только иконка (смысл в подсказке), без иконки
+  // - подпись. Текст убираем не всегда: у «Обзор…» и «Проверить подключение»
+  // своей иконки нет, и голый значок был бы непонятен.
+  function renderButton(b) {
+    var svg = b.icon ? iconSvg(b.icon) : "";
+    var btn = el("button", svg ? "act-btn ico-" + b.icon : null,
+                 {type: "button", id: b.dom, "data-i18n-tip": b.label});
+    if (svg) {
+      var ico = el("span", "ico");
+      ico.innerHTML = svg;
+      btn.appendChild(ico);
+      setTip(btn, t(b.label));
+    } else {
+      btn.appendChild(caption(b.label));
+    }
+    panelButtons[b.dom] = btn;
+    return btn;
   }
 
-  // Разделы окна: слева кнопки, справа содержимое полей. Внутри раздела рамки
-  // блоков и строки собираются теми же правилами, что были у вкладок панели.
+  // Разделы карточки: слева кнопки, справа содержимое полей. Внутри раздела
+  // карточки и строки собираются теми же правилами, что были у вкладок панели:
+  // поля одного блока (box) попадают в одну карточку, поля с одинаковым row -
+  // в одну строку.
   function renderWindow() {
     var nav = document.getElementById("settings-nav");
     var host = document.getElementById("settings-sections");
+    if (!nav || !host) return;
     nav.innerHTML = "";
     host.innerHTML = "";
+    panelFields = {};
+    panelButtons = {};
     panelWrappers = [];
-    SETTINGS_SCHEMA.groups.forEach(function(group, gi) {
+    customSave = {};
+    var groups = SETTINGS_SCHEMA.groups.filter(function(group) {
+      return group.in_panel !== false && (group.fields || []).length;
+    });
+    groups.forEach(function(group, gi) {
       var item = el("button", gi ? "nav-item" : "nav-item active", {type: "button", id: "nav-" + group.id});
       item.appendChild(caption(group.label));
+      item.setAttribute("data-i18n-tip", group.label);
+      setTip(item, t(group.label));
       item.addEventListener("click", function() { switchSection(group.id); });
       nav.appendChild(item);
 
       var section = el("div", null, {id: "section-" + group.id, role: "tabpanel"});
       if (gi) section.hidden = true;
-      var out = [];         // узлы раздела
-      var boxNodes = null;  // узлы текущего блока
-      var boxKeys = null;   // пути полей блока
-      var rowNodes = null;  // узлы текущей строки
-      var rowKeys = null;   // пути полей строки
+      var out = [];        // карточки раздела: то, что уходит в section
+      var cardEls = {};    // имя блока -> карточка (одна на блок, не на поле)
+      var cur = null;      // текущий блок: с названием (body) или без него
+      var rowNodes = null; // узлы текущей строки
+      var rowKeys = null;  // пути полей строки
       var rowIdx = null;
       var rowCls = null;
-      var boxName = null;
       function wrap(list, node, keys) {
         list.push(node);
         panelWrappers.push({el: node, keys: keys});
       }
-      function flushRow() {
-        if (rowNodes) {
-          wrap(boxNodes || out, el("div", rowCls, rowNodes), rowKeys);
-          rowNodes = rowKeys = null; rowIdx = rowCls = null;
+      // Смена блока: закрываем предыдущий и открываем новый. Поля копятся в
+      // cur.nodes, а в раздел попадают при flush() - иначе пришлось бы держать
+      // два разных «списка» (массив без названия и <div> тела карточки).
+      function openBlock(name) {
+        flush();
+        if (!name) { cur = {name: null, nodes: [], keys: []}; return; }
+        if (!cardEls[name]) {
+          var body = el("div", "field-card-body");
+          var box = el("div", "field-card", [caption(group.boxes[name], "field-card-title"), body]);
+          cardEls[name] = {name: name, el: box, body: body, keys: [], nodes: []};
+          wrap(out, box, cardEls[name].keys);
         }
+        cardEls[name].nodes = [];
+        cur = cardEls[name];
       }
-      function flushBox() {
+      function flushRow() {
+        if (!rowNodes || !cur) return;
+        var row = el("div", rowCls, rowNodes);
+        cur.nodes.push(row);
+        panelWrappers.push({el: row, keys: rowKeys});
+        rowNodes = rowKeys = null;
+        rowIdx = rowCls = null;
+      }
+      function flush() {
         flushRow();
-        if (boxNodes) {
-          wrap(out, el("div", "settings-box", boxNodes), boxKeys);
-          boxNodes = boxKeys = null;
+        if (!cur) return;
+        if (cur.body) {
+          // блок без полей (все его поля in_panel: false) в раздел не идёт -
+          // иначе в разделе висит рамка с заголовком и пустотой внутри
+          if (!cur.nodes.length) cur.el.remove();
+          else cur.nodes.forEach(function(n) { cur.body.appendChild(n); });
+        } else if (cur.nodes.length) {
+          wrap(out, el("div", "field-card", [el("div", "field-card-body", cur.nodes)]), cur.keys);
         }
+        cur = null;
       }
       group.fields.forEach(function(spec) {
         if (spec.in_panel === false) return;
-        if ((spec.box || null) !== boxName) {
-          flushBox();
-          boxName = spec.box || null;
-          if (boxName) { boxNodes = [caption(group.boxes[boxName], "settings-box-title")]; boxKeys = []; }
-        }
+        if (!cur || (spec.box || null) !== cur.name) openBlock(spec.box || null);
         var part = renderField(spec);
+        // у блока кнопок нет ни path, ни dom: его узлы в раздел попадают, но в
+        // panelFields ему нечего положить, иначе ключом станет "undefined"
         var key = spec.path || spec.dom;
-        if (boxKeys) boxKeys.push(key);
+        if (key) cur.keys.push(key);
         if (spec.row !== undefined && spec.row !== null) {
           // поля с одинаковым row встают в одну строку (label + input)
           if (rowNodes && spec.row !== rowIdx) flushRow();
           if (!rowNodes) { rowNodes = []; rowKeys = []; rowIdx = spec.row; rowCls = spec.row_class || "range-row"; }
-          rowKeys.push(key);
+          if (key) rowKeys.push(key);
           part.nodes.forEach(function(n) { rowNodes.push(n); });
         } else {
           flushRow();
-          var list = boxNodes || out;
-          part.nodes.forEach(function(n) { list.push(n); });
+          part.nodes.forEach(function(n) { cur.nodes.push(n); });
         }
-        panelFields[key] = {spec: spec, nodes: part.nodes, input: part.input, range: part.range};
+        if (key) {
+          panelFields[key] = {spec: spec, nodes: part.nodes, input: part.input,
+                               range: part.range, get: part.get, set: part.set};
+        }
       });
-      flushBox();
+      flush();
       out.forEach(function(n) { section.appendChild(n); });
       host.appendChild(section);
     });
-    activeSection = SETTINGS_SCHEMA.groups.length ? SETTINGS_SCHEMA.groups[0].id : "";
+    activeSection = groups.length ? groups[0].id : "";
   }
 
   function switchSection(name) {
     SETTINGS_SCHEMA.groups.forEach(function(group) {
-      document.getElementById("section-" + group.id).hidden = group.id !== name;
-      document.getElementById("nav-" + group.id).classList.toggle("active", group.id === name);
+      var sec = document.getElementById("section-" + group.id);
+      var item = document.getElementById("nav-" + group.id);
+      if (sec) sec.hidden = group.id !== name;
+      if (item) item.classList.toggle("active", group.id === name);
     });
     activeSection = name;
   }
@@ -227,6 +311,7 @@
   // -- списки значений полей -------------------------------------------------
   function buildThemeOptions() {
     var sel = document.getElementById("theme");
+    if (!sel) return;
     var keep = sel.value;
     sel.innerHTML = "";
     Object.keys(THEMES).forEach(function(k) {
@@ -240,6 +325,8 @@
       }
       if (label === undefined) label = th.label || k;
       if (th.warnings && th.warnings.length) {
+        // битая тема: подсказка на варианте списка (у <option> нет подсказки
+        // нашего компонента - их не трогает initTooltips, только title)
         label += " ⚠";
         opt.title = t("theme.meta.broken") + "\n" + th.warnings.join("\n");
       }
@@ -259,7 +346,7 @@
     var box = document.getElementById("theme-meta");
     if (!box) return;
     var sel = document.getElementById("theme");
-    var th = THEMES[sel.value] || {};
+    var th = THEMES[(sel && sel.value) || ""] || {};
     var parts = [];
     if (th.label) parts.push(th.label);
     if (th.author) parts.push(t("theme.meta.author").replace("{name}", th.author));
@@ -271,6 +358,7 @@
   function buildQualOptions() { fillSelect("qual", fieldOptions("dl.quality")); }
   function buildTranscodeOptions() {
     var sel = document.getElementById("transcode");
+    if (!sel) return;
     var prev = sel.value;
     sel.innerHTML = "";
     var missing = [];
@@ -289,12 +377,14 @@
     });
     sel.value = prev;
     var note = document.getElementById("transcode-note");
-    if (!transAvailability.ffmpeg) {
-      note.textContent = t("trans.note.noffmpeg");
-    } else if (missing.length) {
-      note.textContent = t("trans.note.missing") + missing.join(", ") + ".";
-    } else {
-      note.textContent = "";
+    if (note) {
+      if (!transAvailability.ffmpeg) {
+        note.textContent = t("trans.note.noffmpeg");
+      } else if (missing.length) {
+        note.textContent = t("trans.note.missing") + missing.join(", ") + ".";
+      } else {
+        note.textContent = "";
+      }
     }
   }
   function buildLangOptions() {
@@ -346,7 +436,10 @@
     });
   }
 
-  function applyI18n() {
+  // applyI18n живёт в app.js и переводит всё окно целиком, включая карточку:
+  // эта функция только её часть, поэтому отдельное имя - иначе одна из двух
+  // перезапишет другую (скрипты грузятся в один глобальный scope).
+  function applySettingsI18n() {
     translateStatic();
     // списки из схемы переводим первыми, дальше их уточняют сборщики полей
     fillSchemaChoices();
@@ -356,14 +449,17 @@
     buildTranscodeOptions();
     buildLangOptions();
     buildFontOptions();
-    document.getElementById("lang").value = curLang;
+    var lang = document.getElementById("lang");
+    if (lang) lang.value = curLang;
     document.documentElement.lang = curLang;
+    langPainted = curLang;
   }
 
   // -- команды кнопок и наполнение пояснений --------------------------------
   // В схеме у кнопки есть dom и подпись, здесь - только действие.
   var ACTIONS = {
     "reload-themes": function() { reloadThemes(); },
+    "download-themes": function() { downloadThemes(); },
     "open-themes": function() { openThemesFolder(); },
     "reload-fonts": function() { reloadFonts(); },
     "download-fonts": function() { downloadFonts(); },
@@ -371,7 +467,7 @@
     "browse": async function() {
       var picked = await pywebview.api.browse_folder();
       if (picked) {
-        panelFields["ui.dest"].input.value = picked;
+        panelFields["ui.dest"].set(picked);
         pywebview.api.set_dest(picked);
       }
     },
@@ -394,21 +490,39 @@
     Object.keys(noteFillers).forEach(function(src) { NOTE_FILLERS[src](); });
   }
   function updateFtpDirNote() {
-    var dir = panelFields["ftp.dir"].input.value.trim();
     var note = document.getElementById("ftp-dir-note");
+    var f = panelFields["ftp.dir"];
+    if (!note || !f) return;
+    var dir = f.get();
     note.textContent = dir ? t("sheet.ftp.dir.ok") : t("sheet.ftp.dir.empty");
   }
 
   // -- значения и сохранение -------------------------------------------------
-  function fillSettings(settings, initData) {
+  function valueOf(spec) {
+    if (spec.value_source) return extra[spec.value_source];
+    return (extra.settings || {})[spec.setting];
+  }
+  function saveValue(key, value) {
+    var spec = panelFields[key].spec;
+    if (spec.setting) pywebview.api.save_setting(spec.setting, value);
+    // папка загрузки - не настройка: Python помнит её до конца сеанса
+    if (spec.path === "ui.dest") pywebview.api.set_dest(value);
+    applyVisibility();
+    refreshNotes();
+  }
+  // Значения приходят и из poll(), поэтому карточка их не только читает, но и
+  // показывает: так она останется верной и после ручной правки settings.json
+  // или смены языка/темы. Поле, в котором сейчас печатают, не трогаем - иначе
+  // poll() (200 мс) затирал бы ввод и сбрасывал курсор.
+  function fillSettings() {
     Object.keys(panelFields).forEach(function(key) {
-      var f = panelFields[key], spec = f.spec, node = f.input;
-      if (!node) return;
-      var value = spec.value_source ? initData[spec.value_source] : settings[spec.setting];
-      if (spec.type === "bool") node.checked = value !== false && !!value;
-      else if (spec.type === "text" || spec.type === "password") node.value = value || node.placeholder || "";
-      else node.value = value || spec.default;
-      if (f.range) f.range.value = node.value;
+      var f = panelFields[key], spec = f.spec;
+      if (!f.get || !f.set) return;
+      if (f.input && f.input === document.activeElement) return;
+      var value = valueOf(spec);
+      if (spec.type === "bool") f.set(value !== false && !!value);
+      else f.set(value === undefined || value === null ? (spec.default || "") : String(value));
+      if (f.range) f.range.value = f.get();
     });
   }
 
@@ -416,14 +530,12 @@
     Object.keys(panelFields).forEach(function(key) {
       var f = panelFields[key], spec = f.spec, node = f.input;
       if (!node || customSave[key]) return;
+      // переключатель режима сам сохраняет значение по клику (см. renderField)
+      if (spec.type === "choice_buttons") return;
       node.addEventListener("change", function() {
-        var value = spec.type === "bool" ? node.checked : node.value.trim();
+        var value = f.get();
         if (f.range) f.range.value = value;
-        if (spec.setting) pywebview.api.save_setting(spec.setting, value);
-        // папка загрузки - не настройка: Python помнит её до конца сеанса
-        if (spec.path === "ui.dest") pywebview.api.set_dest(value);
-        applyVisibility();
-        refreshNotes();
+        saveValue(key, value);
       });
       if (f.range) {
         f.range.addEventListener("input", function() {
@@ -443,10 +555,10 @@
       var cond = panelFields[key].spec.visible_if;
       if (!cond) return;
       var src = panelFields[cond.key];
-      var show = !!(src && src.input && src.input.checked) === !!cond.equals;
+      var show = !!(src && src.get && src.get()) === !!cond.equals;
       panelFields[key].nodes.forEach(function(node) { node.hidden = !show; });
     });
-    // Рамка блока и строка прячутся, когда скрыты все поля внутри: иначе в
+    // Карточка и строка прячутся, когда скрыты все поля внутри: иначе в
     // разделе FTP остаётся пустая рамка «Подключение», а в строках - пустые
     // отступы от margin.
     panelWrappers.forEach(function(box) {
@@ -465,6 +577,33 @@
     customSave[path] = true;
     f.input.addEventListener("change", function() { fn(f.input, f.spec); });
   }
+  // Поля с собственным поведением помечаются customSave ДО bindSettings(),
+  // иначе к теме/языку/шрифтам привяжется ещё и общий обработчик и каждый
+  // выбор запишется в settings.json дважды.
+  function bindCustom() {
+    // тема: часть тем со своим entry собирается в Python (пересборка страницы),
+    // остальные применяются на лету
+    onChange("ui.theme", function(node, spec) {
+      updateThemeMeta();
+      var th = THEMES[node.value] || {};
+      if (th.entry) {
+        pywebview.api.set_theme(node.value);
+        return;
+      }
+      applyTheme(node.value);
+      pywebview.api.save_setting(spec.setting, node.value);
+      if (th.font || th.font_mono) loadFontFaces(fontFacesForTheme());
+    });
+    onChange("ui.language", function(node, spec) {
+      curLang = node.value;
+      applyI18n();
+      updateThemeMeta();
+      applyTheme(themeKey());
+      pywebview.api.save_setting(spec.setting, node.value);
+    });
+    onChange("ui.font_sans", function(node) { setFont("font-sans", node.value); });
+    onChange("ui.font_mono", function(node) { setFont("font-mono", node.value); });
+  }
 
   // -- темы и шрифты ---------------------------------------------------------
   function reloadThemes() {
@@ -472,26 +611,63 @@
     pywebview.api.reload_themes().then(function(newThemes) {
       THEMES = newThemes;
       buildThemeOptions();
-      applyI18n();
-      if (btn) {
-        var lbl = btn.querySelector("[data-i18n]");
-        if (lbl) {
-          var txt = lbl.textContent;
-          lbl.textContent = "✓";
-          btn.classList.add("done");
-          setTimeout(function() {
-            lbl.textContent = txt;
-            btn.classList.remove("done");
-          }, 900);
-        }
-      }
+      fillSettings();
+      updateThemeMeta();
+      flashDone(btn);
     }).catch(function(e) { console.error("reload themes:", e); });
+  }
+  // Восстановление встроенных тем с диска: сети не нужно, на диск попадает
+  // только то, чего ещё нет. Пока Python пишет - кнопка в состоянии busy.
+  function downloadThemes() {
+    var btn = document.getElementById("download-themes");
+    var note = document.getElementById("themes-dl-note");
+    btn.classList.add("busy");
+    setNote(note, t("theme.dl.start"));
+    pywebview.api.download_themes()
+      .then(function(res) {
+        btn.classList.remove("busy");
+        var res2 = res || {};
+        if (res2.error) {
+          setNote(note, t("theme.dl.fail").replace("{names}", String(res2.error)));
+          return;
+        }
+        if (res2.added && res2.added.length) {
+          setNote(note, t("theme.dl.done").replace("{names}", res2.added.join(", ")));
+          flashDone(btn);
+        } else {
+          setNote(note, t("theme.dl.skip"));
+        }
+      })
+      .catch(function(e) {
+        btn.classList.remove("busy");
+        setNote(note, t("theme.dl.fail").replace("{names}", String(e)));
+      });
+  }
+  function setNote(note, text) {
+    if (!note) return;
+    note.textContent = text || "";
+    note.hidden = !text;
+  }
+  // Зелёная галочка на кнопке: действие выполнено. Иконка на это время
+  // заменяется на неё, потом возвращается.
+  function flashDone(btn) {
+    if (!btn) return;
+    var ico = btn.querySelector(".ico");
+    if (!ico) return;
+    var svg = ico.innerHTML;
+    btn.classList.add("done");
+    ico.innerHTML = iconSvg("check");
+    setTimeout(function() {
+      ico.innerHTML = svg;
+      btn.classList.remove("done");
+    }, 900);
   }
   function openThemesFolder() {
     pywebview.api.open_themes_folder();
   }
   // Шрифт применяется подменой блока #fonts-style - без перезагрузки страницы
-  // и без потери состояния окна. Главное окно подхватит выбор по ui_rev.
+  // и без потери состояния интерфейса. Карточка настроек в том же окне, так
+  // что список шрифтов и @font-face обновляются на месте.
   function setFont(id, value) {
     var slot = id === "font-mono" ? "mono" : "sans";
     pywebview.api.set_font(id === "font-mono" ? "font_mono" : "font_sans", value)
@@ -512,147 +688,92 @@
         if (r && r.fonts) FONTS = r.fonts;
         if (r && r.css !== undefined) applyFontCss(r.css);
         buildFontOptions();
-        applyI18n();
+        fillSettings();
       })
       .catch(function(e) { console.error("reload fonts:", e); });
   }
   // Докачка шрифтов из сети: кнопка busy на всё время, прогресс в note.
-  // Список обновится сам, когда Python поднимет fonts_rev (см. tick).
+  // Список обновится сам, когда Python поднимет fonts_rev (см. synfSettingsState).
   function downloadFonts() {
     var btn = document.getElementById("download-fonts");
     var note = document.getElementById("font-dl-note");
     pywebview.api.download_fonts()
       .then(function(res) {
-        if (res === "busy") { setFontDlNote(t("font.dl.busy")); return; }
+        if (res === "busy") { setNote(note, t("font.dl.busy")); return; }
         btn.classList.add("busy");
         btn.disabled = true;
-        setFontDlNote(t("font.dl.start"));
+        setNote(note, t("font.dl.start"));
       })
       .catch(function(e) {
         btn.classList.remove("busy");
         btn.disabled = false;
-        setFontDlNote(t("font.dl.fail").replace("{names}", String(e)));
+        setNote(note, t("font.dl.fail").replace("{names}", String(e)));
       });
-  }
-  function setFontDlNote(text) {
-    var note = document.getElementById("font-dl-note");
-    if (!note) return;
-    note.textContent = text || "";
-    note.hidden = !text;
   }
   function fontDlState(st) {
     var d = st.fonts_dl;
     if (!d) return;
     var btn = document.getElementById("download-fonts");
+    var note = document.getElementById("font-dl-note");
     if (d.downloading) {
       if (btn) { btn.classList.add("busy"); btn.disabled = true; }
-      setFontDlNote(t("font.dl.progress").replace("{pct}", String(Math.round(d.pct || 0))));
+      setNote(note, t("font.dl.progress").replace("{pct}", String(Math.round(d.pct || 0))));
     } else if (btn && btn.disabled) {
       btn.classList.remove("busy");
       btn.disabled = false;
-      setFontDlNote(d.error ? t("font.dl.fail").replace("{names}", String(d.error)) : "");
+      setNote(note, d.error ? t("font.dl.fail").replace("{names}", String(d.error)) : "");
     }
   }
   function openFontsFolder() {
     pywebview.api.open_fonts_folder();
   }
 
-  // -- журнал и синхронизация с главным окном -------------------------------
-  function scheduleTick(delay) {
-    if (pollTimer) clearTimeout(pollTimer);
-    pollTimer = setTimeout(tick, delay);
+  // -- состояние от главного окна -------------------------------------------
+  /* Вызывается из app.js, поэтому здесь нет ни своего get_initial, ни poll():
+     окно у приложения одно, и второй опрос того же состояния только путал бы
+     счётчики. langPainted нужен, чтобы отличить смену языка (нужна полная
+     перерисовка подписей) от обычного обновления значений. */
+  function synfSettingsInit(initData) {
+    extra = initData || {};
+    extra.settings = extra.settings || {};
+    uiRev = typeof extra.ui_rev === "number" ? extra.ui_rev : uiRev;
+    fontsRev = typeof extra.fonts_rev === "number" ? extra.fonts_rev : fontsRev;
+    transAvailability = { ffmpeg: !!extra.ffmpeg, avail: extra.transcoders || [] };
+    if (extra.fonts) FONTS = extra.fonts;
+    renderWindow();
+    bindCustom();
+    bindSettings();
+    applySettingsI18n();
+    fillSettings();
+    applyVisibility();
+    refreshNotes();
   }
 
-  async function tick() {
-    pollTimer = 0;
-    if (typeof pywebview === "undefined") { scheduleTick(300); return; }
-    try {
-      var st = await pywebview.api.poll_settings(since);
-      if (typeof st.log_cursor === "number") since = st.log_cursor;
-      if (st.logs && st.logs.length) {
-        var box = document.getElementById("log");
-        box.value += st.logs.join("\n") + "\n";
-        if (box.value.length > LOG_CHARS) {
-          var all = box.value.split("\n");
-          box.value = all.slice(all.length - LOG_LINES).join("\n");
-        }
-        box.scrollTop = box.scrollHeight;
-      }
-      fontDlState(st);
-      // Язык, тема или шрифты сменились в этом же окне: главное окно ждёт тот
-      // же счётчик, поэтому обновляемся оба.
-      if (typeof st.ui_rev === "number" && st.ui_rev !== uiRev) {
-        uiRev = st.ui_rev;
-        if (st.lang && st.lang !== curLang) {
-          curLang = st.lang;
-          applyI18n();
-        }
-        if (st.theme) applyTheme(st.theme);
-        loadFontFaces(fontFacesForTheme());
-      }
-      // Шрифты докачались на стороне Python: перерисовываем списки и @font-face.
-      if (typeof st.fonts_rev === "number" && st.fonts_rev !== fontsRev) {
-        fontsRev = st.fonts_rev;
-        reloadFonts();
-      }
-    } catch (e) {}
-    scheduleTick(400);
-  }
-
-  function init() {
-    if (window.__initDone) return;
-    window.__initDone = true;
-    pywebview.api.get_initial().then(function(initData) {
-      curLang = initData.settings.language || "en";
-      if (LANGS.indexOf(curLang) === -1) curLang = "en";
-      transAvailability = { ffmpeg: !!initData.ffmpeg, avail: initData.transcoders || [] };
-      FONTS = initData.fonts || FONTS;
-      FONT_PICK.sans = initData.settings.font_sans || "";
-      FONT_PICK.mono = initData.settings.font_mono || "";
+  function synfSettingsState(st) {
+    st = st || {};
+    if (st.settings) extra.settings = st.settings;
+    if (st.lang && st.lang !== curLang) curLang = st.lang;
+    if (st.ffmpeg && typeof st.ffmpeg.ok !== "undefined") {
+      transAvailability = {ffmpeg: !!st.ffmpeg.ok, avail: transAvailability.avail};
+      buildTranscodeOptions();
+    }
+    if (curLang !== langPainted) {
+      // язык сменился: разметка с подписями и подсказками строится заново.
+      // На каждый poll() это не повторяем - пересборка списков дёргала бы
+      // открытый <select> и сбрасывала бы фокус в поле, где печатают.
       renderWindow();
-      applyI18n();
-      fillSettings(initData.settings, initData);
-      applyTheme(themeKey());
-      // Поля с собственным поведением помечаются customSave ДО bindSettings(),
-      // иначе к теме/языку/шрифтам привяжется ещё и общий обработчик и каждый
-      // выбор запишется в settings.json дважды.
-      // тема: часть тем со своим entry собирается в Python (полный rebuild
-      // обоих окон), остальные применяются на лету
-      onChange("ui.theme", function(node, spec) {
-        updateThemeMeta();
-        var th = THEMES[node.value] || {};
-        if (th.entry) {
-          pywebview.api.set_theme(node.value);
-          return;
-        }
-        applyTheme(node.value);
-        pywebview.api.save_setting(spec.setting, node.value);
-        if (th.font || th.font_mono) {
-          loadFontFaces(fontFacesForTheme());
-        }
-      });
-      onChange("ui.language", function(node, spec) {
-        curLang = node.value;
-        applyI18n();
-        buildFontOptions();   // подпись «системный» в списках шрифтов тоже переводится
-        updateThemeMeta();
-        applyTheme(themeKey());
-        pywebview.api.save_setting(spec.setting, node.value);
-      });
-      onChange("ui.font_sans", function(node) { setFont("font-sans", node.value); });
-      onChange("ui.font_mono", function(node) { setFont("font-mono", node.value); });
+      bindCustom();
       bindSettings();
-      applyVisibility();
-      refreshNotes();
-      document.getElementById("settings-close").addEventListener("click", function() {
-        pywebview.api.close_settings();
-      });
-      document.addEventListener("keydown", function(ev) {
-        if (ev.key === "Escape") pywebview.api.close_settings();
-      });
-    }).catch(function(e) { console.error("init error:", e); });
+      applySettingsI18n();
+    }
+    fillSettings();
+    applyVisibility();
+    if (typeof st.ui_rev === "number" && st.ui_rev !== uiRev) {
+      uiRev = st.ui_rev;
+    }
+    if (typeof st.fonts_rev === "number" && st.fonts_rev !== fontsRev) {
+      fontsRev = st.fonts_rev;
+      reloadFonts();
+    }
+    fontDlState(st);
   }
-
-  if (window.pywebview !== undefined) { init(); }
-  else { window.addEventListener("pywebviewready", init); }
-  scheduleTick(400);

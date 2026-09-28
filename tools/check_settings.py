@@ -43,7 +43,8 @@ from ftp import FtpConfig  # noqa: E402
 # служит контрактом для следующих этапов (генерация панели).
 LEGACY_DOM = {
     # вкладка «Интерфейс»
-    "lang", "theme", "theme-meta", "reload-themes", "open-themes", "dest", "browse",
+    "lang", "theme", "theme-meta", "reload-themes", "download-themes", "themes-dl-note",
+    "open-themes", "dest", "browse",
     "font-sans", "font-mono", "font-note", "font-dl-note",
     "reload-fonts", "download-fonts", "open-fonts",
     # вкладка «Загрузчик»
@@ -345,59 +346,70 @@ def main() -> int:
     finally:
         shutil.rmtree(iso, ignore_errors=True)
 
-    # 10. окно настроек: схему рисует settings.js, разметка - свой шаблон
-    section("10. окно настроек")
+    # 10. карточка настроек внутри главного окна: схему рисует settings.js,
+    #    разметка - свой фрагмент, общее состояние - из poll() главного окна
+    section("10. карточка настроек")
     src = ROOT / "ui_src"
     settings_js = (src / "settings.js").read_text(encoding="utf-8")
     app_js = (src / "app.js").read_text(encoding="utf-8")
     common_js = (src / "common.js").read_text(encoding="utf-8")
-    win_html = (src / "settings.html").read_text(encoding="utf-8")
+    card_html = (src / "settings.html").read_text(encoding="utf-8")
     main_html = (src / "index.html").read_text(encoding="utf-8")
 
     ok('var SETTINGS_SCHEMA = __SETTINGS_SCHEMA__' in settings_js,
        "settings.js получает схему из плейсхолдера")
     ok("SLOT:settings" not in main_html,
        "главная страница больше не содержит панели настроек")
-    ok('id="settings-nav"' in win_html and 'id="settings-sections"' in win_html,
-       "в шаблоне окна есть список разделов и область полей")
-    ok('id="settings-close"' in win_html, "в шаблоне окна есть кнопка закрытия")
-    ok("__COMMONJS__" in win_html and "__COMMONJS__" in main_html,
-       "общий JS подключён в обоих окнах")
-    ok("__APPJS__" in win_html or "__APPJS__" not in win_html,
-       "в окне настроек нет логики главного окна")
-    ok("__APPJS__" not in win_html, "главная страница не тянется в окно настроек")
-    for ident in ("renderWindow", "applyVisibility", "fillSettings", "bindSettings",
-                  "poll_settings", "close_settings", "set_dest", "save_setting",
-                  "set_theme", "set_font", "reload_fonts", "download_fonts"):
+    ok('<html' not in card_html and "__COMMONJS__" not in card_html,
+       "фрагмент карточки - кусок страницы, а не отдельное окно")
+    ok('id="settings-nav"' in card_html and 'id="settings-sections"' in card_html,
+       "в карточке есть список разделов и область полей")
+    ok('id="settings-close"' in card_html, "в карточке есть кнопка закрытия")
+    ok('id="settings-overlay"' in card_html, "карточка лежит в оверлее")
+    for ph in ("__SETTINGS_HTML__", "__SETTINGS_CSS__", "__SETTINGS_JS__"):
+        ok(ph in main_html, f"главная страница вставляет {ph}")
+    for ph in ("__COMMONJS__", "__APPJS__"):
+        ok(ph in main_html, f"главная страница подключает {ph}")
+    ok("__SETTINGS_JS__" in main_html and "__APPJS__" in main_html
+       and main_html.index("__APPJS__") < main_html.index("__SETTINGS_JS__"),
+       "settings.js подключается после app.js (иначе он затрёт его applyI18n)")
+    for ident in ("renderWindow", "applyVisibility", "fillSettings", "bindSettings", "bindCustom",
+                  "synfSettingsInit", "synfSettingsState", "set_dest", "save_setting",
+                  "set_theme", "set_font", "reload_fonts", "download_fonts", "download_themes"):
         ok(ident in settings_js, f"settings.js использует {ident}")
+    for gone in ("poll_settings", "close_settings", "pywebviewready"):
+        ok(gone not in settings_js,
+           f"у карточки нет своего запроса состояния ({gone})")
     ok('id: "nav-" + group.id' in settings_js,
        "пункты списка строятся из групп схемы")
     ok('id: "section-" + group.id' in settings_js,
        "разделы строятся из групп схемы")
     ok("collect(" not in app_js and "SETTINGS_SCHEMA" not in app_js,
        "главное окно не рисует и не собирает настройки")
-    for ident in ("open_settings", "poll", "setBlocked", "settingsClosed"):
+    for ident in ("openSettings", "setSettingsOpen", "synfSettingsState", "poll"):
         ok(ident in app_js, f"app.js использует {ident}")
+    for gone in ("open_settings", "setBlocked", "settingsClosed"):
+        ok(gone not in app_js, f"у окна больше нет {gone}")
+    ok("synfSettingsState(st)" in app_js and "synfSettingsState(st.settings" not in app_js,
+       "в карточку уходит весь poll(), а не только настройки")
     ok("ui_rev" in app_js and "ui_rev" in settings_js,
-       "оба окна следят за ui_rev")
+       "главное окно и карточка следят за ui_rev")
     ok("var curTheme" in common_js and "curTheme ||" in common_js,
        "активная тема хранится в общем коде, а не берётся из селекта окна")
     ok("ui.dest" in settings_js and "set_dest" in settings_js,
        "папка загрузки уходит в Python через set_dest")
-    for f in (win_html, main_html):
-        for ph in ("__THEME_ROOT__", "__THEME_CSS__", "__FONTS_CSS__", "__APP_CSS__"):
-            ok(ph in f, f"{ph} подставляется в шаблон")
-    for ph in ("__I18N__", "__THEMES__", "__SETTINGS_SCHEMA__"):
-        if ph == "__SETTINGS_SCHEMA__":
-            continue
+    for ph in ("__THEME_ROOT__", "__THEME_CSS__", "__FONTS_CSS__", "__APP_CSS__"):
+        ok(ph in main_html, f"{ph} подставляется в шаблон")
+        ok(ph not in card_html, f"фрагмент карточки не подставляет {ph}")
+    for ph in ("__I18N__", "__THEMES__"):
         ok(ph in common_js, f"{ph} подставляется в общий JS")
     ok("__SETTINGS_SCHEMA__" in settings_js,
        "схема настроек подставляется в settings.js")
-    ok("__SETTINGS_CSS__" in win_html, "в окно настроек подключается его стиль")
     ok("__MAIN_CSS__" in main_html, "в главное окно подключается его стиль")
-    ok("SLOT:modal" in main_html, "главная страница оставляет место под оверлей")
     ok("__SETTINGS_SCHEMA__" not in main_html,
        "схема настроек не утекает в главное окно")
+    ok('id="settings-block"' not in main_html and 'class="overlay"' not in main_html,
+       "старый блок настроек из главной страницы убран")
 
     print(f"\nитог: {_checks - len(_fails)}/{_checks} ok")
     if _fails:

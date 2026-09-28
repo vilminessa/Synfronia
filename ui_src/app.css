@@ -49,35 +49,36 @@
   .note { margin-top: 6px; font-size: 12px; opacity: .7; }
   #ftp-test-note.ok { color: var(--accent); opacity: 1; }
   #ftp-test-note.bad { color: var(--warn); opacity: 1; }
-  .settings-box {
-    margin-top: 12px; padding: 10px 12px; border: 1px solid var(--widget);
-    border-radius: var(--radius-m); background: var(--widget);
-  }
-  .settings-box-title {
-    font-size: 11px; font-weight: 600; opacity: .65;
-    text-transform: uppercase; letter-spacing: .4px; margin-bottom: 8px;
-  }
 
-  /* ---- кнопки-действия настроек (темы, шрифты, FTP) ---- */
-  .theme-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-  .theme-actions button {
-    /* nowrap + flex:1/min-width:0 обрезали длинные подписи ("Schriften neu laden",
-       "Обновить шрифты") — строка переносится, кнопки перетекают на вторую. */
-    flex: 1 1 auto; min-width: 0; padding: 8px 10px;
-    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-    font-size: 13px; line-height: 1.15; white-space: normal; overflow-wrap: anywhere;
-    background: transparent; color: var(--text);
+  /* ---- подсказки ----
+     Один элемент на страницу (см. initTooltips в common.js): показывается с
+     задержкой, догоняет курсор из-за инерции, стрелка указывает на край
+     элемента. Ни одного нативного title в интерфейсе - иначе браузер
+     нарисовал бы вторую подсказку поверх. */
+  .tip {
+    position: fixed; left: 0; top: 0; z-index: 90;
+    max-width: 320px; padding: 7px 11px;
+    background: var(--surface); color: var(--text);
     border: 1px solid var(--widget); border-radius: var(--radius-s);
-    cursor: pointer; transition: border-color .15s, color .15s, background .15s;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, .45);
+    font-size: 12px; line-height: 1.35;
+    pointer-events: none; opacity: 0;
+    transition: opacity .12s ease-out;
   }
-  .theme-actions button:hover { border-color: var(--accent); color: var(--accent); background: rgba(255,255,255,.05); }
-  .theme-actions button:active { transform: scale(.97); }
-  .theme-actions button.done { border-color: var(--accent); color: var(--accent); }
-  .theme-actions .ta-ico { font-size: 14px; line-height: 1; opacity: .75; }
-  .theme-actions button:hover .ta-ico { opacity: 1; }
-
-  /* ---- модальный оверлей главного окна: пока открыто окно настроек,
-     главное окно не принимает клики ---- */
-  .overlay {
-    position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 50;
+  .tip.tip-on { opacity: 1; }
+  .tip-arrow {
+    position: absolute; width: 9px; height: 9px;
+    background: var(--surface);
+    transform: rotate(45deg);
   }
+  /* подсказка сверху: стрелка на её нижней грани и смотрит вниз, поэтому
+     видны только правая и нижняя стороны квадрата. Снизу - зеркально. */
+  .tip-arrow {
+    bottom: -5px;
+    border: none; border-right: 1px solid var(--widget); border-bottom: 1px solid var(--widget);
+  }
+  .tip.tip-below .tip-arrow {
+    top: -5px; bottom: auto;
+    border: none; border-top: 1px solid var(--widget); border-left: 1px solid var(--widget);
+  }
+  .tip .tip-text { display: block; }

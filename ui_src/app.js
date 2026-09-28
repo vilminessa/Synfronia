@@ -1,5 +1,6 @@
-  /* Главное окно (ui_src/app.js). Настройки живут в отдельном окне
-     (ui_src/settings.js), здесь только загрузка, прогресс и журнал.
+  /* Главное окно (ui_src/app.js). Загрузка, прогресс и журнал; настройки -
+     карточка-оверлей (ui_src/settings.js) поверх этого же окна, поэтому
+     здесь же живёт её открытие, фокус-ловушка и inert для остальной страницы.
      Общие переводы, палитра темы и шрифты - в ui_src/common.js. */
   var since = 0;
   var LOG_LINES = 2000; // сколько строк лога держим в textarea
@@ -8,8 +9,8 @@
   var busy = false;
   var activeTab = "video";
   var clicks = 0;
-  var uiRev = -1;    // счётчик смен языка/темы/шрифтов в окне настроек
-  var blocked = false;  // открыто ли окно настроек (главное окно приглушено)
+  var uiRev = -1;    // счётчик смен языка/темы/шрифтов в настройках
+  var settingsOpen = false;  // открыта ли карточка настроек
   var ffmpegOverlay = document.getElementById("ffmpeg-overlay");
   var ffmpegDlBtn = document.getElementById("ffmpeg-dl");
   var ffmpegRain = document.getElementById("ffmpeg-rain");
@@ -149,6 +150,8 @@
     translateStatic();
     renderClicker();
     updateDownloadTitle();
+    // Карточка настроек в этом же окне: её списки и подписи тоже переводим
+    if (typeof applySettingsI18n === "function") applySettingsI18n();
     if (!busy) document.getElementById("status").textContent = t("status.ready");
   }
 
@@ -204,7 +207,9 @@
   function updateDownloadTitle() {
     var btn = document.getElementById("download");
     var key = DL_TITLE[dlState] || "btn.download";
-    btn.title = t(key);
+    // нативный title браузер рисует сам и поверх наших подсказок, поэтому
+    // состояние кнопки показываем тем же tooltip, что и у остальных controls
+    setTip(btn, t(key));
     btn.setAttribute("aria-label", t(key));
   }
   function setDownloadState(state, pct, indeterminate) {
@@ -262,38 +267,82 @@
     if (!busy) document.getElementById(name === "video" ? "url-video" : "url-playlist").focus();
   }
 
-  /* ---- окно настроек ------------------------------------------------------
-     Настройки живут в отдельном окне, а пока оно открыто, главное окно не должно
-     принимать клики - поэтому Python вызывает synfSetBlocked(true/false).
-     Настоящей модальности у WebView2 нет: alt-tab и горячие клавиши ОС
-     по-прежнему переключают окна, поэтому оверлей глушим и активный элемент
-     снимаем с фокуса. */
-  function setBlocked(value) {
-    blocked = !!value;
-    var veil = document.getElementById("settings-block");
-    if (veil) veil.hidden = !blocked;
-    // Модальность без второго окна: оверлей ловит клики, а inert - клавиатуру
-    // (иначе Tab и Enter уходят в поля под оверлеем). На старых WebView2, где
-    // inert нет, гасим те же элементы через disabled.
-    var kids = [].slice.call(document.body.children).filter(function(n) { return n !== veil; });
-    if ("inert" in HTMLElement.prototype) {
-      kids.forEach(function(node) { node.inert = blocked; });
+  /* ---- оверлей настроек ---------------------------------------------------
+     Настройки - карточка поверх главного окна, а не второе окно. Настоящей
+     модальности у WebView2 нет: alt-tab и горячие клавиши ОС переключают
+     окна, поэтому под карточкой всё равно приглушаем, а остальную страницу
+     делаем inert - иначе Tab и Enter уходят в поля под оверлеем. */
+  var overlay = document.getElementById("settings-overlay");
+  var settingsCard = overlay && overlay.querySelector(".settings-card");
+  var settingsOpener = null;   // на что вернуть фокус при закрытии
+  var FOCUSABLE = 'input, select, textarea, button, a[href], [tabindex]:not([tabindex="-1"])';
+
+  function setSettingsOpen(value) {
+    if (!overlay) return;
+    var want = !!value;
+    if (want === settingsOpen) {
+      if (want) { overlay.inert = false; focusSettings(); }
+      return;
+    }
+    settingsOpen = want;
+    overlay.hidden = !want;
+    if (want) {
+      hideTip();
+      overlay.inert = false;
+      settingsOpener = (document.activeElement && document.activeElement !== document.body)
+        ? document.activeElement : null;
+      focusSettings();
     } else {
-      kids.forEach(function(node) {
+      // ловушка фокуса: пока карточка открыта, Tab не должен уходить на вкладки
+      // и поля главного окна - они inert и всё равно не получают фокус.
+      if (settingsOpener && settingsOpener.focus) settingsOpener.focus();
+      settingsOpener = null;
+    }
+    // остальная страница неактивна. На старых WebView2 без inert гасим те же
+    // элементы через disabled (но карточку оставляем живой).
+    [].slice.call(document.body.children).forEach(function(node) {
+      if (node === overlay) return;
+      if ("inert" in HTMLElement.prototype) {
+        node.inert = want;
+      } else {
         [].slice.call(node.querySelectorAll("input, select, textarea, button, a[href]"))
-          .forEach(function(el) { el.disabled = blocked; });
-      });
-    }
-    if (blocked && document.activeElement && document.activeElement.blur) {
-      document.activeElement.blur();
-    }
+          .forEach(function(el) { el.disabled = want; });
+      }
+    });
+    syncSettingsState();
+  }
+  function focusSettings() {
+    var first = settingsCard && settingsCard.querySelector(FOCUSABLE);
+    if (first) first.focus();
   }
   function openSettings() {
-    pywebview.api.open_settings().then(function() { setBlocked(true); });
+    if (overlay && overlay.hidden) setSettingsOpen(true);
+    else focusSettings();
   }
-  // Python сообщает, что окно настроек закрыто (в том числе крестиком ОС)
-  function settingsClosed() {
-    setBlocked(false);
+  // Крестик и клик по затемнённому фону закрывают карточку, как в обычном
+  // диалоге; клик по самой карточке - нет.
+  if (overlay) {
+    overlay.addEventListener("click", function(ev) {
+      if (ev.target === overlay || ev.target.id === "settings-close") setSettingsOpen(false);
+    });
+    // Пока карточка открыта, клавиши не должны доходить до главного окна.
+    overlay.addEventListener("keydown", function(ev) {
+      if (ev.key === "Escape") { setSettingsOpen(false); ev.preventDefault(); return; }
+      if (ev.key !== "Tab") return;
+      var list = [].slice.call(settingsCard.querySelectorAll(FOCUSABLE))
+        .filter(function(el) { return !el.disabled && el.offsetParent !== null; });
+      if (!list.length) return;
+      var first = list[0];
+      var last = list[list.length - 1];
+      if (ev.shiftKey && document.activeElement === first) { last.focus(); ev.preventDefault(); }
+      else if (!ev.shiftKey && document.activeElement === last) { first.focus(); ev.preventDefault(); }
+    });
+  }
+  // Python узнаёт об открытии из одного вызова: состояние нужно только для
+  // счётчика событий и для восстановления оверлея после перерисовки страницы.
+  function syncSettingsState() {
+    if (typeof pywebview === "undefined") return;
+    try { pywebview.api.synf_settings_state(settingsOpen); } catch (e) {}
   }
 
   function scheduleTick(delay) {
@@ -328,9 +377,6 @@
         setDownloadResult(st.result);
       }
       document.getElementById("status").textContent = st.status || "";
-      if (st.settings_open !== undefined && st.settings_open !== blocked) {
-        if (st.settings_open) setBlocked(true); else settingsClosed();
-      }
       if (ffmpegFetching && st.ffmpeg) {
         var fm = st.ffmpeg;
         if (fm.downloading || fm.extracting) {
@@ -363,7 +409,7 @@
           ffmpegFetching = false;
         }
       }
-      // Язык, тема или шрифты сменились в окне настроек: главное окно догоняет
+      // Язык, тема или шрифты сменились в настройках: главное окно догоняет
       // их по тому же счётчику ui_rev, без перезагрузки страницы.
       if (typeof st.ui_rev === "number" && st.ui_rev !== uiRev) {
         uiRev = st.ui_rev;
@@ -374,6 +420,7 @@
         if (st.theme) applyTheme(st.theme);
         loadFontFaces(fontFacesForTheme());
       }
+      if (typeof synfSettingsState === "function") synfSettingsState(st);
     } catch (e) {}
     scheduleTick(200);
   }
@@ -381,6 +428,7 @@
   function init() {
     if (window.__initDone) return;
     window.__initDone = true;
+    initTooltips();
     pywebview.api.get_initial().then(function(initData) {
       curLang = initData.settings.language || "en";
       if (LANGS.indexOf(curLang) === -1) curLang = "en";
@@ -391,6 +439,12 @@
       applyI18n();
       document.getElementById("group").checked = initData.settings.group_playlist !== false;
       document.getElementById("status").textContent = t("status.ready");
+      // Карточка настроек живёт в этом же окне: отдаём ей начальное
+      // состояние (поля схемы, шрифты, ffmpeg), дальше - из poll().
+      if (typeof synfSettingsInit === "function") synfSettingsInit(initData);
+      // Перерисовка страницы (смена темы с entry) не должна закрывать настройки
+      settingsOpen = false;
+      if (initData.settings_open) setSettingsOpen(true);
       if (!initData.ffmpeg) {
         document.getElementById("warn").style.display = "block";
         ffmpegOverlay.classList.remove("ffmpeg-hidden");
@@ -454,8 +508,20 @@
       document.getElementById("tab-playlist").addEventListener("click", function() { switchTab("playlist"); });
     }).catch(function(e) { console.error("init error:", e); });
   }
-  if (window.pywebview !== undefined) { init(); }
-  else { window.addEventListener("pywebviewready", init); }
+  // Стартуем только когда выполнились все <script>: колбэк get_initial() - это
+  // микроtask, и он успевает отработать между тегами <script>, то есть раньше
+  // settings.js. Без этого synfSettingsInit ещё не объявлен, и карточка
+  // настроек осталась бы пустой.
+  function boot() {
+    if (window.__initDone) return;
+    if (window.pywebview !== undefined) { init(); }
+    else { window.addEventListener("pywebviewready", init); }
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", boot);
+  } else {
+    boot();
+  }
   // Пока вкладка/окно скрыты, не опрашиваем Python и не крутим анимацию.
   document.addEventListener("visibilitychange", function() {
     if (document.hidden) {

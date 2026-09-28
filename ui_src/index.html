@@ -19,6 +19,9 @@ __APP_CSS__
 <style>
 __MAIN_CSS__
 </style>
+<style>
+__SETTINGS_CSS__
+</style>
 </head>
 <body>
 
@@ -28,7 +31,7 @@ __MAIN_CSS__
       <h1 class="logo">Synfronia</h1>
       <div class="sub" data-i18n="ui.sub">Скачивание видео и плейлистов YouTube (yt-dlp)</div>
     </div>
-    <button type="button" id="settings-btn" class="icon-btn" data-i18n-title="ui.settings" title="Настройки">&#x2699;&#xFE0E;</button>
+    <button type="button" id="settings-btn" class="icon-btn" data-i18n-tip="ui.settings" aria-label="Настройки">&#x2699;&#xFE0E;</button>
   </div>
 <!-- /SLOT:head -->
 
@@ -121,19 +124,19 @@ __MAIN_CSS__
 <!-- SLOT:clicker -->
 <div class="clicker-row">
     <div id="clicker-msg" class="clicker-msg"></div>
-    <button type="button" id="clicker" class="clicker" data-i18n-title="clicker.title" title="…">Кликни меня~</button>
+    <button type="button" id="clicker" class="clicker" data-i18n-tip="clicker.title">Кликни меня~</button>
   </div>
 <!-- /SLOT:clicker -->
 
 
   
-<!-- SLOT:modal -->
-<div id="settings-block" class="overlay" hidden></div>
-<!-- /SLOT:modal -->
+<!-- Карточка настроек: оверлей поверх этого окна. Не SLOT - разметку
+     рисует settings.js по схеме, тема не может её подменить. -->__SETTINGS_HTML__
 
 
   
 <script>__COMMONJS__</script>
 <script>__APPJS__</script>
+<script>__SETTINGS_JS__</script>
 </body>
 </html>

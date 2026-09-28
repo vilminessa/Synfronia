@@ -4,9 +4,11 @@ r"""Модульные темы и сборка страницы.
 theme.json (палитра/мета/extends/entry), custom.css, slots/*.html,
 ресурсы (url(...) и {{asset:rel}} -> data:URI). Из этого собирается
 итоговый HTML: build_page() наполняет __THEME_ROOT__/__THEME_CSS__/
-__APP_CSS__/__MAIN_CSS__/__APPJS__/__I18N__/__THEMES__/__SETTINGS_SCHEMA__ в
-ui.BASE_TEMPLATE, а build_settings_page() - то же самое в ui.SETTINGS_TEMPLATE
-для отдельного окна настроек.
+__APP_CSS__/__MAIN_CSS__/__SETTINGS_CSS__/__COMMONJS__/__APPJS__/
+__SETTINGS_JS__/__I18N__/__THEMES__/__SETTINGS_SCHEMA__ в ui.BASE_TEMPLATE.
+Карточка настроек (ui.SETTINGS_HTML) — часть этой же страницы: отдельного
+окна настроек больше нет, а если тема собрала страницу из своего entry без
+оверлея, _ensure_settings() вставляет его обратно.
 """
 
 import base64
@@ -769,6 +771,50 @@ def _seed_theme(root: Path, key: str, payload: dict) -> None:
             pass
 
 
+def restore_builtin_themes(on_log=None) -> dict:
+    """Дописывает недостающие встроенные темы (кнопка «Докачать темы»).
+
+    Темы описаны прямо в этом модуле (THEMES и _SEED_CSS), поэтому интернет не
+    нужен: на диск попадает только то, чего ещё нет. Правки пользователя не
+    трогаем - если theme.json или custom.css уже есть, тема считается
+    установленной и остаётся как есть. То же происходит при каждом
+    load_themes(), но в фоне и без ответа; здесь результат нужен интерфейсу.
+
+    Возвращает {"added": [...], "skipped": [...], "failed": [...]}, где в
+    added - названия тем, которых раньше не было на диске.
+    """
+    report = on_log or (lambda level, msg: _file_log(level, msg))
+    result = {"added": [], "skipped": [], "failed": []}
+    root = _themes_root()
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        report("error", f"themes: не удалось создать папку тем ({exc})")
+        result["failed"] = list(THEMES)
+        return result
+    for key in THEMES:
+        folder = root / key
+        files = [folder / "theme.json", folder / "custom.css"]
+        if all(f.exists() for f in files):
+            result["skipped"].append(key)
+            continue
+        before = {f: f.exists() for f in files}
+        try:
+            _seed_theme(root, key, THEMES[key])
+        except OSError as exc:
+            report("error", f"themes: не удалось восстановить тему {key} ({exc})")
+            result["failed"].append(key)
+            continue
+        if all(f.exists() for f in files):
+            result["added"].append(key)
+        else:
+            # записалось не всё: сообщаем именем недостающего файла
+            missing = [f.name for f in files if not f.exists() and not before[f]]
+            report("error", f"themes: тема {key} записана не полностью ({', '.join(missing)})")
+            result["failed"].append(key)
+    return result
+
+
 _THEME_README = """\
 Synfronia — модульные темы
 ==========================
@@ -810,13 +856,16 @@ CSS наследуется по цепочке extends: файлы родите�
 
   __THEME_ROOT__    палитра темы (:root CSS-переменные)
   __THEME_CSS__     собранный CSS темы (с data:URI внутри)
-  __APP_CSS__       базовые стили приложения (общие для обоих окон)
+  __APP_CSS__       базовые стили приложения
   __MAIN_CSS__      стили только главного окна
-  __COMMONJS__      общий JS обоих окон (переводы, тема, шрифты)
+  __SETTINGS_CSS__  стили карточки настроек
+  __COMMONJS__      общий JS (переводы, тема, шрифты)
   __APPJS__         логика главного окна (обязателен в полном HTML-шаблоне)
+  __SETTINGS_JS__   логика карточки настроек (обязательна в полном шаблоне)
+  __SETTINGS_HTML__ разметка карточки настроек (оверлей)
   __I18N__          переводы (JSON)
   __THEMES__        список тем (JSON)
-  __SETTINGS_SCHEMA__  схема настроек (JSON) - окно настроек рисуется из неё
+  __SETTINGS_SCHEMA__  схема настроек (JSON) - карточка рисуется из неё
   {{asset:rel}}     локальный файл темы -> data:URI
 
 Пример минимального index.html:
@@ -825,6 +874,12 @@ CSS наследуется по цепочке extends: файлы родите�
   <link rel="stylesheet" href="__APP_CSS__">   <!-- или просто <style>__APP_CSS__</style> -->
   ...ваша разметка (элементы сохраняют id, которые использует __APPJS__)...
   <script>__APPJS__</script>
+  <script>__SETTINGS_JS__</script>
+
+Три плейсхолдера карточки (__SETTINGS_HTML__, __SETTINGS_CSS__, __SETTINGS_JS__)
+подставлять необязательно: если своего entry их нет, themes._ensure_settings
+допишет оверлей, его стиль и скрипт сам, иначе шестерёнка в шапке ничего не
+открыла бы. Остальные плейсхолдеры в entry обязательны.
 
 СЕКЦИИ (slots)
 --------------
@@ -1097,7 +1152,7 @@ def _apply_slots(template: str, folders: list[Path]) -> str:
 def _warn_ignored_slot(folders: list[Path], name: str, why: str) -> None:
     """Пишет в лог, если тема подсовывает слот, который собирает приложение.
 
-    Окно настроек рисует settings.js из схемы settings_schema, поэтому свой
+    Карточку настроек рисует settings.js из схемы settings_schema, поэтому свой
     slots/settings.html тема подставить не может - молча проглотили бы файл,
     поэтому пишем в лог (он виден и в журнале, и в themes/README.txt).
     """
@@ -1143,8 +1198,9 @@ def _page_fonts(theme: dict, fonts: dict | None) -> dict:
 def _fill_placeholders(template: str, theme: dict, picked: dict) -> str:
     """Подставляет в шаблон палитру, CSS темы, шрифты, переводы и данные.
 
-    Одинаково для главной страницы и окна настроек: набор плейсхолдеров общий,
-    лишние в шаблоне просто не встречаются.
+    Карточка настроек приходит тем же плейсхолдером (__SETTINGS_HTML__), что и
+    раньше отдельное окно: в своём entry-шаблоне темы его может не быть, и
+    тогда разметку добавляет _ensure_settings.
     """
     fonts_css = font_css([picked["sans"], picked["mono"]])
     page = template.replace("__THEME_ROOT__", _palette_root_vars(theme, picked))
@@ -1159,11 +1215,43 @@ def _fill_placeholders(template: str, theme: dict, picked: dict) -> str:
     page = page.replace("__APPJS__", _ui.APP_JS)
     page = page.replace("__SETTINGS_CSS__", _ui.SETTINGS_CSS)
     page = page.replace("__SETTINGS_JS__", _ui.SETTINGS_JS)
+    page = page.replace("__SETTINGS_HTML__", _ui.SETTINGS_HTML)
     page = page.replace("__I18N__", _js_json(I18N))
     page = page.replace("__THEMES__", _js_json(themes_embed()))
     # __SETTINGS_SCHEMA__ лежит внутри settings.js, поэтому подменяем после него
     page = page.replace("__SETTINGS_SCHEMA__", _js_json(settings_schema.schema_json()))
     return page
+
+
+def _ensure_settings(html: str) -> str:
+    """Гарантирует, что на странице есть карточка настроек и её скрипт.
+
+    Оверлей настроек — часть страницы, а не отдельное окно, поэтому он должен
+    быть в любой теме. Тема со своим entry (theme.json -> "entry") собирает
+    страницу целиком и может не знать про __SETTINGS_HTML__; тогда вставляем
+    разметку сами, иначе шестерёнка в шапке просто ничего не откроет. Стили и
+    скрипт добавляем так же, если их тоже нет в своём шаблоне.
+
+    Плейсхолдеры здесь ещё не подставлены: разметка и CSS темы вставляются
+    позже обычной заменой, поэтому тема не может перекрыть оверлей.
+    """
+    anchors = ("</body>", "</html>")
+    for placeholder, chunk in (
+        ("__SETTINGS_HTML__", _ui.SETTINGS_HTML),
+        ("__SETTINGS_JS__", f"<script>{_ui.SETTINGS_JS}</script>"),
+    ):
+        if placeholder in html:
+            continue
+        for anchor in anchors:
+            pos = html.lower().rfind(anchor)
+            if pos != -1:
+                html = html[:pos] + chunk + "\n" + html[pos:]
+                break
+        else:
+            html += chunk
+    if "__SETTINGS_CSS__" not in html:
+        html = html.replace("</head>", f"<style>{_ui.SETTINGS_CSS}</style></head>", 1)
+    return html
 
 
 def build_page(theme_key: str, lang: str | None = None, fonts: dict | None = None) -> str:
@@ -1172,12 +1260,13 @@ def build_page(theme_key: str, lang: str | None = None, fonts: dict | None = Non
     • если у темы есть entry (index.html в папке) — сборка из него;
     • иначе — из встроенного базового шаблона (ui.BASE_TEMPLATE), причём
       секции SLOT:... можно переопределить файлами slots/<имя>.html;
+    • карточка настроек (оверлей) есть в любом случае — см. _ensure_settings;
     • ассеты {{asset:rel}} и url(...) в CSS встраиваются как data:URI;
     • шрифты из папки fonts (font_sans / font_mono, переопределённые полями
       темы font / font_mono) встраиваются как @font-face с data:URI;
     • плейсхолдеры (__THEME_ROOT__, __THEME_CSS__, __FONTS_CSS__, __APP_CSS__,
-      __MAIN_CSS__, __COMMONJS__, __APPJS__, __I18N__, __THEMES__) подставляются
-      простой заменой.
+      __MAIN_CSS__, __SETTINGS_CSS__, __COMMONJS__, __APPJS__, __SETTINGS_JS__,
+      __SETTINGS_SCHEMA__, __I18N__, __THEMES__) подставляются простой заменой.
     """
     theme = _page_theme(theme_key)
     folders = theme.get("_slot_folders") or []
@@ -1193,29 +1282,13 @@ def build_page(theme_key: str, lang: str | None = None, fonts: dict | None = Non
     else:
         template = _ui.BASE_TEMPLATE
     template = _apply_slots(template, folders)
+    # карточка настроек не слот: разметку рисует settings.js из схемы, поэтому
+    # свой slots/settings.html тема подставить не может (см. _ensure_settings)
+    _warn_ignored_slot(folders, "settings", "карточка настроек строится из схемы")
 
     # 2) ассеты в разметке -> data:URI
     template = _apply_assets(template, folders)
-    return _fill_placeholders(template, theme, picked)
-
-
-def build_settings_page(theme_key: str, lang: str | None = None, fonts: dict | None = None) -> str:
-    """Собирает итоговый HTML окна настроек для темы theme_key.
-
-    Окно настроек - отдельная страница, и в отличие от главной оно всегда
-    собирается из встроенного шаблона ui.SETTINGS_TEMPLATE: тема влияет на
-    окно палитрой, шрифтами и своим CSS, но не переопределяет разметку (слот
-    settings и полный entry игнорируются) - иначе тема могла бы убрать поля,
-    которые рисует settings.js из схемы settings_schema.
-    """
-    theme = _page_theme(theme_key)
-    folders = theme.get("_slot_folders") or []
-    picked = _page_fonts(theme, fonts)
-    _warn_ignored_slot(folders, "settings", "окно настроек строится из схемы")
-    if theme.get("entry"):
-        _file_log("WARN", f"тема {theme.get('label')}: entry игнорируется для окна настроек, "
-                          f"его разметка собирается приложением")
-    return _fill_placeholders(_apply_assets(_ui.SETTINGS_TEMPLATE, folders), theme, picked)
+    return _fill_placeholders(_ensure_settings(template), theme, picked)
 
 
 def themes_embed() -> dict:

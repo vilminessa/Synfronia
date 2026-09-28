@@ -3,13 +3,14 @@ r"""Собирает страницу Synfronia со стабом pywebview дл
 Зачем: app.js и settings.js живут внутри <script> и сразу дёргают pywebview.api,
 поэтому для проверки разметки нужен настоящий DOM + заглушка API. Стаб
 подставляется перед первым <script>, дальше страницу открывает tools/ui_*.js
-через CDP. Обе страницы (главная и окно настроек) проверяются одним стабом:
-методы лишнего окна просто не вызываются.
+через CDP. Проверяется одна страница: окно у приложения одно, а карточка
+настроек лежит в ней оверлеем, поэтому сценарий открывает её сам (--settings
+или клик по шестерёнке).
 
     python tools/ui_probe_page.py                      -> %TEMP%\synf_probe_page.html
     python tools/ui_probe_page.py out.html             -> свой путь
-    python tools/ui_probe_page.py --page settings      -> окно настроек
-    python tools/ui_probe_page.py --page main --theme liquid_glass --lang de
+    python tools/ui_probe_page.py --settings           -> карточка настроек открыта
+    python tools/ui_probe_page.py --theme liquid_glass --lang de
 """
 
 import json
@@ -25,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import settings_schema  # noqa: E402
 import i18n  # noqa: E402
-from themes import build_page, build_settings_page  # noqa: E402
+from themes import build_page  # noqa: E402
 
 # Настройки в стабе берём из схемы: так пробник проверяет настоящие умолчания,
 # а не отдельный список (он уже расходился с приложением).
@@ -35,13 +36,13 @@ def stub_settings(lang: str) -> str:
 
 
 # Стаб API: init() и tick() должны пройти целиком, чтобы мы мерили реальную
-# разметку, а не падение скрипта. Значения повторяют ответы Api.get_initial,
-# Api.poll и Api.poll_settings.
+# разметку, а не падение скрипта. Значения повторяют ответы Api.get_initial и
+# Api.poll.
 STUB = """<script>
 (function () {
   var FONTS = {families: ["Inter", "JetBrains Mono", "Noto Sans"], mono: ["JetBrains Mono"],
                count: 3, folder: "C:\\\\Synfronia\\\\fonts"};
-  var state = {lang: "%(lang)s", css: "", fontsRev: 0, dl: null, page: "%(page)s",
+  var state = {lang: "%(lang)s", css: "", fontsRev: 0, dl: null,
                // ответ poll() для кнопки «Скачать»: сценарий задаёт probe.dl
                dlState: {busy: false, status: "", result: null,
                          progress: {mode: "determinate", value: 0}},
@@ -49,29 +50,29 @@ STUB = """<script>
   var settings = __SETTINGS__;
   function ok(r) { return Promise.resolve(r === undefined ? {} : r); }
   function uiState() {
-    return {lang: state.lang, theme: settings.theme, ui_rev: 1,
-            settings_open: state.settingsOpen, fonts_rev: state.fontsRev};
+    return {lang: state.lang, theme: settings.theme, ui_rev: 1, settings: settings,
+            fonts_rev: state.fontsRev};
   }
   window.pywebview = {api: {
     get_initial: function () { return Promise.resolve({settings: settings, ffmpeg: true,
-      default_dir: settings.dest, transcoders: ["libx265", "nvenc"], fonts: FONTS}); },
+      default_dir: settings.dest, transcoders: ["libx265", "nvenc"], fonts: FONTS,
+      settings_open: state.settingsOpen}); },
     poll: function () { return Promise.resolve(Object.assign({
-      logs: [], log_cursor: 0, ffmpeg: {downloading: false, extracting: false, pct: 0, ok: true, error: null},
+      logs: state.logs, log_cursor: state.logs.length,
+      ffmpeg: {downloading: false, extracting: false, pct: 0, ok: true, error: null},
       fonts_dl: {downloading: false, pct: 0, error: null}}, uiState(), state.dlState)); },
-    poll_settings: function () { return Promise.resolve(Object.assign({
-      logs: state.logs || [], log_cursor: (state.logs || []).length,
-      fonts_dl: {downloading: false, pct: 0, error: null}}, uiState())); },
-    open_settings: function () { state.settingsOpen = true; return ok("created"); },
-    close_settings: function () { state.settingsOpen = false; return ok(); },
+    synf_settings_state: function (open) { state.settingsOpen = !!open; return ok(); },
     set_dest: function (path) { state.dest = path; return ok(); },
     set_font: function () { return ok({css: state.css}); },
     reload_fonts: function () { return ok({fonts: FONTS, css: state.css}); },
     font_face_css: function () { return ok(state.css); },
     download_fonts: function () { state.dl = "started"; return ok("started"); },
+    download_themes: function () { return ok({added: ["scary_forest"], skipped: [], failed: []}); },
     apply_theme_css: function () { return ok(); },
-    set_theme: function () { return ok("ok"); },
+    set_theme: function (id) { settings.theme = id; state.saved.push(["theme", id]); return ok("ok"); },
     switch_theme: function () { return ok(); },
-    reload_themes: function () { return ok([]); },
+    // как настоящий reload_themes: отдаём перечитанный список тем
+    reload_themes: function () { return ok(Object.assign({}, THEMES)); },
     set_language: function (lang) { settings.language = lang; return ok(); },
     save_setting: function (key, value) { state.saved.push([key, value]); return ok(); },
     start_download: function () { return ok({}); },
@@ -88,26 +89,29 @@ STUB = """<script>
 
 
 def build_page_with_stub(theme: str = "scarred_mind", lang: str = "ru",
-                         page: str = "main") -> str:
-    """Страница приложения (главная или окно настроек) со стабом API."""
+                         settings_open: bool = False) -> str:
+    """Страница приложения со стабом API; settings_open - сразу открытая карточка."""
     # приложение грузит языковые файлы до сборки страницы: без этого в I18N нет
-    # thisLang, список языков в окне настроек пуст и мы меряем не то, что видит юзер
+    # thisLang, список языков в настройках пуст и мы меряем не то, что видит юзер.
+    # Сами значения берём встроенные: файлы в %LOCALAPPDATA% могли достаться от
+    # прежней версии и содержать старые подписи, а проверка должна смотреть на
+    # текст из поставки.
     i18n.load_languages()
-    builder = build_settings_page if page == "settings" else build_page
-    out = builder(theme)
+    i18n.use_builtin_languages()
+    out = build_page(theme)
     marker = "<script>"
     idx = out.find(marker)
     if idx < 0:
-        raise SystemExit(f"{page}: не найден <script> для вставки стаба")
-    stub = STUB % {"lang": lang, "page": page,
-                   "settings_open": "false" if page == "main" else "true"}
+        raise SystemExit("не найден <script> для вставки стаба")
+    stub = STUB % {"lang": lang, "settings_open": "true" if settings_open else "false"}
     stub = stub.replace("__SETTINGS__", stub_settings(lang))
     return out[:idx] + stub + out[idx:]
 
 
 def main(argv: list[str]) -> int:
     args = [a for a in argv[1:] if a]
-    theme, lang, page = "scarred_mind", "ru", "main"
+    theme, lang = "scarred_mind", "ru"
+    settings_open = False
     out: Path | None = None
     i = 0
     while i < len(args):
@@ -117,20 +121,22 @@ def main(argv: list[str]) -> int:
         elif args[i] == "--lang":
             lang = args[i + 1] if i + 1 < len(args) else lang
             i += 2
+        elif args[i] == "--settings":
+            settings_open = True
+            i += 1
         elif args[i] == "--page":
-            page = args[i + 1] if i + 1 < len(args) else page
-            i += 2
+            raise SystemExit("страница одна: карточка настроек открывается флагом --settings")
         else:
             out = Path(args[i])
             i += 1
-    if page not in ("main", "settings"):
-        raise SystemExit(f"неизвестная страница: {page} (main или settings)")
-    default_name = "synf_probe_page.html" if page == "main" else "synf_probe_settings.html"
-    out = out or Path(tempfile.gettempdir()) / default_name
+    out = out or Path(tempfile.gettempdir()) / "synf_probe_page.html"
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(build_page_with_stub(theme=theme, lang=lang, page=page), encoding="utf-8")
-    print(f"{out} (страница={page}, тема={theme}, язык={lang})")
+    out.write_text(build_page_with_stub(theme=theme, lang=lang, settings_open=settings_open),
+                   encoding="utf-8")
+    print(f"{out} (карточка настроек={'открыта' if settings_open else 'закрыта'}, "
+          f"тема={theme}, язык={lang})")
     return 0
+
 
 
 if __name__ == "__main__":

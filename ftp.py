@@ -427,7 +427,9 @@ def _upload_with_retry(ftp, path, remote: str, cfg: FtpConfig, log=None, reopen=
 
 # Панель настроек модуля. Порядок полей = порядок строк в панели; поля кроме
 # active видны только при включённой выгрузке (visible_if), умолчания, min/max и
-# подписи берутся отсюда же - FtpConfig их больше не дублирует.
+# подписи берутся отсюда же - FtpConfig их больше не дублирует. Режим
+# выгрузки - choice_buttons: два коротких слова с пояснением в подсказке
+# вместо длинных вариантов в выпадающем списке.
 _WHEN_ACTIVE = {"key": "active", "equals": True}
 
 SETTINGS = {
@@ -439,7 +441,8 @@ SETTINGS = {
     "fields": [
         {"key": "active", "type": "bool", "label": "sheet.ftp.active",
          "default": False, "check": True, "live": True},
-        {"key": "mode", "type": "choice", "label": "sheet.ftp.mode", "default": "batch",
+        {"key": "mode", "type": "choice_buttons", "label": "sheet.ftp.mode",
+         "default": "batch", "title": "sheet.ftp.mode.hint",
          "options": [["batch", "sheet.ftp.mode.batch"], ["per_file", "sheet.ftp.mode.per_file"]],
          "row": 1, "visible_if": _WHEN_ACTIVE},
         {"key": "host", "type": "text", "label": "sheet.ftp.host", "default": "",

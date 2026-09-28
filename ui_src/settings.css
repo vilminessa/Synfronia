@@ -1,51 +1,175 @@
-  /* Вёрстка окна настроек: шапка, список разделов слева, содержимое справа,
-     полоса журнала снизу. Палитра, шрифты и скругления — от темы, структура
-     и отступы — здесь, чтобы окно выглядело одинаково в любой теме. */
-  body {
-    display: flex; flex-direction: column;
-    height: 100vh; padding: 0; overflow: hidden;
+  /* Настройки внутри главного окна: размытый фон и карточка по центру.
+     Палитра, шрифты и скругления — от темы, структура и отступы — здесь,
+     чтобы окно выглядело одинаково в любой теме. */
+  .settings-overlay {
+    position: fixed; inset: 0; z-index: 60;
+    display: flex; align-items: center; justify-content: center; padding: 16px;
+    background: rgba(0, 0, 0, .42);
+    -webkit-backdrop-filter: blur(10px) saturate(.85);
+    backdrop-filter: blur(10px) saturate(.85);
+    animation: overlay-in .18s ease-out;
   }
+  @keyframes overlay-in { from { opacity: 0; } to { opacity: 1; } }
+
+  /* Три уровня поверхностей, иначе элементы сливаются: окно --bg, карточка
+     настроек --surface, блоки полей внутри неё снова --bg. Оттенки берём от
+     темы, поэтому важно только что соседние уровни различаются. */
+  .settings-card {
+    display: flex; flex-direction: column;
+    width: min(760px, 100%); max-height: 100%;
+    background: var(--surface);
+    border: 1px solid var(--widget);
+    border-radius: var(--radius-l);
+    box-shadow: 0 24px 70px rgba(0, 0, 0, .5);
+    overflow: hidden;
+    animation: card-in .2s cubic-bezier(.2, .9, .3, 1.15);
+  }
+  @keyframes card-in {
+    from { opacity: 0; transform: translateY(12px) scale(.98); }
+    to { opacity: 1; transform: none; }
+  }
+  /* карточка без полей, если в разделе всё скрыто - не оставляем пустой прямоугольник */
+  .settings-card:empty { display: none; }
 
   .win-head {
     flex: none;
     display: flex; align-items: center; justify-content: space-between; gap: 12px;
-    padding: 12px 14px;
-    border-bottom: 1px solid var(--surface);
+    padding: 10px 14px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--widget);
   }
-  .win-title { font-size: 16px; font-weight: 600; }
+  .win-title { font-size: 15px; font-weight: 600; }
+  .win-head .icon-btn { width: 30px; height: 30px; font-size: 15px; }
 
   .win-body { flex: 1 1 auto; display: flex; min-height: 0; }
 
   .nav {
-    flex: 0 0 190px; display: flex; flex-direction: column; gap: 4px;
+    flex: 0 0 178px; display: flex; flex-direction: column; gap: 4px;
     padding: 12px 8px; overflow-y: auto;
-    border-right: 1px solid var(--surface);
+    border-right: 1px solid var(--widget);
   }
   .nav-item {
     text-align: left; width: 100%; padding: 9px 12px;
     background: transparent; border: 1px solid transparent; color: var(--text);
     border-radius: var(--radius-m); font-size: 14px;
-    transition: background .15s, color .15s, border-color .15s;
+    transition: background .15s, color .15s, border-color .15s, transform .12s;
   }
-  .nav-item:hover { background: var(--surface); color: var(--text); }
+  .nav-item:hover { background: var(--widget); transform: translateX(2px); }
   .nav-item.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
 
   .section {
     flex: 1 1 auto; min-width: 0;
-    padding: 14px 18px 22px; overflow-y: auto;
+    padding: 14px; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 12px;
   }
-  /* поля идут плотнее, чем в старой панели: окно широкое, места много */
-  .section label { margin-top: 12px; }
+  /* Пустой раздел (все поля скрыты условием) не занимает места. */
+  .section:empty { display: none; }
 
-  .win-log {
-    flex: none; display: block;
-    width: 100%; height: 58px; margin: 0; padding: 8px 14px; resize: none;
-    border: 0; border-top: 1px solid var(--surface); border-radius: 0;
+  /* ---- карточки полей: без них элементы сливались с фоном окна ---- */
+  .field-card {
+    background: var(--bg);
+    border: 1px solid var(--surface);
+    border-radius: var(--radius-m);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, .16);
+    overflow: hidden;
+  }
+  .field-card-title {
+    display: block; padding: 7px 12px;
+    background: var(--widget);
+    font-size: 11px; font-weight: 600; letter-spacing: .5px;
+    text-transform: uppercase; opacity: .85;
+  }
+  .field-card-body { padding: 12px; }
+  .field-card-body > *:first-child { margin-top: 0; }
+  .field-card-body > *:last-child { margin-bottom: 0; }
+  .field-card .label { margin-top: 12px; }
+  .field-card .check { margin-top: 12px; }
+  .field-card .note {
+    margin-top: 8px; padding: 6px 9px; border-radius: var(--radius-s);
+    background: var(--surface); border-left: 2px solid var(--widget);
+    opacity: .8; font-size: 12px;
+  }
+  .field-card .range-row + .range-row { margin-top: 10px; }
+  .field-card .row { margin-top: 10px; }
+  /* пояснение рядом с кнопкой (ftp-test-note) не должно тянуть карточку */
+  .field-card .note.inline { border-left-color: var(--accent); }
+
+  /* ---- кнопки-действия: иконка + подсказка, текст только если иконки нет ---- */
+  .theme-actions {
+    display: flex; flex-wrap: wrap; gap: 8px;
+    margin-top: 12px; align-items: center;
+  }
+  .theme-actions button {
+    flex: 0 0 auto; min-width: 0; padding: 8px 12px;
+    display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+    font-size: 13px; line-height: 1.15; white-space: normal; overflow-wrap: anywhere;
     background: var(--surface); color: var(--text);
-    font-family: var(--font-mono, Consolas), monospace; font-size: 12px;
-    overflow-y: auto;
+    border: 1px solid var(--widget); border-radius: var(--radius-s);
+    cursor: pointer;
+    transition: background .15s, color .15s, border-color .15s, transform .12s;
+  }
+  .theme-actions button:hover { border-color: var(--accent); color: var(--accent); }
+  .theme-actions button:active { transform: scale(.96); }
+  .theme-actions button.done { border-color: var(--accent); color: var(--accent); }
+  .theme-actions .ta-ico { display: inline-flex; font-size: 14px; line-height: 1; opacity: .8; }
+  .theme-actions button:hover .ta-ico { opacity: 1; }
+
+  /* кнопка только с иконкой: квадратная, иконка анимируется */
+  .theme-actions .act-btn {
+    width: 34px; height: 34px; padding: 0; border-radius: var(--radius-m);
+  }
+  .theme-actions .act-btn .ico { display: inline-flex; width: 17px; height: 17px; }
+  .theme-actions .act-btn .ico svg { width: 100%; height: 100%; display: block; }
+  .act-btn:hover .ico { transform: rotate(-12deg) scale(1.08); }
+  .act-btn .ico { transition: transform .2s cubic-bezier(.3, .8, .3, 1.2); }
+  .act-btn:active .ico { animation: act-press .32s ease-out; }
+  @keyframes act-press {
+    0% { transform: scale(1); }
+    35% { transform: scale(.72); }
+    100% { transform: scale(1); }
+  }
+  .act-btn.ico-reload:hover .ico { animation: ico-spin .7s ease-in-out infinite; }
+  .act-btn.ico-reload:active .ico { animation: ico-spin-once .55s ease-out; }
+  @keyframes ico-spin { to { transform: rotate(360deg); } }
+  @keyframes ico-spin-once {
+    from { transform: rotate(0); }
+    to { transform: rotate(-360deg); }
+  }
+  .act-btn.ico-download:active .ico { animation: ico-drop .45s ease-out; }
+  @keyframes ico-drop {
+    0% { transform: translateY(0); }
+    40% { transform: translateY(4px) scale(.9); }
+    100% { transform: translateY(0); }
+  }
+  .act-btn.ico-folder:active .ico { animation: ico-open .45s ease-out; }
+  @keyframes ico-open {
+    0% { transform: none; }
+    45% { transform: translateY(-2px) rotate(-8deg); }
+    100% { transform: none; }
+  }
+  /* докачка идёт - иконка крутится, пока кнопка не вернётся в исходное */
+  .act-btn.busy { color: var(--accent); border-color: var(--accent); pointer-events: none; }
+  .act-btn.busy .ico { animation: ico-spin 1s linear infinite; }
+
+  /* ---- режим выгрузки FTP: переключатель с подсказкой вместо select ---- */
+  .mode-switch { display: inline-flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  .mode-switch button {
+    padding: 7px 14px; font-size: 13px;
+    background: var(--surface); color: var(--text);
+    border: 1px solid var(--widget); border-radius: var(--radius-s);
+    cursor: pointer; transition: background .15s, color .15s, border-color .15s, transform .12s;
+  }
+  .mode-switch button:hover { border-color: var(--accent); color: var(--accent); }
+  .mode-switch button:active { transform: scale(.95); }
+  .mode-switch button.on {
+    background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 600;
   }
 
-  @media (max-width: 560px) {
-    .nav { flex-basis: 140px; }
+  @media (max-width: 640px) {
+    .nav { flex-basis: 128px; }
+    .section { padding: 10px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .settings-overlay, .settings-card { animation: none; }
+    .act-btn:hover .ico, .act-btn:active .ico, .act-btn.busy .ico { animation: none; transition: none; }
   }

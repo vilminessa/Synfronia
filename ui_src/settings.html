@@ -1,40 +1,18 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-<meta charset="utf-8">
-<title>Synfronia — настройки</title>
-<style>
-  :root {
-    --bg: #0c1622; --surface: #1f2b29; --widget: #23444b;
-    --text: #dcdedd; --accent: #628d7c; --warn: #ffb454;
-    --radius-s: 6px; --radius-m: 8px; --radius-l: 12px; --opacity: 1;
-  }
-  :root { __THEME_ROOT__ }
-</style>
-<style id="fonts-style">__FONTS_CSS__</style>
-<style id="theme-style">__THEME_CSS__</style>
-<style>
-__APP_CSS__
-</style>
-<style>
-__SETTINGS_CSS__
-</style>
-</head>
-<body>
-
-<header class="win-head">
-  <span class="win-title" data-i18n="ui.settings">Настройки</span>
-  <button type="button" id="settings-close" class="icon-btn" data-i18n-title="ui.close" title="Закрыть">&#x2715;&#xFE0E;</button>
-</header>
-
-<div class="win-body">
-  <nav class="nav" id="settings-nav" data-i18n-title="sheet.nav.title" title="Разделы настроек"></nav>
-  <main class="section" id="settings-sections"></main>
+<!-- Оверлей настроек внутри главного окна (фрагмент страницы, без обвязки
+     документа). Разметку разделов и полей рисует settings.js по схеме
+     settings_schema.py, поэтому тема не может её переопределить.
+     Вставляется в главную страницу плейсхолдером SETTINGS_HTML;
+     если тема со своим entry этого плейсхолдера не содержит,
+     themes.build_page дописывает фрагмент сам (themes._ensure_settings). -->
+<div id="settings-overlay" class="settings-overlay" hidden>
+  <div class="settings-card" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <header class="win-head">
+      <span class="win-title" id="settings-title" data-i18n="ui.settings">Настройки</span>
+      <button type="button" id="settings-close" class="icon-btn" data-i18n-tip="ui.close" aria-label="Закрыть">&#x2715;&#xFE0E;</button>
+    </header>
+    <div class="win-body">
+      <nav class="nav" id="settings-nav" data-i18n-tip="sheet.nav.title"></nav>
+      <main class="section" id="settings-sections"></main>
+    </div>
+  </div>
 </div>
-
-<textarea id="log" class="win-log" readonly></textarea>
-
-<script>__COMMONJS__</script>
-<script>__SETTINGS_JS__</script>
-</body>
-</html>

@@ -7,9 +7,9 @@
 
 Зачем это нужно: ui.py — сгенерированный файл, в котором CSS, JS и HTML-шаблоны
 лежат строковыми литералами (APP_CSS / MAIN_CSS / APP_JS / COMMON_JS /
-SETTINGS_CSS / SETTINGS_JS / BASE_TEMPLATE / SETTINGS_TEMPLATE). Правки удобнее
+SETTINGS_CSS / SETTINGS_JS / BASE_TEMPLATE / SETTINGS_HTML). Правки удобнее
 вносить в обычные текстовые файлы ui_src/, а этот скрипт собирает из них ui.py,
-который импортирует core.build_page() и core.build_settings_page().
+который импортирует core.build_page().
 """
 
 import ast
@@ -33,7 +33,8 @@ PARTS = (
     ("SETTINGS_CSS", "settings.css"),
     ("SETTINGS_JS", "settings.js"),
     ("BASE_TEMPLATE", "index.html"),
-    ("SETTINGS_TEMPLATE", "settings.html"),
+    # карточка настроек (оверлей) - фрагмент главной страницы, не отдельный шаблон
+    ("SETTINGS_HTML", "settings.html"),
 )
 
 HEADER = (

@@ -13,15 +13,15 @@ settings.json получается из группы и ключа: у груп�
 
 Описание поля
     key          путь внутри группы
-    type         bool | int | text | password | choice | actions | note
+    type         bool | int | text | password | choice | choice_buttons | actions | note
     label        ключ i18n с подписью
     title        ключ i18n с подсказкой (необязательно)
     note         ключ i18n с пояснением под полем
     note_source  имя JS-функции, которая заполняет пояснение (themeMeta, ...)
     default      значение по умолчанию
     min/max/step ограничения для int
-    options      [["значение", "подпись"], ...] для choice; подпись - это ключ
-                 i18n, если он есть в языке, иначе сам текст
+    options      [["значение", "подпись"], ...] для choice/choice_buttons; подпись
+                 - это ключ i18n, если он есть в языке, иначе сам текст
     options_source  "langs" | "themes" | "fonts" - список из runtime
     options_of   словарь в модуле-владельце: значения опций должны быть в нём
     dynamic      "transcoders" - часть опций может быть недоступна (ffmpeg)
@@ -30,7 +30,7 @@ settings.json получается из группы и ключа: у груп�
     dom_range    id ползунка, если у поля есть пара "ползунок + число"
     mirror       "range" - у поля есть ползунок
     check        поле рисуется строкой-флажком (текст подписи рядом)
-    box          имя блока-секции внутри группы (см. boxes группы)
+    box          имя блока-карточки внутри группы (см. boxes группы)
     row          номер строки: поля с одинаковым row встают в одну строку
     row_class    класс строки (по умолчанию range-row; "row" - поле + кнопка)
     inline       True для пояснения, которое живёт в строке с кнопкой
@@ -42,9 +42,17 @@ settings.json получается из группы и ключа: у груп�
     secret       значение не показывать в подсказках и логах
     transient    поле не сохраняется (кнопки, пояснения, папка загрузки)
     in_panel     False - поле живёт в главном окне, не в панели настроек
+
+Кнопки actions
+    dom          id кнопки
+    icon         имя SVG-иконки (reload, download, folder) из ui_src/common.js.
+                Есть иконка - кнопка рисуется иконкой, а смысл живёт в
+                подсказке; нет - подписью
+    label        ключ i18n с подписью
+    browse_dest  True - кнопка выбирает папку загрузки
 """
 
-TYPES = ("bool", "int", "text", "password", "choice", "actions", "note")
+TYPES = ("bool", "int", "text", "password", "choice", "choice_buttons", "actions", "note")
 
 # Общие настройки интерфейса. Порядок вкладок задаётся полем order.
 CORE_GROUPS = [
@@ -52,6 +60,7 @@ CORE_GROUPS = [
         "id": "ui",
         "label": "sheet.tab.ui",
         "order": 10,
+        "boxes": {"look": "sheet.ui.look", "dest": "sheet.ui.dest"},
         "fields": [
             {"key": "language", "type": "choice", "label": "sheet.lang.label",
              "default": "en", "options_source": "langs", "dom": "lang", "live": True},
@@ -60,26 +69,30 @@ CORE_GROUPS = [
              "live": True, "note_source": "themeMeta"},
             {"type": "note", "transient": True, "dom": "theme-meta", "note_source": "themeMeta"},
             {"type": "actions", "transient": True, "buttons": [
-                {"dom": "reload-themes", "icon": "⟳", "label": "sheet.theme.reload"},
-                {"dom": "open-themes", "icon": "⤢", "label": "sheet.theme.open"},
+                {"dom": "reload-themes", "icon": "reload", "label": "sheet.theme.reload"},
+                {"dom": "download-themes", "icon": "download", "label": "sheet.theme.download"},
+                {"dom": "open-themes", "icon": "folder", "label": "sheet.theme.open"},
             ]},
-            # папка загрузки - не настройка: значение приходит из get_initial()
-            {"key": "dest", "type": "text", "label": "sheet.dest.label", "dom": "dest",
-             "transient": True, "placeholder": "", "value_source": "default_dir", "row": 1},
-            {"type": "actions", "transient": True, "row": 1, "row_class": "row", "buttons": [
-                {"dom": "browse", "label": "sheet.browse", "browse_dest": True},
-            ]},
+            {"type": "note", "transient": True, "dom": "themes-dl-note", "hidden": True},
             {"key": "font_sans", "type": "choice", "label": "sheet.font.sans",
              "default": "", "options_source": "fonts", "dom": "font-sans", "live": True},
             {"key": "font_mono", "type": "choice", "label": "sheet.font.mono",
              "default": "", "options_source": "fonts_mono", "dom": "font-mono", "live": True},
             {"type": "note", "transient": True, "dom": "font-note", "note_source": "fontNote"},
             {"type": "actions", "transient": True, "buttons": [
-                {"dom": "reload-fonts", "icon": "⟳", "label": "sheet.font.reload"},
-                {"dom": "download-fonts", "icon": "⤓", "label": "sheet.font.download"},
-                {"dom": "open-fonts", "icon": "⤢", "label": "sheet.font.open"},
+                {"dom": "reload-fonts", "icon": "reload", "label": "sheet.font.reload"},
+                {"dom": "download-fonts", "icon": "download", "label": "sheet.font.download"},
+                {"dom": "open-fonts", "icon": "folder", "label": "sheet.font.open"},
             ]},
             {"type": "note", "transient": True, "dom": "font-dl-note", "hidden": True},
+            # папка загрузки - не настройка: значение приходит из get_initial()
+            {"key": "dest", "type": "text", "label": "sheet.dest.label", "dom": "dest",
+             "box": "dest", "transient": True, "placeholder": "", "value_source": "default_dir",
+             "row": 1},
+            {"type": "actions", "transient": True, "box": "dest", "row": 1, "row_class": "row",
+             "buttons": [
+                 {"dom": "browse", "label": "sheet.browse", "browse_dest": True},
+             ]},
         ],
     },
 ]
@@ -217,7 +230,7 @@ def coerce(key: str, value):
         return num
     if kind in ("text", "password"):
         return "" if value is None else str(value)
-    if kind == "choice":
+    if kind in ("choice", "choice_buttons"):
         # у статических списков (субтитры, качество, кодек, режим FTP) набор
         # значений известен: чужое значение из ручного правки файла -> умолчание.
         # У динамических (язык, тема, шрифты) списка options нет - не проверяем.
