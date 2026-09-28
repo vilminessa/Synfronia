@@ -515,7 +515,7 @@ class Api:
                 percent = d.get("percent")
                 name = d.get("filename") or ""
                 if percent is None:
-                    self._status = f"{name} — {tr(self._lang, 'p.going')}"
+                    self._status = f"{name} · {tr(self._lang, 'p.going')}"
                     self._progress = {"mode": "indeterminate"}
                 else:
                     self._progress = {"mode": "determinate", "value": percent}
@@ -523,7 +523,7 @@ class Api:
                     spd = f"{d['speed'] / 1024 / 1024:.1f} {tr(self._lang, 'p.mbps')}" if d.get("speed") else ""
                     eta = (f" {tr(self._lang, 'p.eta_prefix')} {int(d['eta'])}{tr(self._lang, 'p.eta_sec')}"
                            if d.get("eta") else "")
-                    self._status = f"{name} — {bits}{(' | ' + spd) if spd else ''}{eta}"
+                    self._status = f"{name} · {bits}{(' | ' + spd) if spd else ''}{eta}"
             elif status == "postprocessing":
                 self._status = d.get("msg") or tr(self._lang, "p.post")
                 self._progress = {"mode": "indeterminate"}

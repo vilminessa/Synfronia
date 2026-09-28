@@ -84,6 +84,39 @@
   .field-card-body > *:last-child { margin-bottom: 0; }
   .field-card .label { margin-top: 12px; }
   .field-card .check { margin-top: 12px; }
+  /* пиксельный переключатель (майнкрафтовский): без скруглений, резкие грани,
+     ползунок едет ступеньками, при включении - акцентный цвет. Нативный
+     чекбокс спрятан, но остаётся внутри <label>: клик по SVG его переключает. */
+  .check.pixel-toggle { gap: 0; }
+  .check.pixel-toggle input {
+    position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0;
+  }
+  .check.pixel-toggle .px {
+    display: block; width: 44px; height: 22px; cursor: pointer;
+  }
+  .check.pixel-toggle .px-track {
+    fill: var(--panel); stroke: var(--line); stroke-width: 2;
+    shape-rendering: crispEdges;
+  }
+  .check.pixel-toggle .px-knob {
+    fill: none; shape-rendering: crispEdges;
+    transition: transform .09s steps(3);
+  }
+  .check.pixel-toggle .px-knob-fill {
+    fill: var(--text-dim); shape-rendering: crispEdges;
+  }
+  .check.pixel-toggle .px-check {
+    fill: none; stroke: var(--panel); stroke-width: 2.5;
+    stroke-linecap: square; stroke-linejoin: miter; opacity: 0;
+  }
+  .check.pixel-toggle input:checked + .px .px-knob {
+    transform: translate(18px, 0);
+  }
+  .check.pixel-toggle input:checked + .px .px-knob-fill {
+    fill: var(--accent);
+  }
+  .check.pixel-toggle input:checked + .px .px-check { opacity: 1; }
+  .check.pixel-toggle input:focus-visible + .px .px-track { stroke: var(--accent); }
   .field-card .note {
     margin-top: 8px; padding: 6px 9px; border-radius: var(--radius-s);
     background: var(--surface); border-left: 2px solid var(--widget);

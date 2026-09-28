@@ -31,6 +31,9 @@
     document.querySelectorAll("[data-i18n]").forEach(function(el) {
       el.textContent = t(el.getAttribute("data-i18n"));
     });
+    document.querySelectorAll("[data-i18n-aria]").forEach(function(el) {
+      el.setAttribute("aria-label", t(el.getAttribute("data-i18n-aria")));
+    });
     document.querySelectorAll("[data-i18n-tip]").forEach(function(el) {
       setTip(el, t(el.getAttribute("data-i18n-tip")));
     });

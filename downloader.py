@@ -754,8 +754,16 @@ SETTINGS = {
     "label": "sheet.tab.dl",
     "order": 20,
     "flat_prefix": "",  # исторически без префикса: retries, socket_timeout, quality
-    "boxes": {"net": "sheet.network.label"},
+    "boxes": {"dest": "sheet.dl.dest", "net": "sheet.network.label"},
     "fields": [
+        # папка загрузки - не настройка: значение приходит из get_initial()
+        {"key": "dest", "type": "text", "label": "sheet.dest.label", "dom": "dest",
+         "box": "dest", "transient": True, "placeholder": "", "value_source": "default_dir",
+         "row": 1},
+        {"type": "actions", "transient": True, "box": "dest", "row": 1, "row_class": "row",
+         "buttons": [
+             {"dom": "browse", "label": "sheet.browse", "browse_dest": True},
+         ]},
         {"key": "subtitles", "type": "choice", "label": "sheet.subs.label", "default": "en",
          "dom": "subs", "options": [
              ["off", "subs.off"], ["ru", "subs.ru"], ["en", "subs.en"], ["all", "subs.all"],
@@ -766,7 +774,7 @@ SETTINGS = {
              ["720", "720p"], ["480", "480p"], ["240", "240p"],
          ], "options_of": "QUALITY_FORMATS"},
         {"key": "transcode", "type": "choice", "label": "sheet.transcode.label",
-         "default": "none", "dom": "transcode", "options": [
+         "default": "none", "dom": "transcode", "title": "sheet.transcode.hint", "options": [
              ["none", "trans.none"], ["libx265", "trans.libx265"], ["nvenc", "trans.nvenc"],
              ["amf", "trans.amf"], ["qsv", "trans.qsv"],
          ], "options_of": "TRANSCODERS", "dynamic": "transcoders"},

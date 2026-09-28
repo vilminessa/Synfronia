@@ -207,9 +207,6 @@
   function updateDownloadTitle() {
     var btn = document.getElementById("download");
     var key = DL_TITLE[dlState] || "btn.download";
-    // нативный title браузер рисует сам и поверх наших подсказок, поэтому
-    // состояние кнопки показываем тем же tooltip, что и у остальных controls
-    setTip(btn, t(key));
     btn.setAttribute("aria-label", t(key));
   }
   function setDownloadState(state, pct, indeterminate) {

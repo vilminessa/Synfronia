@@ -30,6 +30,10 @@ settings.json получается из группы и ключа: у груп�
     dom_range    id ползунка, если у поля есть пара "ползунок + число"
     mirror       "range" - у поля есть ползунок
     check        поле рисуется строкой-флажком (текст подписи рядом)
+    pixel        True - bool-поле рисуется пиксельным переключателем вместо галочки
+    no_label     True - у bool-поля подпись не рисуется (доступное имя = label)
+    option_hints {значение опции: ключ i18n} - отдельные подсказки опций
+                 choice_buttons (иначе берётся общий title)
     box          имя блока-карточки внутри группы (см. boxes группы)
     row          номер строки: поля с одинаковым row встают в одну строку
     row_class    класс строки (по умолчанию range-row; "row" - поле + кнопка)
@@ -60,14 +64,13 @@ CORE_GROUPS = [
         "id": "ui",
         "label": "sheet.tab.ui",
         "order": 10,
-        "boxes": {"look": "sheet.ui.look", "dest": "sheet.ui.dest"},
+        "boxes": {"look": "sheet.ui.look"},
         "fields": [
             {"key": "language", "type": "choice", "label": "sheet.lang.label",
              "default": "en", "options_source": "langs", "dom": "lang", "live": True},
             {"key": "theme", "type": "choice", "label": "sheet.theme.label",
              "default": "scarred_mind", "options_source": "themes", "dom": "theme",
-             "live": True, "note_source": "themeMeta"},
-            {"type": "note", "transient": True, "dom": "theme-meta", "note_source": "themeMeta"},
+             "live": True},
             {"type": "actions", "transient": True, "buttons": [
                 {"dom": "reload-themes", "icon": "reload", "label": "sheet.theme.reload"},
                 {"dom": "download-themes", "icon": "download", "label": "sheet.theme.download"},
@@ -85,14 +88,6 @@ CORE_GROUPS = [
                 {"dom": "open-fonts", "icon": "folder", "label": "sheet.font.open"},
             ]},
             {"type": "note", "transient": True, "dom": "font-dl-note", "hidden": True},
-            # папка загрузки - не настройка: значение приходит из get_initial()
-            {"key": "dest", "type": "text", "label": "sheet.dest.label", "dom": "dest",
-             "box": "dest", "transient": True, "placeholder": "", "value_source": "default_dir",
-             "row": 1},
-            {"type": "actions", "transient": True, "box": "dest", "row": 1, "row_class": "row",
-             "buttons": [
-                 {"dom": "browse", "label": "sheet.browse", "browse_dest": True},
-             ]},
         ],
     },
 ]

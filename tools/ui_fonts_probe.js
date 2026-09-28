@@ -145,6 +145,11 @@ const THEME_SWITCH = `(function () {
 const FTP_VIS = `(function () {
   switchSection("ftp");
   var flag = document.getElementById("ftp-active");
+  function tip(el) { return el ? (el.getAttribute("data-tip") || "") : ""; }
+  function captionOf(id) {
+    var el = document.getElementById(id);
+    return el ? el.parentElement.querySelector("span[data-i18n]") : null;
+  }
   function connCard() {
     var cards = [].slice.call(document.querySelectorAll("#section-ftp .field-card"));
     for (var i = 0; i < cards.length; i++) {
@@ -201,6 +206,17 @@ const FTP_VIS = `(function () {
   flag.checked = false;
   flag.dispatchEvent(new Event("change"));
   out.back = count();
+  // подсказки полей и доступность пиксельного переключателя выгрузки
+  var active = flag.parentElement;
+  out.hints = {
+    tls: tip(captionOf("ftp-tls")),
+    tlsVerify: tip(captionOf("ftp-tls-verify")),
+    pasv: tip(captionOf("ftp-pasv")),
+    activeAria: active ? active.getAttribute("aria-label") || "" : "",
+    activeTip: active ? active.getAttribute("data-tip") || "" : "",
+    activePixel: active ? active.classList.contains("pixel-toggle") : false,
+    activeText: active ? active.textContent.trim() : ""
+  };
   return out;
 })()`;
 
@@ -244,7 +260,8 @@ const CONTRAST = `(function () {
 
 // Кнопка «Скачать»: сценарий poll() гоняем через window.__probe.dlState,
 // tick() сам подхватит состояние за ~200 мс. Проверяем заливку, проценты,
-// SVG-иконки итога, возврат в idle через 2 с и блокировку «Отмены».
+// SVG-иконки итога, возврат в idle через 2 с и блокировку «Отмены». Своей
+// подсказки у кнопки нет: состояние объясняет доступное имя (aria-label).
 const DL_SET = (st) => `(function () { window.__probe.dlState = ${JSON.stringify(st)}; return true; })()`;
 const DL_READ = `(function () {
   var b = document.getElementById("download");
@@ -274,7 +291,7 @@ const DL_READ = `(function () {
              i.left >= r.left - 2 && i.right <= r.right + 2,
               i: [Math.round(i.left), Math.round(i.top), Math.round(i.width), Math.round(i.height)],
               b: [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]}; })(),
-    // состояние кнопки показывает наша подсказка, а не нативный title
+    // состояние кнопки объясняет доступное имя, а не нативная всплывашка
     tip: b.getAttribute("data-tip"), title: b.getAttribute("title") || "",
     aria: b.getAttribute("aria-label"),
     dlDisabled: b.disabled, stopDisabled: document.getElementById("stop").disabled,
@@ -571,13 +588,17 @@ async function waitForPage() {
       ["«Режим» — два коротких варианта", ftp.modeRu.n === 2 && ftp.modeRu.wide <= 0 &&
         ftp.modeRu.texts.every((x) => x && x.length <= 12)],
       ["выбран «пакет»", ftp.modeRu.value === "batch"],
-      ["у обоих вариантов подсказка из схемы и нет нативного title",
-        ftp.modeRu.tips[0] && ftp.modeRu.tips[0] === ftp.modeRu.tips[1] &&
-        ftp.modeRu.titles.every((x) => !x)],
       ["клик по варианту сохраняет значение", ftp.clicked.value === "per_file" &&
         ftp.saved && ftp.saved[0] === "ftp_mode" && ftp.saved[1] === "per_file"],
-      ["«Режим» переводится при смене языка", ftp.modeEn.texts.join("|") !== ftp.modeRu.texts.join("|") &&
-        ftp.modeEn.texts.every(Boolean)],
+      ["«Режим» и его подсказки переводятся при смене языка",
+        ftp.modeEn.texts.join("|") !== ftp.modeRu.texts.join("|") &&
+        ftp.modeEn.texts.every(Boolean) && ftp.modeEn.tips.every(Boolean) &&
+        ftp.modeEn.tips.join("|") !== ftp.modeRu.tips.join("|")],
+      ["у FTPS/сертификата/PASV есть подсказки", ftp.hints.tls.length > 0 &&
+        ftp.hints.tlsVerify.length > 0 && ftp.hints.pasv.length > 0],
+      ["выгрузка: пиксельный переключатель без подписи",
+        ftp.hints.activePixel && !ftp.hints.activeText &&
+        ftp.hints.activeAria.length > 0 && ftp.hints.activeTip.length > 0],
       ["нет переполнения и обрезки подписей", ftp.on.overflowX <= 0 && !ftp.clipped.length],
     ];
     ftpChecks.forEach(([name, okFlag]) => { if (!okFlag) fail(name); });
@@ -588,7 +609,49 @@ async function waitForPage() {
     console.log(`  «Режим» ${ftp.modeRu.n} [${ftp.modeRu.texts.join(" | ")}] = "${ftp.modeRu.value}"` +
       ` -> en ${ftp.modeEn.n} [${ftp.modeEn.texts.join(" | ")}]` +
       ` -> клик "${ftp.clicked.value}" сохранено=${JSON.stringify(ftp.saved)}`);
+    console.log(`  выгрузка: пиксельный=${ftp.hints.activePixel} подпись="${ftp.hints.activeText}" ` +
+      `aria="${ftp.hints.activeAria}" подсказка=${ftp.hints.activeTip.length > 0}; ` +
+      `подсказки: FTPS=${!!ftp.hints.tls.length} сертификат=${!!ftp.hints.tlsVerify.length} PASV=${!!ftp.hints.pasv.length}`);
     if (ftp.clipped.length) console.log(`        обрезано: ${ftp.clipped.join(", ")}`);
+
+    console.log("--- подсказки схемы ---");
+    const hints = await evaluate(`(function () {
+      switchSection("dl");
+      var trans = document.getElementById("transcode");
+      var transLabel = null;
+      if (trans) {
+        var labels = trans.parentElement.querySelectorAll("label[data-i18n]");
+        for (var i = 0; i < labels.length; i++) {
+          if (labels[i].htmlFor === "transcode") { transLabel = labels[i]; break; }
+        }
+      }
+      switchSection("ui");
+      var navItems = [].slice.call(document.querySelectorAll("#settings-nav .nav-item"));
+      var gear = document.getElementById("settings-btn");
+      var close = document.getElementById("settings-close");
+      var browse = document.getElementById("browse");
+      function tip(el) { return el ? el.getAttribute("data-tip") || "" : ""; }
+      return {
+        transcode: tip(transLabel),
+        navTips: navItems.map(tip),
+        gearTip: tip(gear), gearAria: gear ? gear.getAttribute("aria-label") || "" : "",
+        closeTip: tip(close), closeAria: close ? close.getAttribute("aria-label") || "" : "",
+        browseTip: tip(browse), browseIcon: browse ? !!browse.querySelector(".ico") : false
+      };
+    })()`);
+    const hintChecks = [
+      ["«Перекодировка»: подсказка есть", hints.transcode.length > 0],
+      ["разделы без подсказок", hints.navTips.every((x) => !x)],
+      ["шестерёнка без подсказки, имя для доступности есть",
+        !hints.gearTip && hints.gearAria.length > 0],
+      ["крестик без подсказки, имя для доступности есть",
+        !hints.closeTip && hints.closeAria.length > 0],
+      ["«Обзор…» без подсказки (текстовая кнопка)", !hints.browseTip && !hints.browseIcon],
+    ];
+    hintChecks.forEach(([name, okFlag]) => { if (!okFlag) fail(name); });
+    console.log(`  перекодировка=${hints.transcode.length > 0 ? "есть" : "нет"}; ` +
+      `разделы=${hints.navTips.filter(Boolean).length}; шестерёнка: подсказка=${!!hints.gearTip} aria="${hints.gearAria}"; ` +
+      `крестик: подсказка=${!!hints.closeTip} aria="${hints.closeAria}"; «Обзор…»: подсказка=${!!hints.browseTip}`);
 
     console.log("--- контраст элементов ---");
     const contrast = await evaluate(CONTRAST);
@@ -735,7 +798,7 @@ async function waitForPage() {
     await sleep(700);
     const after2 = await read();
     console.log(`  ${"через 2.6 с".padEnd(22)} класс="${after.cls}" процент="${after.pct}" ` +
-      `svg=${after.svg} подсказка="${after.tip}" native_title="${after.title}"` +
+      `svg=${after.svg} имя="${after.aria}" native_title="${after.title}"` +
       `${after.cls.indexOf("dl-idle") > -1 ? "" : "  <-- FAIL"}`);
     if (after.cls.indexOf("dl-idle") === -1) dlBad++;
     if (after2.cls.indexOf("dl-idle") === -1) { console.log(`        через 3.3 с снова "${after2.cls}"  <-- FAIL (мигает)`); dlBad++; }
@@ -760,7 +823,7 @@ async function waitForPage() {
 
     const checks = [
       ["idle: нет иконки, заливка 0", idle.svg === 0 && idle.fillPct === "0%" && idle.pct === ""],
-      ["idle: наша подсказка вместо нативного title", idle.tip === dlTitles.idle &&
+      ["idle: без подсказки и title, имя для доступности есть", !idle.tip &&
         idle.title === "" && idle.aria === dlTitles.idle],
       ["idle: кнопка активна", idle.dlDisabled === false && idle.stopDisabled === true],
       ["высота: подпись в потоке", all.every((m) => m.labelInFlow)],
@@ -783,17 +846,17 @@ async function waitForPage() {
         Math.abs(full.fillW - full.w) <= 2],
       ["ok: лайк, анимация, подпись", ok.svg === 1 && /dl-ok/.test(ok.cls) &&
         ok.iconAnim === "dl-pop" && ok.iconOpacity === 1 && ok.labelOpacity === 0 &&
-        ok.tip === dlTitles.done && ok.fillPct === "0%"],
+        !ok.tip && ok.aria === dlTitles.done && ok.fillPct === "0%"],
       ["error: восклицательный знак, «не всё»", err.svg === 1 && /dl-err/.test(err.cls) &&
-        err.iconAnim === "dl-shake" && err.tip === dlTitles.partial],
+        err.iconAnim === "dl-shake" && !err.tip && err.aria === dlTitles.partial],
       ["warn: тот же знак, своя подпись", warn.svg === 1 && /dl-warn/.test(warn.cls) &&
-        warn.iconAnim === "dl-shake" && warn.tip === dlTitles.warn && warn.shapes === err.shapes],
+        warn.iconAnim === "dl-shake" && !warn.tip && warn.aria === dlTitles.warn && warn.shapes === err.shapes],
       ["failed: крест и выпячивание", fail2.svg === 1 && fail2.shapes === 2 &&
         /dl-fail/.test(fail2.cls) && fail2.iconAnim === "dl-bulge" &&
-        fail2.tip === dlTitles.failed && fail2.iconOpacity === 1 && fail2.labelOpacity === 0],
+        !fail2.tip && fail2.aria === dlTitles.failed && fail2.iconOpacity === 1 && fail2.labelOpacity === 0],
       ["failed: другой цвет и знак, чем у «!»", fail2.color !== err.color && fail2.color !== idle.color],
       ["cancelled: знак стоп", cancel.svg === 1 && cancel.shapes >= 2 && /dl-cancel/.test(cancel.cls) &&
-        cancel.iconAnim === "dl-pop" && cancel.tip === dlTitles.cancelled],
+        cancel.iconAnim === "dl-pop" && !cancel.tip && cancel.aria === dlTitles.cancelled],
       ["иконка помещается в кнопку", ok.iconIn.ok && err.iconIn.ok && warn.iconIn.ok &&
         fail2.iconIn.ok && cancel.iconIn.ok ||
         `ok=${JSON.stringify(ok.iconIn)} err=${JSON.stringify(err.iconIn)} ` +
@@ -822,12 +885,12 @@ async function waitForPage() {
     await sleep(500);
     const done = await read();
     console.log(`  отмена: до=${before.stopDisabled} нажатие=${pressed.stopDisabled} ` +
-      `после_завершения=${done.stopDisabled} итог="${done.tip}" svg=${done.svg}`);
+      `после_завершения=${done.stopDisabled} итог="${done.aria}" svg=${done.svg}`);
     if (before.stopDisabled !== false || pressed.stopDisabled !== true || done.stopDisabled !== true) {
       console.log("        FAIL: «Отмена» активна только пока идёт загрузка");
       dlBad++;
     }
-    if (done.svg !== 1 || done.tip !== dlTitles.cancelled) {
+    if (done.svg !== 1 || done.aria !== dlTitles.cancelled) {
       console.log("        FAIL: после отмены ожидался знак стоп");
       dlBad++;
     }

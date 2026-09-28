@@ -112,10 +112,31 @@
       return {nodes: [note]};
     }
     if (spec.type === "bool" && spec.check) {
-      var check = el("div", "check");
+      var check = el("div", "check" + (spec.pixel ? " pixel-toggle" : ""));
       var box = el("input", null, {type: "checkbox", id: spec.dom});
       check.appendChild(box);
-      check.appendChild(caption(spec.label));
+      // у обычного чекбокса подсказка живёт на подписи
+      if (!spec.no_label) {
+        var cap = caption(spec.label);
+        if (spec.title) {
+          cap.setAttribute("data-i18n-tip", spec.title);
+          setTip(cap, t(spec.title));
+        }
+        check.appendChild(cap);
+      }
+      // пиксельный переключатель без подписи: смысл - в подсказке и в aria
+      if (spec.pixel) {
+        var px = el("svg", "px", {viewBox: "0 0 40 20", width: "44", height: "22",
+                                  "aria-hidden": "true"});
+        px.innerHTML = '<rect class="px-track" x="1" y="1" width="38" height="18"></rect>'
+          + '<g class="px-knob">'
+          + '<rect class="px-knob-fill" x="3" y="3" width="12" height="12"></rect>'
+          + '<polyline class="px-check" points="6.5 9.5 9 12 13 6.5"></polyline></g>';
+        check.appendChild(px);
+        check.setAttribute("data-i18n-aria", spec.label);
+        check.setAttribute("data-i18n-tip", spec.title || spec.label);
+        setTip(check, t(spec.title || spec.label));
+      }
       return {nodes: [check], input: box, get: function() { return box.checked; },
               set: function(v) { box.checked = v !== false && !!v; }};
     }
@@ -129,9 +150,11 @@
       (spec.options || []).forEach(function(o) {
         var b = el("button", null, {type: "button", "data-value": o[0], "data-i18n": o[1]});
         b.textContent = t(o[1]);
-        if (spec.title) {
-          b.setAttribute("data-i18n-tip", spec.title);
-          setTip(b, t(spec.title));
+        // у каждого варианта режима своя подсказка (option_hints в схеме)
+        var hintKey = spec.option_hints && spec.option_hints[o[0]];
+        if (hintKey) {
+          b.setAttribute("data-i18n-tip", hintKey);
+          setTip(b, t(hintKey));
         }
         b.addEventListener("click", function() {
           var key = spec.path || spec.dom;
@@ -177,16 +200,20 @@
   }
   // Кнопка действия: с иконкой - только иконка (смысл в подсказке), без иконки
   // - подпись. Текст убираем не всегда: у «Обзор…» и «Проверить подключение»
-  // своей иконки нет, и голый значок был бы непонятен.
+  // своей иконки нет, и голый значок был бы непонятен. Подсказка есть только у
+  // кнопок с иконкой: у текстовых смысл уже виден в подписи.
   function renderButton(b) {
     var svg = b.icon ? iconSvg(b.icon) : "";
     var btn = el("button", svg ? "act-btn ico-" + b.icon : null,
-                 {type: "button", id: b.dom, "data-i18n-tip": b.label});
+                 {type: "button", id: b.dom});
     if (svg) {
       var ico = el("span", "ico");
       ico.innerHTML = svg;
       btn.appendChild(ico);
-      setTip(btn, t(b.label));
+      if (b.label) {
+        btn.setAttribute("data-i18n-tip", b.label);
+        setTip(btn, t(b.label));
+      }
     } else {
       btn.appendChild(caption(b.label));
     }
@@ -215,8 +242,6 @@
     groups.forEach(function(group, gi) {
       var item = el("button", gi ? "nav-item" : "nav-item active", {type: "button", id: "nav-" + group.id});
       item.appendChild(caption(group.label));
-      item.setAttribute("data-i18n-tip", group.label);
-      setTip(item, t(group.label));
       item.addEventListener("click", function() { switchSection(group.id); });
       nav.appendChild(item);
 
@@ -340,21 +365,6 @@
       var first = sel.querySelector("option");
       sel.value = first ? first.value : "";
     }
-    updateThemeMeta();
-  }
-
-  // Метаданные темы (автор/версия) и предупреждения валидации theme.json.
-  function updateThemeMeta() {
-    var box = document.getElementById("theme-meta");
-    if (!box) return;
-    var sel = document.getElementById("theme");
-    var th = THEMES[(sel && sel.value) || ""] || {};
-    var parts = [];
-    if (th.label) parts.push(th.label);
-    if (th.author) parts.push(t("theme.meta.author").replace("{name}", th.author));
-    if (th.version) parts.push(t("theme.meta.version").replace("{v}", th.version));
-    box.textContent = parts.join(" · ");
-    box.hidden = parts.length === 0;
   }
   function buildSubsOptions() { fillSelect("subs", fieldOptions("dl.subtitles")); }
   function buildQualOptions() { fillSelect("qual", fieldOptions("dl.quality")); }
@@ -469,7 +479,7 @@
     "browse": async function() {
       var picked = await pywebview.api.browse_folder();
       if (picked) {
-        panelFields["ui.dest"].set(picked);
+        panelFields["dl.dest"].set(picked);
         pywebview.api.set_dest(picked);
       }
     },
@@ -508,7 +518,7 @@
     var spec = panelFields[key].spec;
     if (spec.setting) pywebview.api.save_setting(spec.setting, value);
     // папка загрузки - не настройка: Python помнит её до конца сеанса
-    if (spec.path === "ui.dest") pywebview.api.set_dest(value);
+    if (spec.path === "dl.dest") pywebview.api.set_dest(value);
     applyVisibility();
     refreshNotes();
   }
@@ -586,7 +596,6 @@
     // тема: часть тем со своим entry собирается в Python (пересборка страницы),
     // остальные применяются на лету
     onChange("ui.theme", function(node, spec) {
-      updateThemeMeta();
       var th = THEMES[node.value] || {};
       if (th.entry) {
         pywebview.api.set_theme(node.value);
@@ -599,7 +608,6 @@
     onChange("ui.language", function(node, spec) {
       curLang = node.value;
       applyI18n();
-      updateThemeMeta();
       applyTheme(themeKey());
       pywebview.api.save_setting(spec.setting, node.value);
     });
@@ -614,7 +622,6 @@
       THEMES = newThemes;
       buildThemeOptions();
       fillSettings();
-      updateThemeMeta();
       flashDone(btn);
     }).catch(function(e) { console.error("reload themes:", e); });
   }

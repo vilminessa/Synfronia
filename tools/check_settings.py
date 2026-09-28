@@ -42,15 +42,15 @@ from ftp import FtpConfig  # noqa: E402
 # Схема обязана выдавать ровно этот набор: пока он не сгенерирован, список
 # служит контрактом для следующих этапов (генерация панели).
 LEGACY_DOM = {
-    # вкладка «Интерфейс»
-    "lang", "theme", "theme-meta", "reload-themes", "download-themes", "themes-dl-note",
-    "open-themes", "dest", "browse",
+    # раздел «Интерфейс»
+    "lang", "theme", "reload-themes", "download-themes", "themes-dl-note",
+    "open-themes",
     "font-sans", "font-mono", "font-note", "font-dl-note",
     "reload-fonts", "download-fonts", "open-fonts",
-    # вкладка «Загрузчик»
-    "subs", "qual", "transcode", "transcode-note",
+    # раздел «Загрузчик»
+    "subs", "qual", "transcode", "transcode-note", "dest", "browse",
     "retries", "retries-range", "socket_timeout", "socket_timeout-range",
-    # вкладка «FTP»
+    # раздел «FTP»
     "ftp-active", "ftp-mode", "ftp-host", "ftp-port", "ftp-user", "ftp-password",
     "ftp-tls", "ftp-tls-verify", "ftp-pasv", "ftp-delete-local", "ftp-dir",
     "ftp-dir-note", "ftp-template", "ftp-timeout", "ftp-retries",
@@ -136,6 +136,9 @@ def _i18n_keys() -> set:
             for name in ("label", "title", "note"):
                 if spec.get(name):
                     keys.add(spec[name])
+            for hint in (spec.get("option_hints") or {}).values():
+                if hint:
+                    keys.add(hint)
             for value, caption in spec.get("options", []):
                 if caption in i18n.I18N.get("ru", {}):  # подпись-ключ, а не текст
                     keys.add(caption)
@@ -396,7 +399,7 @@ def main() -> int:
        "главное окно и карточка следят за ui_rev")
     ok("var curTheme" in common_js and "curTheme ||" in common_js,
        "активная тема хранится в общем коде, а не берётся из селекта окна")
-    ok("ui.dest" in settings_js and "set_dest" in settings_js,
+    ok("dl.dest" in settings_js and "set_dest" in settings_js,
        "папка загрузки уходит в Python через set_dest")
     for ph in ("__THEME_ROOT__", "__THEME_CSS__", "__FONTS_CSS__", "__APP_CSS__"):
         ok(ph in main_html, f"{ph} подставляется в шаблон")

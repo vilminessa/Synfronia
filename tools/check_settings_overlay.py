@@ -289,6 +289,8 @@ def main() -> int:
     ok("self._dest or str(default_download_dir())" in src,
        "без выбора берётся папка загрузок по умолчанию")
     ok(not gui.settings_schema.has("ui.dest"), "в схеме нет сохраняемой настройки ui.dest")
+    ok(not gui.settings_schema.has("dl.dest"), "папка загрузки - не настройка (transient)")
+    ok(gui.settings_schema.field("dl.dest")[0]["id"] == "dl", "папка живёт в разделе «Загрузчик»")
 
     # 7. границы между слоями
     section("7. главное окно и карточка не мешают друг другу")

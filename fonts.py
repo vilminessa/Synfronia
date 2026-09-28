@@ -429,7 +429,7 @@ def download_test_fonts(names=None, on_log=None, on_progress=None) -> dict:
                 report("error", f"fonts: {meta['family']} не сохранён ({exc})")
         else:
             result["failed"].append(name)
-            report("error", f"fonts: {meta['family']} — ответ не похож на шрифт, отброшен")
+            report("error", f"fonts: {meta['family']} · ответ не похож на шрифт, отброшен")
         # при отказе убираем мусор: битый .part-*.ttf иначе попал бы в список шрифтов
         _unlink(tmp)
         if on_progress:
@@ -481,7 +481,7 @@ def _face_for(path: Path) -> dict | None:
     except OSError:
         return None
     if size > MAX_FONT_BYTES:
-        _file_log("warning", f"font {path.name}: {size} байт — пропущен (слишком большой)")
+        _file_log("warning", f"font {path.name}: {size} байт · пропущен (слишком большой)")
         return None
     try:
         data = path.read_bytes()
@@ -609,7 +609,7 @@ def font_css(families) -> str:
                 continue
             seen.add(key)
             if total + len(face["uri"]) > MAX_TOTAL_BYTES:
-                _file_log("warning", f"font {face['file']}: не встроен — превышен лимит "
+                _file_log("warning", f"font {face['file']}: не встроен · превышен лимит "
                                      f"{MAX_TOTAL_BYTES // (1024 * 1024)} МБ на страницу")
                 continue
             total += len(face["uri"])
