@@ -9,6 +9,8 @@
   "language": "en",
   "font_sans": "",
   "font_mono": "",
+  "tip_pull": 50,
+  "tip_repel": 100,
   "ftp_active": false,
   "ftp_mode": "batch",
   "ftp_host": "",

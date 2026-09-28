@@ -64,7 +64,7 @@ CORE_GROUPS = [
         "id": "ui",
         "label": "sheet.tab.ui",
         "order": 10,
-        "boxes": {"look": "sheet.ui.look"},
+        "boxes": {"look": "sheet.ui.look", "tips": "sheet.ui.tips"},
         "fields": [
             {"key": "language", "type": "choice", "label": "sheet.lang.label",
              "default": "en", "options_source": "langs", "dom": "lang", "live": True},
@@ -88,6 +88,18 @@ CORE_GROUPS = [
                 {"dom": "open-fonts", "icon": "folder", "label": "sheet.font.open"},
             ]},
             {"type": "note", "transient": True, "dom": "font-dl-note", "hidden": True},
+            # «магнитные» подсказки: две силы 0..100 (см. TIP_FORCE в common.js),
+            # дефолты повторяют прежнее поведение - pull 50, repel 100
+            {"key": "tip_pull", "type": "int", "label": "sheet.ui.tip_pull",
+             "default": 50, "min": 0, "max": 100, "step": 5, "row": 1,
+             "box": "tips", "mirror": "range", "live": True,
+             "dom": "tip-pull", "dom_range": "tip-pull-range",
+             "title": "sheet.ui.tip_pull.hint"},
+            {"key": "tip_repel", "type": "int", "label": "sheet.ui.tip_repel",
+             "default": 100, "min": 0, "max": 100, "step": 5, "row": 2,
+             "box": "tips", "mirror": "range", "live": True,
+             "dom": "tip-repel", "dom_range": "tip-repel-range",
+             "title": "sheet.ui.tip_repel.hint"},
         ],
     },
 ]

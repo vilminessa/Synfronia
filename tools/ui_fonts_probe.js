@@ -610,6 +610,121 @@ async function waitForPage() {
       `нить=${tip.thread} наконечник_у_элемента=${tip.onBorder} ` +
       `следует_за_курсором=${bigMoved && bigEnd.settled} скрыта_после_ухода=${goneOk}`);
 
+    // Магнитные силы подсказок (карточка «Подсказки» раздела «Интерфейс»):
+    // поля есть и переводятся, дефолты 50/100, правка сохраняется и применяется
+    // сразу, а поведение правда меняется: repel держит подсказку вне элемента,
+    // pull ускоряет схождение за курсором.
+    console.log("--- силы подсказок ---");
+    const forceFields = await evaluate(`(function () {
+      var pull = document.getElementById("tip-pull"), repel = document.getElementById("tip-repel");
+      var pr = document.getElementById("tip-pull-range"), rr = document.getElementById("tip-repel-range");
+      function tipAttr(n) { return n ? (n.getAttribute("data-i18n-tip") || "") : ""; }
+      var row = pull ? pull.closest(".range-row") : null;
+      return {pull: !!pull, repel: !!repel, range: !!pr && !!rr,
+              pullType: pull ? pull.type : "",
+              pullTip: tipAttr(pull), repelTip: tipAttr(repel),
+              label: row ? !!row.querySelector("label") : false,
+              force: {pull: TIP_FORCE.pull, repel: TIP_FORCE.repel}};
+    })()`);
+    const forceChecks = [
+      ["поля сил подсказок есть (число + ползунок)",
+        forceFields.pull && forceFields.repel && forceFields.range &&
+        forceFields.pullType === "number" && forceFields.label],
+      ["поля сил подсказок переведены", forceFields.pullTip.length > 0 && forceFields.repelTip.length > 0],
+      ["силы по умолчанию 50/100",
+        forceFields.force.pull === 50 && forceFields.force.repel === 100],
+    ];
+    forceChecks.forEach(([name, okFlag]) => { if (!okFlag) fail(name); });
+    const forceSaved = await evaluate(`(function () {
+      window.__probe.saved = [];
+      var n = document.getElementById("tip-pull");
+      n.value = "85"; n.dispatchEvent(new Event("change"));
+      return {saved: window.__probe.saved.slice(-1)[0], pull: TIP_FORCE.pull};
+    })()`);
+    if (!forceSaved.saved || forceSaved.saved[0] !== "tip_pull" || +forceSaved.saved[1] !== 85) {
+      fail("правка силы притяжения не сохраняется");
+    }
+    if (forceSaved.pull !== 85) fail("сила притяжения не применилась сразу после правки");
+    // поведение: временная кнопка под курсором, замер перекрытия и скорости.
+    // Кнопка стоит высоко: окно пробника низкое, прижатие к нижнему краю окна
+    // (clamp) не даст вытолкнуть подсказку вниз и проверка соврала бы.
+    await evaluate(`(function () {
+      var b = document.createElement("button");
+      b.id = "probe-tip-force";
+      b.setAttribute("data-tip", "проверка сил");
+      b.style.cssText = "position:fixed;left:40px;top:120px;width:360px;height:80px;z-index:2147483000;";
+      document.body.appendChild(b);
+      return true;
+    })()`);
+    const forceBtn = await evaluate(`(function () {
+      var b = document.getElementById("probe-tip-force").getBoundingClientRect();
+      return {cx: Math.round(b.left + b.width / 2), cy: Math.round(b.top + b.height / 2)};
+    })()`);
+    // Силы задаются через стаб настроек, а не только setTipForces: poll() каждые
+    // 200 мс возвращает TIP_FORCE из настроек и затирал бы временные значения.
+    async function setForces(pull, repel) {
+      await evaluate(`(function () {
+        pywebview.api.save_setting("tip_pull", ${pull});
+        pywebview.api.save_setting("tip_repel", ${repel});
+        setTipForces(${pull}, ${repel});
+        var a = document.getElementById("tip-pull"), b = document.getElementById("tip-repel");
+        if (a) a.value = ${pull};
+        if (b) b.value = ${repel};
+        return TIP_FORCE.pull + "/" + TIP_FORCE.repel;
+      })()`);
+    }
+    async function forceProbe(pull, repel) {
+      await setForces(pull, repel);
+      await mouseMove(forceBtn.cx - 9, forceBtn.cy - 7);   // встряска: иначе
+      await sleep(80);                                     // pointermove в точку
+      await mouseMove(forceBtn.cx, forceBtn.cy);           // не перезапускает кадры
+      await sleep(450);
+      return evaluate(`(function () {
+        var t = document.getElementById("tip"), el = document.getElementById("probe-tip-force");
+        var tr = t.getBoundingClientRect(), er = el.getBoundingClientRect();
+        var overlap = !(tr.right <= er.left || tr.left >= er.right ||
+                        tr.bottom <= er.top || tr.top >= er.bottom);
+        return {hidden: t.hidden, overlap: overlap,
+                tx: TIP.tx, ty: TIP.ty,
+                force: {pull: TIP_FORCE.pull, repel: TIP_FORCE.repel},
+                rect: [Math.round(tr.left), Math.round(tr.top),
+                       Math.round(tr.width), Math.round(tr.height)]};
+      })()`);
+    }
+    const repelOff = await forceProbe(50, 0);
+    if (repelOff.hidden || !repelOff.overlap) {
+      fail("repel=0 не ослабляет отталкивание (подсказка не ляжет на элемент)");
+    }
+    const repelOn = await forceProbe(50, 100);
+    if (repelOn.hidden || repelOn.overlap) {
+      fail("repel=100 не держит подсказку вне элемента " + JSON.stringify(repelOn));
+    }
+    // pull: подсказка уже показана на кнопке, прыжок курсора внутри неё -
+    // хвост расстояния через 150 мс должен быть больше при слабом притяжении
+    async function lagAt(pull) {
+      await setForces(pull, 100);
+      await mouseMove(forceBtn.cx - 90, forceBtn.cy + 10);
+      await sleep(500);                                  // показ и схождение
+      await mouseMove(forceBtn.cx + 90, forceBtn.cy + 10);
+      await sleep(150);
+      return evaluate('({lag: Math.hypot(TIP.tx - TIP.x, TIP.ty - TIP.y), ' +
+        'pull: TIP_FORCE.pull, ' +
+        'hidden: document.getElementById("tip").hidden, ' +
+        'shown: document.getElementById("tip").classList.contains("tip-on")})');
+    }
+    const lagLow = await lagAt(0), lagHigh = await lagAt(100);
+    if (!(lagLow.lag > lagHigh.lag + 4)) {
+      fail(`притяжение не влияет на скорость: pull=0 -> ${lagLow.lag.toFixed(1)}px, ` +
+           `pull=100 -> ${lagHigh.lag.toFixed(1)}px ` + JSON.stringify({lagLow, lagHigh}));
+    }
+    await setForces(50, 100);                            // вернуть дефолты
+    await evaluate('var b = document.getElementById("probe-tip-force"); if (b) b.remove(); true');
+    await mouseMove(12, 12);
+    await sleep(200);
+    console.log(`  поля=есть сохранение=${JSON.stringify(forceSaved.saved)} ` +
+      `repel: 0->на_элементе=${repelOff.overlap} 100->вне=${!repelOn.overlap} ` +
+      `pull хвост: 0=${lagLow.lag.toFixed(1)}px 100=${lagHigh.lag.toFixed(1)}px`);
+
     console.log("--- раздел FTP ---");
     const ftp = await evaluate(FTP_VIS);
     const ftpChecks = [

@@ -87,6 +87,20 @@
   var TIP_TAU = 70;      // постоянная времени инерции (мс): меньше - короче хвост
   var TIP_HEAD_LEN = 7;  // длина наконечника-стрелки
   var TIP_HEAD_W = 3.5;  // половина ширины наконечника
+  // «Магнитные» силы подсказки - две настройки 0..100 (карточка «Подсказки»).
+  // Дефолты повторяют прежнее поведение: pull 50 - прежняя инерция,
+  // repel 100 - выталкивание из рамки элемента сразу и целиком.
+  var TIP_FORCE = {pull: 50, repel: 100};
+  function setTipForces(pull, repel) {
+    var p = Number(pull), r = Number(repel);
+    if (isFinite(p)) TIP_FORCE.pull = Math.max(0, Math.min(100, p));
+    if (isFinite(r)) TIP_FORCE.repel = Math.max(0, Math.min(100, r));
+    // подсказка может стоять «на месте» (кадры остановлены после схождения) -
+    // без толчка новая сила применится только при следующем движении мыши
+    if (TIP.target && TIP.raf === 0 && !reducedMotion()) {
+      TIP.raf = requestAnimationFrame(tipFrame);
+    }
+  }
 
   function reducedMotion() {
     return window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -145,17 +159,22 @@
       dx = TIP.cx + TIP_OFF_X;
       dy = TIP.cy + TIP_OFF_Y;
       // вытолкнуть из раздутой рамки элемента по наименьшей грани - тогда нить
-      // всегда короткая и указывает на бордюр, а подсказка не перекрывает его
-      var left = r.left - TIP_GAP, top = r.top - TIP_GAP;
-      var right = r.right + TIP_GAP, bottom = r.bottom + TIP_GAP;
+      // всегда короткая и указывает на бордюр, а подсказка не перекрывает его.
+      // Сила отталкивания (repel) управляет и зазором, и жёсткостью: 100 -
+      // выталкивает сразу целиком (прежнее поведение), меньше - подсказка
+      // «магнитит» к элементу и может заходить на рамку вполовину.
+      var gap = 2 + 0.16 * TIP_FORCE.repel;
+      var left = r.left - gap, top = r.top - gap;
+      var right = r.right + gap, bottom = r.bottom + gap;
       if (dx < right && dx + w > left && dy < bottom && dy + h > top) {
         var pushL = right - dx, pushR = dx + w - left;
         var pushT = bottom - dy, pushB = dy + h - top;
         var m = Math.min(pushL, pushR, pushT, pushB);
-        if (m === pushL) dx = right;
-        else if (m === pushR) dx = left - w;
-        else if (m === pushT) dy = bottom;
-        else dy = top - h;
+        var s = TIP_FORCE.repel / 100;
+        if (m === pushL) dx += (right - dx) * s;
+        else if (m === pushR) dx += (left - w - dx) * s;
+        else if (m === pushT) dy += (bottom - dy) * s;
+        else dy += (top - h - dy) * s;
       }
     }
     dx = Math.max(TIP_MARGIN, Math.min(dx, window.innerWidth - w - TIP_MARGIN));
@@ -220,7 +239,8 @@
     if (!TIP.lastT) TIP.lastT = now;
     var dt = Math.min(50, Math.max(1, now - TIP.lastT));
     TIP.lastT = now;
-    var k = 1 - Math.exp(-dt / TIP_TAU);
+    // притяжение к курсору: множитель к инерции (pull 50 = прежний темп)
+    var k = (1 - Math.exp(-dt / TIP_TAU)) * (0.5 + TIP_FORCE.pull / 100);
     TIP.x += (TIP.tx - TIP.x) * k;
     TIP.y += (TIP.ty - TIP.y) * k;
     var settled = Math.abs(TIP.tx - TIP.x) < 0.5 && Math.abs(TIP.ty - TIP.y) < 0.5;

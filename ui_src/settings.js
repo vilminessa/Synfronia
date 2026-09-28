@@ -537,11 +537,20 @@
     if (spec.value_source) return extra[spec.value_source];
     return (extra.settings || {})[spec.setting];
   }
+  // Силы подсказок (common.js, TIP_FORCE) применяются сразу при правке поля,
+  // а не с задержкой poll(): fillSettings пропускает поле в фокусе, поэтому
+  // пока тянут слайдер, значения едут в общий движок напрямую.
+  function syncTipForces() {
+    var pull = panelFields["ui.tip_pull"], repel = panelFields["ui.tip_repel"];
+    setTipForces(pull && pull.get ? pull.get() : undefined,
+                 repel && repel.get ? repel.get() : undefined);
+  }
   function saveValue(key, value) {
     var spec = panelFields[key].spec;
     if (spec.setting) pywebview.api.save_setting(spec.setting, value);
     // папка загрузки - не настройка: Python помнит её до конца сеанса
     if (spec.path === "dl.dest") pywebview.api.set_dest(value);
+    syncTipForces();
     applyVisibility();
     refreshNotes();
   }
@@ -576,6 +585,8 @@
         f.range.addEventListener("input", function() {
           node.value = this.value;
           if (spec.setting) pywebview.api.save_setting(spec.setting, this.value);
+          // при перетаскивании силы подсказок применяются на лету
+          syncTipForces();
         });
       }
     });
@@ -777,6 +788,7 @@
     bindSettings();
     applySettingsI18n();
     fillSettings();
+    syncTipForces();
     applyVisibility();
     refreshNotes();
   }
@@ -799,6 +811,7 @@
       applySettingsI18n();
     }
     fillSettings();
+    syncTipForces();
     applyVisibility();
     if (typeof st.ui_rev === "number" && st.ui_rev !== uiRev) {
       uiRev = st.ui_rev;
