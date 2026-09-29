@@ -22,7 +22,18 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
-const EDGE = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
+// Кандидаты: путь к Edge зависит от разрядности Windows и версии - на CI
+// и чужих машинах может быть другим.
+const EDGE_CANDIDATES = [
+  "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+  "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+  "C:\\Program Files (x86)\\Microsoft\\Edge Dev\\Application\\msedge.exe",
+];
+const EDGE = EDGE_CANDIDATES.find((p) => fs.existsSync(p));
+if (!EDGE) {
+  console.error("msedge.exe не найден, пробовали:\n  " + EDGE_CANDIDATES.join("\n  "));
+  process.exit(1);
+}
 // Всё служебное пробника - в %LOCALAPPDATA%\Synfronia\probe, в %TEMP% ничего
 // не пишем (страница и профили headless Edge).
 const PROBE_DIR = path.join(process.env.LOCALAPPDATA, "Synfronia", "probe");

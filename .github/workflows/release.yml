@@ -1,0 +1,134 @@
+# Релизы по тегам: проверки -> сборка exe -> публикация в релиз -> SLSA-провенанс.
+# Пробный запуск: workflow_dispatch (ветка вручную) - пройдут verify и build,
+# публикация и провенанс выполняются только на тегах v*.
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: проверки перед сборкой
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+          cache: pip
+      - name: Зависимости
+        run: python -m pip install -r requirements.txt
+      - name: ui.py собран из ui_src
+        run: python tools/build_ui.py --check
+      - name: Синтаксис JS
+        shell: bash
+        run: |
+          node --check ui_src/app.js
+          node --check ui_src/settings.js
+          node --check ui_src/common.js
+          node --check tools/ui_fonts_probe.js
+      - name: Проверки схемы, UI и инструментов
+        run: |
+          python tools/check_settings.py
+          python tools/check_settings_overlay.py
+          python tools/check_download_button.py
+          python tools/check_test_fonts.py
+          python tools/check_tools_output.py
+          python tools/check_debug.py
+      - name: Пробники вёрстки (headless Edge)
+        run: |
+          python tools/ui_probe_page.py
+          node tools/ui_fonts_probe.js
+          node tools/ui_themes_probe.js
+
+  build:
+    name: сборка Synfronia.exe
+    needs: verify
+    runs-on: windows-latest
+    outputs:
+      digests: ${{ steps.hash.outputs.digests }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+          cache: pip
+      - name: Зависимости
+        run: python -m pip install -r requirements.txt
+      - name: Пересборка страницы и exe
+        run: |
+          python tools/build_ui.py
+          python tools/build_ui.py --check
+          python -m PyInstaller Synfronia.spec --distpath . --workpath build --noconfirm
+      - name: Проверка артефакта
+        shell: bash
+        run: python -c "import os; s = os.path.getsize('Synfronia.exe'); print('Synfronia.exe', s, 'байт'); assert s > 25_000_000, s"
+      - name: Хеш артефакта (формат sha256sum, base64 - для SLSA)
+        id: hash
+        shell: bash
+        run: |
+          python -c "import hashlib, base64; h = hashlib.sha256(); f = open('Synfronia.exe', 'rb'); [h.update(c) for c in iter(lambda: f.read(1048576), b'')]; open('digests.b64', 'w').write(base64.b64encode((h.hexdigest() + '  Synfronia.exe\n').encode()).decode())"
+          echo "digests=$(cat digests.b64)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Synfronia-exe
+          path: Synfronia.exe
+          if-no-files-found: error
+          retention-days: 5
+
+  python-publish:
+    name: публикация exe в релиз
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: Synfronia-exe
+      - name: Создать/обновить релиз тега
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" Synfronia.exe --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" Synfronia.exe --repo "$GITHUB_REPOSITORY" \
+              --title "$GITHUB_REF_NAME" \
+              --notes "Автоматическая сборка (CI). Провенанс SLSA прикладывается отдельным джобом."
+          fi
+
+  generator-generic-ossf-slsa3-publish:
+    name: SLSA-провенанс
+    needs: [build, python-publish]
+    permissions:
+      id-token: write
+      contents: write
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    with:
+      base64-subjects: "${{ needs.build.outputs.digests }}"
+      upload-assets: true
+
+  verify-attestation:
+    name: проверка подписи
+    needs: generator-generic-ossf-slsa3-publish
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      attestations: read
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: Synfronia-exe
+      - name: gh attestation verify
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh attestation verify Synfronia.exe --repo "$GITHUB_REPOSITORY"
