@@ -857,13 +857,24 @@ async function waitForPage() {
       fail(`притяжение не влияет на скорость: pull=0 -> ${lagLow.lag.toFixed(1)}px, ` +
            `pull=100 -> ${lagHigh.lag.toFixed(1)}px ` + JSON.stringify({lagLow, lagHigh}));
     }
+    // прогрессия притяжения: на том же repel подсказка при pull=0 стоит
+    // заметно дальше курсора (центр кнопки), чем при pull=100
+    const far = await forceProbe(0, 100);
+    const near = await forceProbe(100, 100);
+    const distCur = (p) => Math.hypot(p.rect[0] + p.rect[2] / 2 - forceBtn.cx,
+                                      p.rect[1] + p.rect[3] / 2 - forceBtn.cy);
+    if (far.hidden || near.hidden || !(distCur(far) > distCur(near) + 15)) {
+      fail("pull не меняет расстояние до курсора в прогрессии: " +
+           JSON.stringify({far: Math.round(distCur(far)), near: Math.round(distCur(near))}));
+    }
     await setForces(50, 100);                            // вернуть дефолты
     await evaluate('var b = document.getElementById("probe-tip-force"); if (b) b.remove(); true');
     await mouseMove(12, 12);
     await sleep(200);
     console.log(`  поля=есть сохранение=${JSON.stringify(forceSaved.saved)} ` +
       `repel: 0->на_элементе=${repelOff.overlap} 100->вне=${!repelOn.overlap} ` +
-      `pull хвост: 0=${lagLow.lag.toFixed(1)}px 100=${lagHigh.lag.toFixed(1)}px`);
+      `pull хвост: 0=${lagLow.lag.toFixed(1)}px 100=${lagHigh.lag.toFixed(1)}px ` +
+      `дистанция: 0=${Math.round(distCur(far))}px 100=${Math.round(distCur(near))}px`);
 
     console.log("--- раздел FTP ---");
     const ftp = await evaluate(FTP_VIS);
