@@ -257,6 +257,10 @@ const FTP_VIS = `(function () {
     activeAria: active ? active.getAttribute("aria-label") || "" : "",
     activeTip: active ? active.getAttribute("data-tip") || "" : "",
     activePixel: active ? active.classList.contains("pixel-toggle") : false,
+    // rect носителя data-tip = куда целится нить подсказки: бокс обязан
+    // обнимать тумблер (40x20), а не тянуться на всю строку карточки
+    activeBox: active ? [Math.round(active.getBoundingClientRect().width),
+                         Math.round(active.getBoundingClientRect().height)] : [0, 0],
     activeText: active ? active.textContent.trim() : "",
     pxNs: pxNs, pxKidsNs: pxKidsNs, trackRect: pxRect(".px-track"),
     knobRect: pxRect(".px-knob-fill"),
@@ -777,6 +781,8 @@ async function waitForPage() {
       ["выгрузка: пиксельный переключатель без подписи",
         ftp.hints.activePixel && !ftp.hints.activeText &&
         ftp.hints.activeAria.length > 0 && ftp.hints.activeTip.length > 0],
+      ["бокс подсказки тумблера обнимает переключатель, а не строку карточки",
+        ftp.hints.activeBox[0] <= 48 && ftp.hints.activeBox[1] <= 28],
       ["тумблер рисуется: SVG-namespace и размеры фигур > 0",
         ftp.hints.pxNs === "http://www.w3.org/2000/svg" &&
         ftp.hints.pxKidsNs.length === 4 &&
@@ -800,7 +806,8 @@ async function waitForPage() {
       ` -> en ${ftp.modeEn.n} [${ftp.modeEn.texts.join(" | ")}]` +
       ` -> клик "${ftp.clicked.value}" сохранено=${JSON.stringify(ftp.saved)}`);
     console.log(`  выгрузка: пиксельный=${ftp.hints.activePixel} подпись="${ftp.hints.activeText}" ` +
-      `aria="${ftp.hints.activeAria}" подсказка=${ftp.hints.activeTip.length > 0}; ` +
+      `aria="${ftp.hints.activeAria}" подсказка=${ftp.hints.activeTip.length > 0} ` +
+      `бокс=${ftp.hints.activeBox.join("x")}; ` +
       `svg-ns=${ftp.hints.pxNs === "http://www.w3.org/2000/svg" ? "ok" : "BAD"} ` +
       `дорожка=${ftp.hints.trackRect.join("x")} ползунок=${ftp.hints.knobRect.join("x")}; ` +
       `цвета: дорожка=${ftp.hints.trackFill}/${ftp.hints.trackStroke} ползунок ${ftp.hints.knobOff}->${ftp.hints.knobOn}` +
