@@ -68,7 +68,7 @@ jobs:
           python -m PyInstaller Synfronia.spec --distpath . --workpath build --noconfirm
       - name: Проверка артефакта
         shell: bash
-        run: python -c "import os; s = os.path.getsize('Synfronia.exe'); print('Synfronia.exe', s, 'байт'); assert s > 25_000_000, s"
+        run: python -c "import os; s = os.path.getsize('Synfronia.exe'); print('Synfronia.exe', s, 'bytes'); assert s > 25_000_000, s"
       - name: Хеш артефакта (формат sha256sum, base64 - для SLSA)
         id: hash
         shell: bash
