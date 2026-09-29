@@ -616,6 +616,40 @@ async function waitForPage() {
     } else {
       fail("подсказка не потянулась за курсором");
     }
+    // Орбита: курсор по осям - подсказка переходит на другие грани, и нить
+    // после перехода целится в грань, а не в угол. Слева у кнопки (left: 40)
+    // нет места - там подсказка уходит на смежную грань, поэтому верх, право
+    // и низ.
+    const orbitSides = [];
+    for (const [ox, oy] of [[0, -30], [100, 0], [0, 30]]) {
+      await mouseMove(bigBtn.cx + ox, bigBtn.cy + oy);
+      await sleep(450);
+      orbitSides.push(await evaluate(`(function () {
+        var t = document.getElementById("tip").getBoundingClientRect();
+        var b = document.getElementById("probe-tip-big").getBoundingClientRect();
+        if (t.top >= b.bottom - 1) return "bottom";
+        if (t.bottom <= b.top + 1) return "top";
+        if (t.left >= b.right - 1) return "right";
+        if (t.right <= b.left + 1) return "left";
+        return "overlap";
+      })()`));
+    }
+    if (new Set(orbitSides).size < 3 || orbitSides.includes("overlap")) {
+      fail("подсказка не крутится вокруг элемента: " + orbitSides.join(","));
+    }
+    const orbitArrow = await evaluate(`(function () {
+      var d = document.querySelector(".tip-thread-head").getAttribute("d") || "";
+      var m = d.match(/L\\s*(-?[\\d.]+)\\s+(-?[\\d.]+)\\s+L/);
+      var b = document.getElementById("probe-tip-big").getBoundingClientRect();
+      if (!m) return {ok: false};
+      var x = parseFloat(m[1]), y = parseFloat(m[2]);
+      var onEdge = Math.abs(y - b.top) < 1.5 || Math.abs(y - b.bottom) < 1.5 ||
+                   Math.abs(x - b.left) < 1.5 || Math.abs(x - b.right) < 1.5;
+      var atCorner = (Math.abs(x - b.left) < 1.5 || Math.abs(x - b.right) < 1.5) &&
+                     (Math.abs(y - b.top) < 1.5 || Math.abs(y - b.bottom) < 1.5);
+      return {ok: onEdge && !atCorner, x: Math.round(x), y: Math.round(y)};
+    })()`);
+    if (!orbitArrow.ok) fail("нить целится не в грань (орбита): " + JSON.stringify(orbitArrow));
     // Перерисовка карточки: элемент исчезает из-под курсора без pointerout,
     // подсказка не имеет права висеть на мёртвом узле.
     await evaluate('var b = document.getElementById("probe-tip-big"); if (b) b.remove(); true');
@@ -632,7 +666,8 @@ async function waitForPage() {
     if (!detachOk) fail("подсказка висит после перерисовки элемента");
     console.log(`  задержка=${tipEarly.hidden ? "есть" : "нет"} текст="${tip.text}" ` +
       `нить=${tip.thread} наконечник_у_элемента=${tip.onBorder} ` +
-      `следует_за_курсором=${bigMoved && bigEnd.settled} скрыта_после_ухода=${goneOk}`);
+      `следует_за_курсором=${bigMoved && bigEnd.settled} скрыта_после_ухода=${goneOk} ` +
+      `орбита=[${orbitSides.join(",")}] наконечник_в_грани=${orbitArrow.ok}`);
 
     // Магнитные силы подсказок (карточка «Подсказки» раздела «Интерфейс»):
     // поля есть и переводятся, дефолты 50/100, правка сохраняется и применяется
