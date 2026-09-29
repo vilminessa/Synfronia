@@ -165,8 +165,16 @@
     var w = TIP.node.offsetWidth;
     var h = TIP.node.offsetHeight;
     var r = el.getBoundingClientRect();
-    var gap = 2 + 0.16 * TIP_FORCE.repel;
-    var onto = (1 - TIP_FORCE.repel / 100) * Math.min(w, h) / 2;
+    // Зазор до элемента (repel) и близость к курсору (pull) меняются по
+    // прогрессии, а не по прямой: концы прежние (repel 0 - лёжа на элементе,
+    // 100 -18px снаружи; pull 50 - дефолт), поэтому обычные настройки не
+    // едутся, но между ними изменение чувствуется сильнее у краёв. pull 0 -
+    // подсказка отдаляется от курсора (50px), 100 - подтягивается вплотную.
+    var gap = 2 * Math.pow(9, TIP_FORCE.repel / 100);
+    var onto = Math.pow(1 - TIP_FORCE.repel / 100, 1.8) * Math.min(w, h) / 2;
+    var pn = (TIP_FORCE.pull - 50) / 50;
+    var away = pn < 0 ? 50 * Math.pow(-pn, 1.8)
+                      : -10 * Math.pow(pn, 1.8);
     var dx, dy;
     if (TIP.mode === "focus") {
       var sp = {top: r.top - TIP_MARGIN,
@@ -216,7 +224,7 @@
         var tR2 = Math.min(ux2 ? Math.abs(hw / ux2) : Infinity,
                            uy2 ? Math.abs(hh / uy2) : Infinity);
         var proj2 = (w / 2) * Math.abs(ux2) + (h / 2) * Math.abs(uy2);
-        var dist2 = tR2 + gap - onto + proj2;
+        var dist2 = tR2 + gap - onto + proj2 + away;
         return {x: ccx + ux2 * dist2 - w / 2, y: ccy + uy2 * dist2 - h / 2};
       }
       function hits(x, y) {
