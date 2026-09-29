@@ -67,23 +67,24 @@
   }
 
   // ---- подсказки -----------------------------------------------------------
-  // Один элемент на страницу (см. initTooltips). В режиме hover догоняет курсор
-  // с инерцией и держится снаружи рамки элемента, чтобы не накрывать его; между
+  // Один элемент на страницу (см. initTooltips). В режиме hover подсказка
+  // «крутится» вокруг элемента: сторона выбирается по направлению от центра
+  // элемента к курсору, вдоль грани - за координатой курсора, - поэтому нить
+  // упирается в грань, а не в угол, и подсказка не накрывает элемент. Между
   // краем подсказки и краем элемента рисуется «нить» (SVG) с наконечником-
-  // стрелкой у элемента. В режиме focus (клавиатура) курсора нет - подсказка
-  // встаёт над/под элементом, нить та же. Скрывается, как только элемент
-  // пропал из-под курсора, узел отсоединён или курсор ушёл из окна, - потому
-  // что pointerout после перерисовки карточки настроек не приходит.
+  // стрелкой у элемента. В режиме focus (клавиатура) курсора нет - сторона
+  // выбирается по простору: сверху, иначе снизу, затем по бокам. Скрывается,
+  // как только элемент пропал из-под курсора, узел отсоединён или курсор
+  // ушёл из окна, - потому что pointerout после перерисовки карточки
+  // настроек не приходит.
   var TIP = {node: null, text: null, thread: null, line: null, head: null,
-             target: null, pending: null, mode: "hover",
+             target: null, pending: null, mode: "hover", side: null,
              cx: 0, cy: 0, x: 0, y: 0, tx: 0, ty: 0,
              raf: 0, timer: 0, shown: false, lastT: 0};
   var SVG_NS = "http://www.w3.org/2000/svg";
   var TIP_GAP = 10;      // минимальный зазор до элемента
   var TIP_MARGIN = 8;    // минимальный отступ от края окна
   var TIP_DELAY = 220;   // задержка появления, чтобы не мигало при проносе
-  var TIP_OFF_X = 16;    // смещение подсказки от курсора
-  var TIP_OFF_Y = 20;
   var TIP_TAU = 70;      // постоянная времени инерции (мс): меньше - короче хвост
   var TIP_HEAD_LEN = 7;  // длина наконечника-стрелки
   var TIP_HEAD_W = 3.5;  // половина ширины наконечника
@@ -142,39 +143,72 @@
     TIP.head = head;
   }
 
-  // Куда поставить подсказку. hover: курсор + смещение, но снаружи раздутой
-  // рамки элемента (подсказка не должна накрывать то, на что указывает).
-  // focus: над элементом, если есть место, иначе под ним.
+  // Куда поставить подсказку. hover - орбита: сторона берётся по направлению
+  // от центра элемента к курсору (нормировано на полуполе, чтобы сторона не
+  // дрожала на диагонали; прежняя сторона держится, пока новая не выигрывает
+  // с заметным перевесом), вдоль грани подсказка идёт за координатой курсора.
+  // Так нить упирается в грань, а не в угол, а при обводе курсором подсказка
+  // плавно переходит вокруг элемента на другие грани. Снаружи, с зазором
+  // силы repel; при 0 зазор минимален и подсказка может лечь на элемент
+  // вполовину (onto). focus: сверху, если есть место, иначе снизу, затем
+  // по бокам с большим простором.
   function tipTarget() {
     var el = TIP.target;
     var w = TIP.node.offsetWidth;
     var h = TIP.node.offsetHeight;
     var r = el.getBoundingClientRect();
+    var gap = 2 + 0.16 * TIP_FORCE.repel;
+    var onto = (1 - TIP_FORCE.repel / 100) * Math.min(w, h) / 2;
     var dx, dy;
     if (TIP.mode === "focus") {
-      var below = r.top - h - TIP_GAP < TIP_MARGIN;
-      dy = below ? r.bottom + TIP_GAP : r.top - h - TIP_GAP;
-      dx = r.left + r.width / 2 - w / 2;
+      var sp = {top: r.top - TIP_MARGIN,
+                bottom: window.innerHeight - r.bottom - TIP_MARGIN,
+                left: r.left - TIP_MARGIN,
+                right: window.innerWidth - r.right - TIP_MARGIN};
+      var need = {top: h, bottom: h, left: w, right: w};
+      var fside = null, bestS = null, bestV = -Infinity;
+      ["top", "bottom", "right", "left"].forEach(function(s) {
+        var free = sp[s] - need[s];
+        if (fside === null && free >= TIP_GAP) fside = s;
+        if (free > bestV) { bestV = free; bestS = s; }
+      });
+      fside = fside || bestS;
+      if (fside === "top" || fside === "bottom") {
+        dx = r.left + r.width / 2 - w / 2;
+        dy = fside === "top" ? r.top - TIP_GAP - h : r.bottom + TIP_GAP;
+      } else {
+        dy = r.top + r.height / 2 - h / 2;
+        dx = fside === "right" ? r.right + TIP_GAP : r.left - TIP_GAP - w;
+      }
     } else {
-      dx = TIP.cx + TIP_OFF_X;
-      dy = TIP.cy + TIP_OFF_Y;
-      // вытолкнуть из раздутой рамки элемента по наименьшей грани - тогда нить
-      // всегда короткая и указывает на бордюр, а подсказка не перекрывает его.
-      // Сила отталкивания (repel) управляет и зазором, и жёсткостью: 100 -
-      // выталкивает сразу целиком (прежнее поведение), меньше - подсказка
-      // «магнитит» к элементу и может заходить на рамку вполовину.
-      var gap = 2 + 0.16 * TIP_FORCE.repel;
-      var left = r.left - gap, top = r.top - gap;
-      var right = r.right + gap, bottom = r.bottom + gap;
-      if (dx < right && dx + w > left && dy < bottom && dy + h > top) {
-        var pushL = right - dx, pushR = dx + w - left;
-        var pushT = bottom - dy, pushB = dy + h - top;
-        var m = Math.min(pushL, pushR, pushT, pushB);
-        var s = TIP_FORCE.repel / 100;
-        if (m === pushL) dx += (right - dx) * s;
-        else if (m === pushR) dx += (left - w - dx) * s;
-        else if (m === pushT) dy += (bottom - dy) * s;
-        else dy += (top - h - dy) * s;
+      var hw = Math.max(r.width / 2, 1), hh = Math.max(r.height / 2, 1);
+      var vx = TIP.cx - (r.left + r.width / 2);
+      var vy = TIP.cy - (r.top + r.height / 2);
+      var sc = {bottom: vy / hh, right: vx / hw, top: -vy / hh, left: -vx / hw};
+      // помещается ли подсказка снаружи этой грани (с зазором и отступом окна)
+      function fits(s) {
+        if (s === "top") return r.top - TIP_MARGIN - gap >= h;
+        if (s === "bottom") return window.innerHeight - r.bottom - TIP_MARGIN - gap >= h;
+        if (s === "left") return r.left - TIP_MARGIN - gap >= w;
+        return window.innerWidth - r.right - TIP_MARGIN - gap >= w;
+      }
+      var order = Object.keys(sc).sort(function(a, b) { return sc[b] - sc[a]; });
+      var side = null;
+      // прежняя сторона держится, пока новая не выигрывает с заметным перевесом
+      if (TIP.side && sc[order[0]] <= sc[TIP.side] + 0.25 && fits(TIP.side)) side = TIP.side;
+      if (!side) for (var i = 0; i < order.length; i++) if (fits(order[i])) { side = order[i]; break; }
+      if (!side) side = TIP.side || order[0];   // негде поместиться - clamp спасёт
+      TIP.side = side;
+      if (side === "top" || side === "bottom") {
+        dx = (w < r.width
+              ? Math.max(r.left + w / 2, Math.min(TIP.cx, r.right - w / 2))
+              : r.left + r.width / 2) - w / 2;
+        dy = side === "bottom" ? r.bottom + gap - onto : r.top - gap + onto - h;
+      } else {
+        dy = (h < r.height
+              ? Math.max(r.top + h / 2, Math.min(TIP.cy, r.bottom - h / 2))
+              : r.top + r.height / 2) - h / 2;
+        dx = side === "right" ? r.right + gap - onto : r.left - gap + onto - w;
       }
     }
     dx = Math.max(TIP_MARGIN, Math.min(dx, window.innerWidth - w - TIP_MARGIN));
@@ -192,6 +226,7 @@
     TIP.target = el;
     TIP.pending = null;
     TIP.shown = false;
+    TIP.side = null;
     TIP.text.textContent = text;
     el.setAttribute("aria-describedby", "tip");
     TIP.node.hidden = false;
