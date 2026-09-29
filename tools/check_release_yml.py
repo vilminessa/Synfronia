@@ -9,8 +9,9 @@
      actions: read) - иначе GitHub даёт startup_failure «only allowed
      actions: none» ещё до запуска, и текст виден только в веб-интерфейсе
      Actions;
-  4. публикация ограждена if на теге, у генератора upload-assets: true
-     (иначе провенанс не попадёт в релиз);
+  4. публикация ограждена if на теге; генератор провенанса ранится и на
+     dispatch (if допускает skipped), upload-assets отключён вне тега,
+     а проверка подписи не привязана к тегу - проба конвейера до выпуска;
   5. в шагах python -c только ASCII - консоль CI cp1252, кириллица роняет
      уже собранный артефакт;
   6. зонд ui_fonts_probe эмулирует prefers-reduced-motion: no-preference -
@@ -94,12 +95,20 @@ def main() -> int:
     ok(str(gen.get("uses", "")).endswith("@v2.1.0"),
        "генератор запинен по тегу v2.1.0", str(gen.get("uses", "")))
 
-    section("4. публикация и провенанс только на теге")
+    section("4. публикация на теге, провенанс и подпись - на обоих событиях")
     pub_if = str(jobs.get("python-publish", {}).get("if", ""))
     ok("refs/tags/" in pub_if, "python-publish ограждён if на тег", pub_if)
     with_ = gen.get("with") or {}
-    ok(with_.get("upload-assets") is True,
-       "upload-assets: true (иначе провенанс не попадёт в релиз)")
+    ua = with_.get("upload-assets")
+    ok(ua is True or "startsWith(github.ref" in str(ua),
+       "upload-assets: на теге true, на dispatch false (без публикации в релиз)", str(ua))
+    gen_if = str(gen.get("if", ""))
+    ok("python-publish.result" in gen_if and "skipped" in gen_if,
+       "генератор ждёт публикацию, но допускает её пропуск на dispatch", gen_if)
+    attest_if = str(jobs.get("verify-attestation", {}).get("if", ""))
+    ok("refstags" not in attest_if,
+       "проверка подписи ранится и на dispatch (проба до тега)",
+       attest_if or "без if")
     ok("needs.build.outputs.digests" in str(with_.get("base64-subjects", "")),
        "subjects берутся из хеша build-джоба")
 
