@@ -110,6 +110,9 @@ jobs:
   generator-generic-ossf-slsa3-publish:
     name: SLSA-провенанс
     needs: [build, python-publish]
+    # на теге ждём успеха публикации, на dispatch публикация пропущена -
+    # генерация провенанса всё равно должна пройти (проба конвейера)
+    if: always() && (needs.python-publish.result == 'success' || needs.python-publish.result == 'skipped')
     permissions:
       id-token: write
       contents: write
@@ -117,12 +120,12 @@ jobs:
     uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
     with:
       base64-subjects: "${{ needs.build.outputs.digests }}"
-      upload-assets: true
+      # на теге - в релиз, на dispatch - просто артефакт рана (проба конвейера)
+      upload-assets: ${{ startsWith(github.ref, 'refs/tags/') }}
 
   verify-attestation:
     name: проверка подписи
     needs: generator-generic-ossf-slsa3-publish
-    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
       contents: read
