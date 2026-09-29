@@ -1,7 +1,46 @@
 # -*- mode: python ; coding: utf-8 -*-
+import os
+import sys
+import tempfile
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_all
+
+# Версия из version.py - единственный источник истины; попадает в свойства exe
+sys.path.insert(0, SPECPATH)
+from version import __version__  # noqa: E402
+
+_v = [int(x) for x in __version__.split(".")]
+_v4 = tuple(_v[:4]) + (0,) * (4 - len(_v))
+_version_file = os.path.join(tempfile.gettempdir(), "synfronia-version-info.txt")
+with open(_version_file, "w", encoding="utf-8") as _fh:
+    _fh.write(f"""VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=({_v4[0]}, {_v4[1]}, {_v4[2]}, {_v4[3]}),
+    prodvers=({_v4[0]}, {_v4[1]}, {_v4[2]}, {_v4[3]}),
+    mask=0x3f, flags=0x0, OS=0x40004, fileType=0x1, subtype=0x0, date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo(
+      [
+        StringTable(
+          '040904B0',
+          [
+            StringStruct('CompanyName', 'Vilminessa'),
+            StringStruct('FileDescription', 'Synfronia - download YouTube videos and playlists'),
+            StringStruct('FileVersion', '{__version__}'),
+            StringStruct('InternalName', 'Synfronia'),
+            StringStruct('OriginalFilename', 'Synfronia.exe'),
+            StringStruct('ProductName', 'Synfronia'),
+            StringStruct('ProductVersion', '{__version__}')
+          ]
+        )
+      ]
+    ),
+    VarFileInfo([VarStruct('Translation', [1033, 1200])])
+  ]
+)
+""")
 
 datas = []
 binaries = []
@@ -55,4 +94,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    version=_version_file,
 )

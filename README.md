@@ -283,6 +283,21 @@ spec собирает один файл (`--onefile --windowed`), включая
 (workflow_dispatch) проходит проверки, сборку, **генерацию провенанса и
 проверку подписи без публикации** — так весь конвейер проверяют до выпуска
 тега. Линт самого workflow: `python tools/check_release_yml.py`.
+На теге verify дополнительно сверяет имя тега с `version.py` — расходжение
+падает до сборки.
+
+### Выпуск версии
+
+Версия приложения живёт в одном месте — `version.py` (`__version__`).
+От неё питаются: подпись «Synfronia by Vilminessa - vX.Y.Z» слева снизу
+главного окна, ключ `app_version` в `settings.json` (пишется при старте,
+если отличается), VersionInfo в свойствах exe и сверка тега в CI.
+
+1. поднять `__version__` в `version.py` и `app_version` в
+   `based_settings.json` (проверки не дают забыть — умолчания сверяются);
+2. закоммитить;
+3. поставить тег `vX.Y.Z` (ровно `v` + версия из `version.py`) и запушить —
+   workflow release сверит тег и выпустит релиз с exe и провенансом.
 
 ## Состав
 
@@ -307,6 +322,8 @@ tools/utf8_console.py - общий для tools/ перевод вывода в 
   кириллицы, ни «✕», и проверки без этого падают с UnicodeEncodeError
 based_settings.json - настройки по умолчанию (копируются в settings.json
   при первом запуске; недостающие ключи дописываются при обновлении)
+version.py        - версия приложения (единый источник: подпись в UI,
+                    app_version в settings.json, VersionInfo exe, сверка тега)
 requirements.txt  - yt-dlp, pywebview, pyinstaller, pyyaml (инструменты CI)
 Synfronia.spec    - конфиг сборки exe
 LICENSE           - лицензия проекта (PolyForm Noncommercial 1.0.0)
@@ -330,7 +347,8 @@ python tools/build_ui.py --check    # проверить, что ui.py акту�
 `SETTINGS_JS` и `COMMON_JS`. Все плейсхолдеры (`__THEME_ROOT__`,
 `__THEME_CSS__`, `__FONTS_CSS__`, `__APP_CSS__`, `__MAIN_CSS__`,
 `__SETTINGS_CSS__`, `__SETTINGS_HTML__`, `__COMMONJS__`, `__APPJS__`,
-`__SETTINGS_JS__`, `__I18N__`, `__THEMES__`, `__SETTINGS_SCHEMA__`)
+`__SETTINGS_JS__`, `__I18N__`, `__THEMES__`, `__SETTINGS_SCHEMA__`,
+`__APP_VERSION__`)
 подставляются при сборке страницы.
 
 ### Проверки для разработчиков

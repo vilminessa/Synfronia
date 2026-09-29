@@ -2,6 +2,13 @@
      вёрстка окна настроек — в settings.css. */
   h1 { font-size: 22px; margin: 0 0 8px; }
   .sub { opacity: .65; font-size: 12px; }
+  /* Подпись автора и версии слева снизу; значение подставляет build_page
+     из version.py, подпись не интерактивна и не мешает контенту */
+  #app-version {
+    position: fixed; left: 14px; bottom: 10px; z-index: 5;
+    font-size: 11px; color: var(--text); opacity: .5;
+    pointer-events: none; user-select: none;
+  }
   .head { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 14px; }
   .brand { flex: 1; min-width: 0; }
   .logo {

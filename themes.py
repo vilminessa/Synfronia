@@ -19,6 +19,7 @@ from pathlib import Path
 
 import settings_schema
 import ui as _ui
+from version import __version__
 
 from i18n import I18N
 from fonts import _clean_family, families as _loaded_families, font_css, font_vars
@@ -1218,6 +1219,7 @@ def _fill_placeholders(template: str, theme: dict, picked: dict) -> str:
     page = page.replace("__SETTINGS_HTML__", _ui.SETTINGS_HTML)
     page = page.replace("__I18N__", _js_json(I18N))
     page = page.replace("__THEMES__", _js_json(themes_embed()))
+    page = page.replace("__APP_VERSION__", __version__)
     # __SETTINGS_SCHEMA__ лежит внутри settings.js, поэтому подменяем после него
     page = page.replace("__SETTINGS_SCHEMA__", _js_json(settings_schema.schema_json()))
     return page
@@ -1266,7 +1268,8 @@ def build_page(theme_key: str, lang: str | None = None, fonts: dict | None = Non
       темы font / font_mono) встраиваются как @font-face с data:URI;
     • плейсхолдеры (__THEME_ROOT__, __THEME_CSS__, __FONTS_CSS__, __APP_CSS__,
       __MAIN_CSS__, __SETTINGS_CSS__, __COMMONJS__, __APPJS__, __SETTINGS_JS__,
-      __SETTINGS_SCHEMA__, __I18N__, __THEMES__) подставляются простой заменой.
+      __SETTINGS_SCHEMA__, __I18N__, __THEMES__, __APP_VERSION__) подставляются
+      простой заменой.
     """
     theme = _page_theme(theme_key)
     folders = theme.get("_slot_folders") or []

@@ -56,6 +56,8 @@ settings.json получается из группы и ключа: у груп�
     browse_dest  True - кнопка выбирает папку загрузки
 """
 
+from version import __version__  # единый источник версии приложения
+
 TYPES = ("bool", "int", "text", "password", "choice", "choice_buttons", "actions", "note")
 
 # Общие настройки интерфейса. Порядок вкладок задаётся полем order.
@@ -100,6 +102,10 @@ CORE_GROUPS = [
              "box": "tips", "mirror": "range", "live": True,
              "dom": "tip-repel", "dom_range": "tip-repel-range",
              "title": "sheet.ui.tip_repel.hint"},
+            # Версия, записавшая settings.json: в панели не рисуется,
+            # обновляется молча при старте (см. settings.load_settings)
+            {"key": "app_version", "type": "text", "label": "sheet.ui.app_version",
+             "default": __version__, "in_panel": False},
         ],
     },
 ]
