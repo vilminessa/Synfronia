@@ -123,6 +123,13 @@
     var text = document.createElement("span");
     text.className = "tip-text";
     node.appendChild(text);
+    // пылинки: живут в узле подсказки, оживают и гаснут вместе с ней
+    // (анимация и раскладка - в app.css)
+    for (var i = 0; i < 6; i++) {
+      var dust = document.createElement("i");
+      dust.className = "dust";
+      node.appendChild(dust);
+    }
     document.body.appendChild(node);
     TIP.node = node;
     TIP.text = text;
@@ -200,13 +207,36 @@
         var step = reducedMotion() ? 4 : 0.45;     // рад за кадр: вокруг, не сквозь
         TIP.ang += Math.max(-step, Math.min(step, dA));
       }
-      var ux = Math.cos(TIP.ang), uy = Math.sin(TIP.ang);
-      var tR = Math.min(ux ? Math.abs(hw / ux) : Infinity,
-                        uy ? Math.abs(hh / uy) : Infinity);
-      var proj = (w / 2) * Math.abs(ux) + (h / 2) * Math.abs(uy);
-      var dist = tR + gap - onto + proj;
-      dx = ccx + ux * dist - w / 2;
-      dy = ccy + uy * dist - h / 2;
+      // Обход кандидатов: желаемый угол, противоположный и боковые. Кламп к
+      // краю окна не должен прижимать подсказку на элемент - такую позицию
+      // отбрасываем (перекрытие порождено только клампом), а перекрытие по
+      // воле сил (repel = 0 - «лечь на элемент») оставляем.
+      function ringPos(a) {
+        var ux2 = Math.cos(a), uy2 = Math.sin(a);
+        var tR2 = Math.min(ux2 ? Math.abs(hw / ux2) : Infinity,
+                           uy2 ? Math.abs(hh / uy2) : Infinity);
+        var proj2 = (w / 2) * Math.abs(ux2) + (h / 2) * Math.abs(uy2);
+        var dist2 = tR2 + gap - onto + proj2;
+        return {x: ccx + ux2 * dist2 - w / 2, y: ccy + uy2 * dist2 - h / 2};
+      }
+      function hits(x, y) {
+        return x < r.right && x + w > r.left && y < r.bottom && y + h > r.top;
+      }
+      function clampWin(x, y) {
+        return {x: Math.max(TIP_MARGIN, Math.min(x, window.innerWidth - w - TIP_MARGIN)),
+                y: Math.max(TIP_MARGIN, Math.min(y, window.innerHeight - h - TIP_MARGIN))};
+      }
+      var cands = [TIP.ang, TIP.ang + Math.PI,
+                   TIP.ang + Math.PI / 2, TIP.ang - Math.PI / 2];
+      var place = null;
+      for (var ci = 0; ci < cands.length; ci++) {
+        var raw = ringPos(cands[ci]);
+        var win = clampWin(raw.x, raw.y);
+        if (!hits(win.x, win.y) || hits(raw.x, raw.y)) { place = win; break; }
+      }
+      if (!place) place = clampWin(ringPos(TIP.ang).x, ringPos(TIP.ang).y);
+      dx = place.x;
+      dy = place.y;
     }
     dx = Math.max(TIP_MARGIN, Math.min(dx, window.innerWidth - w - TIP_MARGIN));
     dy = Math.max(TIP_MARGIN, Math.min(dy, window.innerHeight - h - TIP_MARGIN));
@@ -288,8 +318,9 @@
     paintThread();
   }
 
-  // Нить: линия от края подсказки до ближайшей точки бордюра элемента плюс
-  // наконечник-стрелка, носик которой упирается в сам элемент.
+  // Нить: кратчайший отрезок между двумя рамками - «край -> край» точно:
+  // по общей оси линия строго горизонтальна/вертикальна, при диагональном
+  // расположении соединяются углы; наконечник-стрелка упирается в элемент.
   function paintThread() {
     var el = TIP.target;
     if (!el) return;
@@ -297,21 +328,30 @@
     if (!r.width && !r.height) return;
     var w = TIP.node.offsetWidth;
     var h = TIP.node.offsetHeight;
-    var cx = TIP.x + w / 2;
-    var cy = TIP.y + h / 2;
-    // ближайшая к центру подсказки точка рамки элемента
-    var px = Math.max(r.left, Math.min(cx, r.right));
-    var py = Math.max(r.top, Math.min(cy, r.bottom));
-    if (px > r.left && px < r.right && py > r.top && py < r.bottom) {
-      var dl = cx - r.left, dr = r.right - cx, dt = cy - r.top, db = r.bottom - cy;
-      var m = Math.min(dl, dr, dt, db);
-      if (m === dl) px = r.left; else if (m === dr) px = r.right;
-      else if (m === dt) py = r.top; else py = r.bottom;
+    var lT = TIP.x, rT = TIP.x + w, tT = TIP.y, bT = TIP.y + h;
+    var toRight = r.left > rT;      // объект правее подсказки
+    var toLeft = lT > r.right;      // подсказка правее объекта
+    var toBelow = r.top > bT;       // объект ниже подсказки
+    var toAbove = tT > r.bottom;
+    var gx = toRight || toLeft, gy = toBelow || toAbove;
+    if (!gx && !gy) {               // рамки пересекаются - нить не нужна
+      TIP.line.setAttribute("d", "");
+      TIP.head.setAttribute("d", "");
+      return;
     }
-    // старт нити - ближайшая к точке на объекте точка края подсказки:
-    // строка всегда «край -> край», центр подсказки в геометрии не участвует
-    var sx = Math.max(TIP.x, Math.min(px, TIP.x + w));
-    var sy = Math.max(TIP.y, Math.min(py, TIP.y + h));
+    var sx, sy, px, py;
+    if (gx) {                       // по X разрыв: ближайшие вертикальные грани
+      sx = toRight ? rT : lT;
+      px = toRight ? r.left : r.right;
+    } else {                        // общая зона по X - одна координата на двоих
+      sx = px = (Math.max(lT, r.left) + Math.min(rT, r.right)) / 2;
+    }
+    if (gy) {
+      sy = toBelow ? bT : tT;
+      py = toBelow ? r.top : r.bottom;
+    } else {
+      sy = py = (Math.max(tT, r.top) + Math.min(bT, r.bottom)) / 2;
+    }
     var dx = px - sx, dy = py - sy;
     var len = Math.hypot(dx, dy);
     if (len < 1) {
