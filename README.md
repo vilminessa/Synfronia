@@ -280,8 +280,9 @@ spec собирает один файл (`--onefile --windowed`), включая
 публикация exe в GitHub Release тега → **SLSA-провенанс**
 (`Synfronia.exe.intoto.jsonl`, slsa-github-generator v2.1.0, keyless-подпись
 через OIDC) → проверка подписи `gh attestation verify`. Ручной запуск
-(workflow_dispatch) проходит проверки и сборку **без публикации** - так CI
-проверяют себя до выпуска тега.
+(workflow_dispatch) проходит проверки, сборку, **генерацию провенанса и
+проверку подписи без публикации** — так весь конвейер проверяют до выпуска
+тега. Линт самого workflow: `python tools/check_release_yml.py`.
 
 ## Состав
 
