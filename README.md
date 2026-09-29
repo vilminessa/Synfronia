@@ -306,7 +306,7 @@ tools/utf8_console.py - общий для tools/ перевод вывода в 
   кириллицы, ни «✕», и проверки без этого падают с UnicodeEncodeError
 based_settings.json - настройки по умолчанию (копируются в settings.json
   при первом запуске; недостающие ключи дописываются при обновлении)
-requirements.txt  - yt-dlp, pywebview, pyinstaller
+requirements.txt  - yt-dlp, pywebview, pyinstaller, pyyaml (инструменты CI)
 Synfronia.spec    - конфиг сборки exe
 LICENSE           - лицензия проекта (PolyForm Noncommercial 1.0.0)
 THIRD_PARTY_NOTICES.md - источники и лицензии всех компонентов
@@ -340,6 +340,7 @@ python tools/check_settings_overlay.py  # оверлей: сборка, Api, о�
 python tools/check_test_fonts.py        # встроенные шрифты и докачка (без сети)
 python tools/check_download_button.py   # кнопка «Скачать»: прогресс и итог
 python tools/check_tools_output.py      # скрипты печатают на любой кодовой странице
+python tools/check_release_yml.py      # линт release.yml: пиннинг, permissions SLSA, ASCII
 python tools/check_debug.py            # отладочная консоль: очистка, логи, меню
 node  tools/ui_themes_probe.js          # вёрстка карточки по всем темам (headless Edge)
 ```
