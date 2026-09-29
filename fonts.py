@@ -614,15 +614,20 @@ def font_css(families) -> str:
     return "\n".join(parts)
 
 
-def font_vars(sans: str = "", mono: str = "") -> str:
-    """CSS-переменные --font-sans / --font-mono.
+def font_vars(sans: str = "", mono: str = "", head: str = "", weight: str = "") -> str:
+    """CSS-переменные --font-sans / --font-mono / --font-head / --font-weight.
 
     Если шрифт не выбран, переменная не выводится — app.css использует
-    системный шрифт через var(--font-sans, "Segoe UI").
+    системный шрифт через var(--font-sans, "Segoe UI"). Вес 400 не выводится:
+    это CSS-умолчание.
     """
     parts = []
-    for name, value in (("--font-sans", sans), ("--font-mono", mono)):
+    for name, value in (("--font-sans", sans), ("--font-mono", mono),
+                        ("--font-head", head)):
         clean = _clean_family(value)
         if clean:
             parts.append(f"{name}: {css_family(clean)}")
+    wt = str(weight or "").strip()
+    if wt.isdigit() and wt != "400":
+        parts.append(f"--font-weight: {wt}")
     return " ".join(parts)

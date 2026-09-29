@@ -13,14 +13,14 @@ settings.json получается из группы и ключа: у груп�
 
 Описание поля
     key          путь внутри группы
-    type         bool | int | text | password | choice | choice_buttons | actions | note
+    type         bool | int | text | password | choice | choice_buttons | radio | actions | note
     label        ключ i18n с подписью
     title        ключ i18n с подсказкой (необязательно)
     note         ключ i18n с пояснением под полем
     note_source  имя JS-функции, которая заполняет пояснение (themeMeta, ...)
     default      значение по умолчанию
     min/max/step ограничения для int
-    options      [["значение", "подпись"], ...] для choice/choice_buttons; подпись
+    options      [["значение", "подпись"], ...] для choice/choice_buttons/radio; подпись
                  - это ключ i18n, если он есть в языке, иначе сам текст
     options_source  "langs" | "themes" | "fonts" - список из runtime
     options_of   словарь в модуле-владельце: значения опций должны быть в нём
@@ -58,7 +58,7 @@ settings.json получается из группы и ключа: у груп�
 
 from version import __version__  # единый источник версии приложения
 
-TYPES = ("bool", "int", "text", "password", "choice", "choice_buttons", "actions", "note")
+TYPES = ("bool", "int", "text", "password", "choice", "choice_buttons", "radio", "actions", "note")
 
 # Общие настройки интерфейса. Порядок вкладок задаётся полем order.
 CORE_GROUPS = [
@@ -66,7 +66,8 @@ CORE_GROUPS = [
         "id": "ui",
         "label": "sheet.tab.ui",
         "order": 10,
-        "boxes": {"look": "sheet.ui.look", "tips": "sheet.ui.tips"},
+        "boxes": {"look": "sheet.ui.look", "fonts": "sheet.font.title",
+                  "tips": "sheet.ui.tips"},
         "fields": [
             {"key": "language", "type": "choice", "label": "sheet.lang.label",
              "default": "en", "options_source": "langs", "dom": "lang", "live": True},
@@ -79,17 +80,32 @@ CORE_GROUPS = [
                 {"dom": "open-themes", "icon": "folder", "label": "sheet.theme.open"},
             ]},
             {"type": "note", "transient": True, "dom": "themes-dl-note", "hidden": True},
-            {"key": "font_sans", "type": "choice", "label": "sheet.font.sans",
-             "default": "", "options_source": "fonts", "dom": "font-sans", "live": True},
-            {"key": "font_mono", "type": "choice", "label": "sheet.font.mono",
-             "default": "", "options_source": "fonts_mono", "dom": "font-mono", "live": True},
-            {"type": "note", "transient": True, "dom": "font-note", "note_source": "fontNote"},
-            {"type": "actions", "transient": True, "buttons": [
+            {"key": "font_heading", "type": "radio", "label": "sheet.font.heading",
+             "default": "", "options_source": "fonts", "dom": "font-heading",
+             "box": "fonts", "live": True},
+            {"key": "font_sans", "type": "radio", "label": "sheet.font.sans",
+             "default": "", "options_source": "fonts", "dom": "font-sans",
+             "box": "fonts", "live": True},
+            {"key": "font_mono", "type": "radio", "label": "sheet.font.mono",
+             "default": "", "options_source": "fonts_mono", "dom": "font-mono",
+             "box": "fonts", "live": True},
+            {"key": "font_weight", "type": "radio", "label": "sheet.font.weight",
+             "default": "400", "dom": "font-weight", "box": "fonts", "live": True,
+             "options": [["300", "300"], ["400", "400"], ["500", "500"],
+                         ["600", "600"], ["700", "700"]]},
+            # предпросмотр: три строки на выбранных шрифтах, заполняет
+            # settings.js (NOTE_FILLERS.fontPreview) и обновляется при смене
+            {"type": "note", "transient": True, "dom": "font-preview",
+             "box": "fonts", "note_source": "fontPreview"},
+            {"type": "note", "transient": True, "dom": "font-note",
+             "box": "fonts", "note_source": "fontNote"},
+            {"type": "actions", "transient": True, "box": "fonts", "buttons": [
                 {"dom": "reload-fonts", "icon": "reload", "label": "sheet.font.reload"},
                 {"dom": "download-fonts", "icon": "download", "label": "sheet.font.download"},
                 {"dom": "open-fonts", "icon": "folder", "label": "sheet.font.open"},
             ]},
-            {"type": "note", "transient": True, "dom": "font-dl-note", "hidden": True},
+            {"type": "note", "transient": True, "dom": "font-dl-note",
+             "box": "fonts", "hidden": True},
             # «магнитные» подсказки: две силы 0..100 (см. TIP_FORCE в common.js),
             # дефолты повторяют прежнее поведение - pull 50, repel 100
             {"key": "tip_pull", "type": "int", "label": "sheet.ui.tip_pull",
@@ -243,7 +259,7 @@ def coerce(key: str, value):
         return num
     if kind in ("text", "password"):
         return "" if value is None else str(value)
-    if kind in ("choice", "choice_buttons"):
+    if kind in ("choice", "choice_buttons", "radio"):
         # у статических списков (субтитры, качество, кодек, режим FTP) набор
         # значений известен: чужое значение из ручного правки файла -> умолчание.
         # У динамических (язык, тема, шрифты) списка options нет - не проверяем.

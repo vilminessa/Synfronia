@@ -5,6 +5,7 @@
     margin: 0; padding: 16px;
     font-family: var(--font-sans, "Segoe UI"), system-ui, sans-serif;
     background: var(--bg); color: var(--text); font-size: 14px;
+    font-weight: var(--font-weight, 400);
     opacity: var(--opacity);
   }
   /* поля и строки прячутся по visible_if из схемы, а .row/.range-row задают

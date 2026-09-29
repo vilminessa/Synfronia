@@ -316,7 +316,8 @@ class Api:
         """
         theme = (themes_embed() or {}).get(self.settings.get("theme", "scarred_mind")) or {}
         return font_css([theme.get("font") or self.settings.get("font_sans") or "",
-                         theme.get("font_mono") or self.settings.get("font_mono") or ""])
+                         theme.get("font_mono") or self.settings.get("font_mono") or "",
+                         self.settings.get("font_heading") or ""])
 
     def font_face_css(self, families) -> str:
         """@font-face для произвольных семейств.
@@ -335,7 +336,7 @@ class Api:
         Страница не перезагружается: JS подменяет блок #fonts-style, поэтому
         выбор шрифта не сбрасывает состояние интерфейса.
         """
-        if key not in ("font_sans", "font_mono"):
+        if key not in ("font_sans", "font_mono", "font_heading"):
             return {"error": "unknown key"}
         self.settings[key] = str(value or "")
         try:

@@ -14,7 +14,7 @@
   // Выбор шрифтов из настроек (без кавычек) — нужен, чтобы при переключении
   // темы вернуть шрифт, если у темы нет своих font/font_mono, и чтобы запросить
   // @font-face именно для этих семейств.
-  var FONT_PICK = { sans: "", mono: "" };
+  var FONT_PICK = { sans: "", mono: "", head: "", weight: "" };
 
   function t(key) {
     var d = I18N[curLang] || I18N.ru;
@@ -465,6 +465,8 @@
     root.setProperty("--opacity", pick(c.opacity, 1));
     setFontVar("--font-sans", c.font ? quoted(c.font) : quoted(FONT_PICK.sans));
     setFontVar("--font-mono", c.font_mono ? quoted(c.font_mono) : quoted(FONT_PICK.mono));
+    setFontVar("--font-head", quoted(FONT_PICK.head));
+    setFontVar("--font-weight", FONT_PICK.weight);
     var cssEl = document.getElementById("theme-style");
     if (!cssEl) {
       cssEl = document.createElement("style");
@@ -507,7 +509,7 @@
   // @font-face для действующей темы и выбранных шрифтов.
   function fontFacesForTheme() {
     var th = THEMES[themeKey()] || {};
-    return [th.font, th.font_mono, FONT_PICK.sans, FONT_PICK.mono];
+    return [th.font, th.font_mono, FONT_PICK.sans, FONT_PICK.mono, FONT_PICK.head];
   }
   function themeKey() {
     var sel = document.getElementById("theme");

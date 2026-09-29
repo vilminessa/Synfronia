@@ -22,6 +22,11 @@
     0%, 100% { text-shadow: 0 0 5px var(--accent), 0 0 12px var(--accent), 0 0 24px var(--accent); opacity: .92; }
     50% { text-shadow: 0 0 8px var(--accent), 0 0 20px var(--accent), 0 0 44px var(--accent); opacity: 1; }
   }
+  /* Шрифт заголовков (font_heading): логотип, заголовки и вкладки; если не
+     выбран - как общий (--font-sans) через цепочку fallback */
+  h1, h2, .logo, .tab {
+    font-family: var(--font-head, var(--font-sans, "Segoe UI")), system-ui, sans-serif;
+  }
   .clicker-row { text-align: center; margin-top: 10px; position: relative; }
   .clicker-msg {
     position: absolute; top: -34px; left: 0; right: 0; text-align: center;

@@ -407,9 +407,10 @@ async function waitForPage() {
       features: [{ name: "prefers-reduced-motion", value: "no-preference" }],
     });
     // init() асинхронный, а поля рисует скрипт. Ждём и главное окно, и поля
-    // карточки (font-sans заполняется из get_initial).
+    // карточки (группы шрифтов наполняются из get_initial - это radio-inputs).
     const READY = '(function () { return !!(window.__initDone && document.getElementById("download")' +
-      ' && document.getElementById("font-sans") && document.getElementById("font-sans").options.length > 1); })()';
+      ' && document.getElementById("font-sans")' +
+      ' && document.getElementById("font-sans").querySelectorAll("input").length > 1); })()';
     for (let i = 0; i < 40; i++) {
       if (await evaluate(READY)) break;
       await sleep(100);
@@ -463,8 +464,45 @@ async function waitForPage() {
     console.log("--- разделы и поля ---");
     await evaluate(OVERLAY_OPEN);
     await sleep(300);
-    const seeded = await evaluate('[].slice.call(document.getElementById("font-sans").options).map(function(o){return o.value;}).filter(Boolean)');
+    const seeded = await evaluate('[].slice.call(document.getElementById("font-sans").querySelectorAll("input")).map(function(i){return i.value;}).filter(Boolean)');
     console.log(`шрифты в списке: ${JSON.stringify(seeded)}`);
+    // две колонки карточки шрифтов: слева четыре группы круговых
+    // переключателей (по строке на группу), справа - предпросмотр
+    const fontCols = await evaluate(`(function () {
+      function rect(id) {
+        var n = document.getElementById(id);
+        if (!n) return null;
+        var r = n.getBoundingClientRect();
+        return {l: Math.round(r.left), t: Math.round(r.top),
+                r: Math.round(r.right), b: Math.round(r.bottom),
+                n: n.querySelectorAll("input[type=radio]").length};
+      }
+      var prev = rect("font-preview");
+      var groups = ["font-heading", "font-sans", "font-mono", "font-weight"].map(rect);
+      var txt = document.getElementById("font-preview");
+      return {prev: prev, groups: groups,
+              text: txt ? txt.textContent.replace(/\\s+/g, " ").trim().length : 0};
+    })()`);
+    const colChecks = [
+      ["карточка шрифтов: четыре группы круговых переключателей",
+        fontCols.groups.length === 4 && fontCols.groups.every(function(g) { return g && g.n > 1; })],
+      ["левая колонка: все группы слева от предпросмотра",
+        !!fontCols.prev && fontCols.groups.every(function(g) {
+          return g && g.l < fontCols.prev.l && g.r <= fontCols.prev.l + 1; })],
+      ["предпросмотр в правой колонке напротив строк",
+        !!fontCols.prev && fontCols.prev.t <= fontCols.groups[0].b &&
+        fontCols.prev.t < fontCols.groups[3].t],
+      ["в предпросмотре есть текст (заголовок, абзац, консоль)",
+        fontCols.text >= 30],
+      ["группа толщины - пять вариантов (300..700)",
+        fontCols.groups[3] && fontCols.groups[3].n === 5],
+      ["общий шрифт = системный + семейства",
+        fontCols.groups[1] && fontCols.groups[1].n === seeded.length + 1],
+    ];
+    colChecks.forEach(([name, okFlag]) => { if (!okFlag) fail(name); });
+    console.log(`  колонки шрифтов: группы=[${fontCols.groups.map(function(g) {
+      return g ? g.n : "x"; }).join(",")}] предпросмотр l=${fontCols.prev ? fontCols.prev.l : "?"}` +
+      ` текст=${fontCols.text}`);
     for (const lang of LANGS) {
       const m = await evaluate(`(function () {
         curLang = ${JSON.stringify(lang)}; applyI18n(); return ${WIN_MEASURE};

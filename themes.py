@@ -1086,7 +1086,8 @@ def _palette_root_vars(theme: dict, fonts: dict | None = None) -> str:
             if color is not None:
                 parts.append(f"--{f}: {color}")
     if fonts:
-        vars_css = font_vars(fonts.get("sans") or "", fonts.get("mono") or "")
+        vars_css = font_vars(fonts.get("sans") or "", fonts.get("mono") or "",
+                             fonts.get("head") or "", fonts.get("weight") or "")
         if vars_css:
             parts.append(vars_css)
     return " ".join(parts)
@@ -1171,10 +1172,14 @@ def _page_fonts(theme: dict, fonts: dict | None) -> dict:
     if fonts is None:
         from settings import load_settings
         saved = load_settings()
-        fonts = {"sans": saved.get("font_sans") or "", "mono": saved.get("font_mono") or ""}
+        fonts = {"sans": saved.get("font_sans") or "", "mono": saved.get("font_mono") or "",
+                 "head": saved.get("font_heading") or "",
+                 "weight": str(saved.get("font_weight") or "")}
     return {
         "sans": _clean_family(theme.get("font") or fonts.get("sans") or ""),
         "mono": _clean_family(theme.get("font_mono") or fonts.get("mono") or ""),
+        "head": _clean_family(fonts.get("head") or ""),
+        "weight": str(fonts.get("weight") or ""),
     }
 
 
@@ -1185,7 +1190,7 @@ def _fill_placeholders(template: str, theme: dict, picked: dict) -> str:
     раньше отдельное окно: в своём entry-шаблоне темы его может не быть, и
     тогда разметку добавляет _ensure_settings.
     """
-    fonts_css = font_css([picked["sans"], picked["mono"]])
+    fonts_css = font_css([picked["sans"], picked["mono"], picked.get("head") or ""])
     page = template.replace("__THEME_ROOT__", _palette_root_vars(theme, picked))
     page = page.replace("__THEME_CSS__", theme.get("css") or "")
     page = page.replace("__FONTS_CSS__", fonts_css)
