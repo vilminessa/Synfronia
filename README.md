@@ -275,6 +275,14 @@ python -m PyInstaller Synfronia.spec --distpath . --workpath build --noconfirm
 spec собирает один файл (`--onefile --windowed`), включая yt-dlp, webview
 и рантайм .NET (pythonnet) для EdgeChromium.
 
+**Релиз по тегу.** Push тега `v*` запускает workflow **release**
+(`.github/workflows/release.yml`): проверки и пробники вёрстки → сборка exe →
+публикация exe в GitHub Release тега → **SLSA-провенанс**
+(`Synfronia.exe.intoto.jsonl`, slsa-github-generator v2.1.0, keyless-подпись
+через OIDC) → проверка подписи `gh attestation verify`. Ручной запуск
+(workflow_dispatch) проходит проверки и сборку **без публикации** - так CI
+проверяют себя до выпуска тега.
+
 ## Состав
 
 ```
