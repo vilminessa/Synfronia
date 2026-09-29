@@ -719,12 +719,19 @@ async function waitForPage() {
       await setForces(pull, 100);
       await mouseMove(forceBtn.cx - 90, forceBtn.cy + 10);
       await sleep(500);                                  // показ и схождение
+      const before = await evaluate('({x: Math.round(TIP.x), tx: Math.round(TIP.tx), shown: TIP.node.classList.contains("tip-on")})');
       await mouseMove(forceBtn.cx + 90, forceBtn.cy + 10);
       await sleep(150);
-      return evaluate('({lag: Math.hypot(TIP.tx - TIP.x, TIP.ty - TIP.y), ' +
-        'pull: TIP_FORCE.pull, ' +
+      const after = await evaluate('({lag: Math.hypot(TIP.tx - TIP.x, TIP.ty - TIP.y), ' +
+        'pull: TIP_FORCE.pull, rm: reducedMotion(), mode: TIP.mode, raf: TIP.raf, ' +
+        'at: [Math.round(TIP.x), Math.round(TIP.y)], tx: [Math.round(TIP.tx), Math.round(TIP.ty)], ' +
+        'cx: Math.round(TIP.cx), cy: Math.round(TIP.cy), ' +
+        'target: TIP.target ? (TIP.target.id || TIP.target.tagName) : "нет", ' +
+        'hover: TIP.target ? TIP.target.matches(":hover") : null, ' +
         'hidden: document.getElementById("tip").hidden, ' +
         'shown: document.getElementById("tip").classList.contains("tip-on")})');
+      after.before = before;
+      return after;
     }
     const lagLow = await lagAt(0), lagHigh = await lagAt(100);
     if (!(lagLow.lag > lagHigh.lag + 4)) {
