@@ -1,9 +1,9 @@
 r"""Модульные шрифты: %LOCALAPPDATA%\Synfronia\fonts.
 
-В сборку вшиты три тестовых шрифта (assets/fonts, лицензия OFL 1.1): Inter,
-JetBrains Mono и Noto Sans. При первом запуске они раскладываются в папку
-шрифтов, поэтому свежая установка работает без сети и список шрифтов не
-пустой. Свои файлы пользователь кладёт в ту же папку (или жмёт «Докачать
+В сборку вшит тестовый шрифт (assets/fonts, лицензия OFL 1.1): JetBrains
+Mono. При первом запуске он раскладывается в папку шрифтов, поэтому свежая
+установка работает без сети и список шрифтов не пуст. Свои файлы
+пользователь кладёт в ту же папку (или жмёт «Докачать
 шрифты»), а Synfronia читает из них семейство, начертание и вес, встраивает
 нужные как @font-face с data:URI и подставляет их в CSS через переменные
 --font-sans / --font-mono.
@@ -214,33 +214,23 @@ def _face_from_name(stem: str) -> tuple[str, int, bool]:
 # Копии лежат в репозитории и попадают в сборку (Synfronia.spec -> datas),
 # поэтому первый запуск не требует сети. Кнопка «Докачать шрифты» тянет те же
 # файлы из сети — см. TEST_FONTS.
-BUNDLED_FONTS = ("Inter.ttf", "JetBrainsMono.ttf", "NotoSans.ttf")
-BUNDLED_LICENSES = ("OFL-Inter.txt", "OFL-JetBrainsMono.txt", "OFL-NotoSans.txt")
+BUNDLED_FONTS = ("JetBrainsMono.ttf",)
+BUNDLED_LICENSES = ("OFL-JetBrainsMono.txt",)
 _RAW = "https://raw.githubusercontent.com/google/fonts/main/ofl"
 # Источник каждого файла: имена совпадают с BUNDLED_FONTS, чтобы «докачать»
 # можно было ровно те же бинарники, что лежат в сборке.
 TEST_FONTS = {
-    "Inter.ttf": {
-        "url": f"{_RAW}/inter/Inter%5Bopsz%2Cwght%5D.ttf",
-        "family": "Inter",
-        "bytes": 876576,
-    },
     "JetBrainsMono.ttf": {
         "url": f"{_RAW}/jetbrainsmono/JetBrainsMono%5Bwght%5D.ttf",
         "family": "JetBrains Mono",
         "bytes": 187208,
-    },
-    "NotoSans.ttf": {
-        "url": f"{_RAW}/notosans/NotoSans%5Bwdth%2Cwght%5D.ttf",
-        "family": "Noto Sans",
-        "bytes": 2049096,
     },
 }
 _FONTS_README = """Synfronia - тестовые шрифты
 =========================
 
 {list}
-Все три - переменные шрифты под SIL Open Font License 1.1 (полные тексты
+Все шрифты - переменные шрифты под SIL Open Font License 1.1 (полные тексты
 лицензий лежат рядом в файлах OFL-*.txt). Приложение положило их сюда при
 первом запуске, чтобы список шрифтов не был пустым; файлы можно свободно
 удалить и положить свои .ttf/.otf/.woff/.woff2.
@@ -575,7 +565,7 @@ def fonts_embed() -> dict:
 
 
 def css_family(name: str) -> str:
-    """Семейство в виде значения CSS: "Inter SemiBold" (с кавычками)."""
+    """Семейство в виде значения CSS: "JetBrains Mono SemiBold" (с кавычками)."""
     return '"' + name.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 

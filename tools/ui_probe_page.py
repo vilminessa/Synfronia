@@ -43,7 +43,7 @@ def stub_settings(lang: str) -> str:
 # Api.poll.
 STUB = """<script>
 (function () {
-  var FONTS = {families: ["Inter", "JetBrains Mono", "Noto Sans"], mono: ["JetBrains Mono"],
+  var FONTS = {families: ["JetBrains Mono"], mono: ["JetBrains Mono"],
                count: 3, folder: "C:\\\\Synfronia\\\\fonts"};
   var state = {lang: "%(lang)s", css: "", fontsRev: 0, dl: null,
                // ответ poll() для кнопки «Скачать»: сценарий задаёт probe.dl
@@ -70,7 +70,7 @@ STUB = """<script>
     reload_fonts: function () { return ok({fonts: FONTS, css: state.css}); },
     font_face_css: function () { return ok(state.css); },
     download_fonts: function () { state.dl = "started"; return ok("started"); },
-    download_themes: function () { return ok({added: ["scary_forest"], skipped: [], failed: []}); },
+    download_themes: function () { return ok({added: ["technology_day"], skipped: [], failed: []}); },
     apply_theme_css: function () { return ok(); },
     set_theme: function (id) { settings.theme = id; state.saved.push(["theme", id]); return ok("ok"); },
     switch_theme: function () { return ok(); },

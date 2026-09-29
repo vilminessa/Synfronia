@@ -570,6 +570,26 @@ async function waitForPage() {
         magic1.n >= 6 && (magic1.lit >= 1 || magic2.lit >= 1)],
     ];
     tipChecks.forEach(([name, okFlag]) => { if (!okFlag) fail(name); });
+    // wiggle реплики кликера: каждые 500-й клик показывает комментарий с
+    // анимацией msg-wiggle, и она правда двигает текст (замер трансформа)
+    await evaluate(`(function () {
+      var btn = document.getElementById("clicker");
+      for (var i = 0; i < 500; i++) btn.click();
+      return true;
+    })()`);
+    await sleep(300);
+    const wig = await evaluate(`(function () {
+      var m = document.getElementById("clicker-msg");
+      var cs = getComputedStyle(m);
+      return {shown: m.classList.contains("show"), anim: cs.animationName,
+              t1: cs.transform, text: (m.textContent || "").trim().length > 0};
+    })()`);
+    await sleep(150);
+    const wig2 = await evaluate(
+      'getComputedStyle(document.getElementById("clicker-msg")).transform');
+    if (!(wig.shown && wig.anim.indexOf("msg-wiggle") >= 0 && wig.text && wig.t1 !== wig2)) {
+      fail("реплика кликера без wiggle: " + JSON.stringify({wig: wig, t2: wig2}));
+    }
     // курсор ушёл с кнопки - подсказка обязана исчезнуть вместе с нитью
     await mouseMove(6, 6);
     await sleep(250);

@@ -39,8 +39,8 @@ EdgeChromium) на основе [yt-dlp](https://github.com/yt-dlp/yt-dlp).
   (доступные варианты определяются из установленного ffmpeg).
 - **Метаданные и обложка** - теги (название, автор, дата), превью вшивается
   как вложение (attached picture).
-- **Модульные темы** - семь встроенных (Scary Forest, Technology day,
-  Technology Pinks, Scarred Mind, Audrey Main Colours, Basic Night Sky, Vilmy~)
+- **Модульные темы** - шесть встроенных (Technology day, Technology Pinks,
+  Scarred Mind, Audrey Main Colours, Basic Night Sky, Liquid Glass)
   и сколько угодно своих: папка в `%LOCALAPPDATA%\Synfronia\themes\<имя>\`
   с `theme.json` (+ `custom.css`, `index.html`, слоты и ассеты).
   Тема задаёт палитру, радиусы, прозрачность, свои шрифты и даже свой HTML.
@@ -95,7 +95,7 @@ python gui.py
 | ⚙ Настройки | шестерёнка справа вверху: язык, папка, тема, шрифты, подсказки, субтитры, качество, перекодировка, сеть |
 | Язык | Русский / English / 日本語 / 简体中文 / Español / Deutsch |
 | Каталог | куда сохранять (по умолчанию `downloads\` рядом с приложением) |
-| Тема | Scary Forest / Technology day / Technology Pinks / Scarred Mind / Audrey Main / Night Sky / Vilmy~ + свои папки |
+| Тема | Technology day / Technology Pinks / Scarred Mind / Audrey Main / Night Sky / Liquid Glass + свои папки |
 | Шрифт интерфейса / моноширинный | семейство из папки `fonts` или системный |
 | Качество | `lossless` / 8K / 4K / 2K / 1080p / 720p / 480p / 240p |
 | Субтитры | off / ru / en / all (вшиваются в контейнер) |
@@ -146,9 +146,9 @@ python gui.py
 
 ### Шрифты
 
-В сборку вшиты три тестовых шрифта (OFL 1.1, ~3 МБ): **Inter**,
-**JetBrains Mono** и **Noto Sans** из `assets/fonts`. При первом запуске они
-раскладываются в `%LOCALAPPDATA%\Synfronia\fonts` вместе с текстами лицензий
+В сборку вшит один тестовый шрифт (OFL 1.1, ~190 КБ): **JetBrains Mono**
+из `assets/fonts`. При первом запуске он
+раскладывается в `%LOCALAPPDATA%\Synfronia\fonts` вместе с текстами лицензий
 и `README.txt`, поэтому свежая установка работает без сети, а список шрифтов
 не пустой. Уже существующие файлы не трогаются: папка шрифтов принадлежит
 пользователю. Кнопка «Докачать шрифты» в настройках тянет те же файлы из
@@ -376,7 +376,7 @@ node  tools/ui_themes_probe.js          # вёрстка карточки по �
 | pythonnet / pythonnet-clr | MIT | https://github.com/pythonnet/pythonnet |
 | PyInstaller (только сборка) | GPL-2.0+ с исключением | https://github.com/pyinstaller/pyinstaller |
 | ffmpeg (внешний, не входит в exe) | GPL | https://ffmpeg.org/ |
-| Inter, JetBrains Mono, Noto Sans (вшиты, `assets/fonts`) | OFL-1.1 | https://github.com/google/fonts |
+| JetBrains Mono (вшит, `assets/fonts`) | OFL-1.1 | https://github.com/google/fonts |
 | Python | PSF | https://www.python.org/ |
 | certifi, urllib3, idna, cffi, cryptography | MPL-2.0 / MIT / BSD-3 / MIT-0 / Apache-2.0 | см. notices |
 
