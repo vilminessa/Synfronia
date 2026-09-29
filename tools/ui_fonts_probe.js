@@ -396,6 +396,12 @@ async function waitForPage() {
     await send("Page.enable");
     await send("Runtime.enable");
     await send("Page.navigate", { url: "file:///" + path.resolve(PAGE).replace(/\\/g, "/") });
+    // CI-раннеры отдают prefers-reduced-motion: reduce - все CSS-анимации
+    // погашены, и проверки «анимация играют» ложно падают. Зонд принудительно
+    // нормализует среду до состояния обычного десктопа.
+    await send("Emulation.setEmulatedMedia", {
+      features: [{ name: "prefers-reduced-motion", value: "no-preference" }],
+    });
     // init() асинхронный, а поля рисует скрипт. Ждём и главное окно, и поля
     // карточки (font-sans заполняется из get_initial).
     const READY = '(function () { return !!(window.__initDone && document.getElementById("download")' +
