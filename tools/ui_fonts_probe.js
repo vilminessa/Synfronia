@@ -650,6 +650,33 @@ async function waitForPage() {
       return {ok: onEdge && !atCorner, x: Math.round(x), y: Math.round(y)};
     })()`);
     if (!orbitArrow.ok) fail("нить целится не в грань (орбита): " + JSON.stringify(orbitArrow));
+    // угол кольца достижим (наконечник - в угол объекта), а строка начинается
+    // строго от края подсказки, а не из её центра
+    await mouseMove(bigBtn.cx + 80, bigBtn.cy - 23);
+    await sleep(450);
+    const cornerRing = await evaluate(`(function () {
+      var b = document.getElementById("probe-tip-big").getBoundingClientRect();
+      var t = document.getElementById("tip").getBoundingClientRect();
+      var hd = document.querySelector(".tip-thread-head").getAttribute("d") || "";
+      var hm = hd.match(/L\\s*(-?[\\d.]+)\\s+(-?[\\d.]+)\\s+L/);
+      var ld = document.querySelector(".tip-thread-line").getAttribute("d") || "";
+      var lm = ld.match(/^M\\s*(-?[\\d.]+)\\s+(-?[\\d.]+)/);
+      var atCorner = false;
+      if (hm) {
+        var x = parseFloat(hm[1]), y = parseFloat(hm[2]);
+        atCorner = Math.abs(x - b.right) < 1.5 && Math.abs(y - b.top) < 1.5;
+      }
+      var startOk = false;
+      if (lm) {
+        var sx = parseFloat(lm[1]), sy = parseFloat(lm[2]);
+        startOk = Math.abs(sx - t.left) < 0.7 || Math.abs(sx - t.right) < 0.7 ||
+                  Math.abs(sy - t.top) < 0.7 || Math.abs(sy - t.bottom) < 0.7;
+      }
+      return {atCorner: atCorner, startOk: startOk,
+              arrow: hm ? [Math.round(parseFloat(hm[1])), Math.round(parseFloat(hm[2]))] : null};
+    })()`);
+    if (!cornerRing.atCorner) fail("угол кольца недоступен: " + JSON.stringify(cornerRing));
+    if (!cornerRing.startOk) fail("нить начинается не от края подсказки: " + JSON.stringify(cornerRing));
     // Перерисовка карточки: элемент исчезает из-под курсора без pointerout,
     // подсказка не имеет права висеть на мёртвом узле.
     await evaluate('var b = document.getElementById("probe-tip-big"); if (b) b.remove(); true');
@@ -667,7 +694,8 @@ async function waitForPage() {
     console.log(`  задержка=${tipEarly.hidden ? "есть" : "нет"} текст="${tip.text}" ` +
       `нить=${tip.thread} наконечник_у_элемента=${tip.onBorder} ` +
       `следует_за_курсором=${bigMoved && bigEnd.settled} скрыта_после_ухода=${goneOk} ` +
-      `орбита=[${orbitSides.join(",")}] наконечник_в_грани=${orbitArrow.ok}`);
+      `орбита=[${orbitSides.join(",")}] наконечник_в_грани=${orbitArrow.ok} ` +
+      `угол_кольца=${cornerRing.atCorner} старт_от_края=${cornerRing.startOk}`);
 
     // Магнитные силы подсказок (карточка «Подсказки» раздела «Интерфейс»):
     // поля есть и переводятся, дефолты 50/100, правка сохраняется и применяется

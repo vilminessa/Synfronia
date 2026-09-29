@@ -68,17 +68,18 @@
 
   // ---- подсказки -----------------------------------------------------------
   // Один элемент на страницу (см. initTooltips). В режиме hover подсказка
-  // «крутится» вокруг элемента: сторона выбирается по направлению от центра
-  // элемента к курсору, вдоль грани - за координатой курсора, - поэтому нить
-  // упирается в грань, а не в угол, и подсказка не накрывает элемент. Между
-  // краем подсказки и краем элемента рисуется «нить» (SVG) с наконечником-
+  // «придерживается круговой области» вокруг элемента: цель - кольцо на угле
+  // «центр элемента -> курсор», поэтому прямые грани и углы достижимы
+  // одинаково, при обводе курсором подсказка плавно объезжает угол, а не
+  // срывается на противоположную сторону. Между краем подсказки и краем
+  // элемента рисуется «нить» (SVG) строго от края до края, с наконечником-
   // стрелкой у элемента. В режиме focus (клавиатура) курсора нет - сторона
   // выбирается по простору: сверху, иначе снизу, затем по бокам. Скрывается,
   // как только элемент пропал из-под курсора, узел отсоединён или курсор
   // ушёл из окна, - потому что pointerout после перерисовки карточки
   // настроек не приходит.
   var TIP = {node: null, text: null, thread: null, line: null, head: null,
-             target: null, pending: null, mode: "hover", side: null,
+             target: null, pending: null, mode: "hover", ang: null,
              cx: 0, cy: 0, x: 0, y: 0, tx: 0, ty: 0,
              raf: 0, timer: 0, shown: false, lastT: 0};
   var SVG_NS = "http://www.w3.org/2000/svg";
@@ -143,15 +144,15 @@
     TIP.head = head;
   }
 
-  // Куда поставить подсказку. hover - орбита: сторона берётся по направлению
-  // от центра элемента к курсору (нормировано на полуполе, чтобы сторона не
-  // дрожала на диагонали; прежняя сторона держится, пока новая не выигрывает
-  // с заметным перевесом), вдоль грани подсказка идёт за координатой курсора.
-  // Так нить упирается в грань, а не в угол, а при обводе курсором подсказка
-  // плавно переходит вокруг элемента на другие грани. Снаружи, с зазором
-  // силы repel; при 0 зазор минимален и подсказка может лечь на элемент
-  // вполовину (onto). focus: сверху, если есть место, иначе снизу, затем
-  // по бокам с большим простором.
+  // Куда поставить подсказку. hover - кольцо: цель строится в полярных
+  // координатах от центра элемента на угле «центр -> курсор» - расстояние
+  // это выход луча из рамки элемента в этом направлении + зазор силы repel +
+  // проекция самого бокса подсказки, поэтому подсказка придерживается
+  // круговой области одинаково и на гранях, и на углах. Угол ограничен по
+  // скорости (0.45 рад/кадр): при переходе курсора через центр подсказка
+  // объезжает элемент по кольцу, а не летит сквозь него; в центре (курсор
+  // ближе 6px) угол держится прежним, чтобы не дрожать. focus: сверху, если
+  // есть место, иначе снизу, затем по бокам с большим простором.
   function tipTarget() {
     var el = TIP.target;
     var w = TIP.node.offsetWidth;
@@ -181,35 +182,31 @@
         dx = fside === "right" ? r.right + TIP_GAP : r.left - TIP_GAP - w;
       }
     } else {
+      // кольцо: цель на угле «центр -> курсор», радиус = выход луча из
+      // рамки + зазор + проекция бокса подсказки на направление
+      var ccx = r.left + r.width / 2, ccy = r.top + r.height / 2;
       var hw = Math.max(r.width / 2, 1), hh = Math.max(r.height / 2, 1);
-      var vx = TIP.cx - (r.left + r.width / 2);
-      var vy = TIP.cy - (r.top + r.height / 2);
-      var sc = {bottom: vy / hh, right: vx / hw, top: -vy / hh, left: -vx / hw};
-      // помещается ли подсказка снаружи этой грани (с зазором и отступом окна)
-      function fits(s) {
-        if (s === "top") return r.top - TIP_MARGIN - gap >= h;
-        if (s === "bottom") return window.innerHeight - r.bottom - TIP_MARGIN - gap >= h;
-        if (s === "left") return r.left - TIP_MARGIN - gap >= w;
-        return window.innerWidth - r.right - TIP_MARGIN - gap >= w;
+      var vx = TIP.cx - ccx, vy = TIP.cy - ccy;
+      var lv = Math.hypot(vx, vy);
+      var want;
+      if (lv >= 6) want = Math.atan2(vy, vx);
+      else if (TIP.ang !== null) want = TIP.ang;   // курсор в центре - угол держим
+      else want = Math.PI / 2;                     // первый показ - снизу
+      if (TIP.ang === null) TIP.ang = want;
+      else {
+        var dA = want - TIP.ang;
+        while (dA > Math.PI) dA -= 2 * Math.PI;
+        while (dA < -Math.PI) dA += 2 * Math.PI;
+        var step = reducedMotion() ? 4 : 0.45;     // рад за кадр: вокруг, не сквозь
+        TIP.ang += Math.max(-step, Math.min(step, dA));
       }
-      var order = Object.keys(sc).sort(function(a, b) { return sc[b] - sc[a]; });
-      var side = null;
-      // прежняя сторона держится, пока новая не выигрывает с заметным перевесом
-      if (TIP.side && sc[order[0]] <= sc[TIP.side] + 0.25 && fits(TIP.side)) side = TIP.side;
-      if (!side) for (var i = 0; i < order.length; i++) if (fits(order[i])) { side = order[i]; break; }
-      if (!side) side = TIP.side || order[0];   // негде поместиться - clamp спасёт
-      TIP.side = side;
-      if (side === "top" || side === "bottom") {
-        dx = (w < r.width
-              ? Math.max(r.left + w / 2, Math.min(TIP.cx, r.right - w / 2))
-              : r.left + r.width / 2) - w / 2;
-        dy = side === "bottom" ? r.bottom + gap - onto : r.top - gap + onto - h;
-      } else {
-        dy = (h < r.height
-              ? Math.max(r.top + h / 2, Math.min(TIP.cy, r.bottom - h / 2))
-              : r.top + r.height / 2) - h / 2;
-        dx = side === "right" ? r.right + gap - onto : r.left - gap + onto - w;
-      }
+      var ux = Math.cos(TIP.ang), uy = Math.sin(TIP.ang);
+      var tR = Math.min(ux ? Math.abs(hw / ux) : Infinity,
+                        uy ? Math.abs(hh / uy) : Infinity);
+      var proj = (w / 2) * Math.abs(ux) + (h / 2) * Math.abs(uy);
+      var dist = tR + gap - onto + proj;
+      dx = ccx + ux * dist - w / 2;
+      dy = ccy + uy * dist - h / 2;
     }
     dx = Math.max(TIP_MARGIN, Math.min(dx, window.innerWidth - w - TIP_MARGIN));
     dy = Math.max(TIP_MARGIN, Math.min(dy, window.innerHeight - h - TIP_MARGIN));
@@ -226,7 +223,7 @@
     TIP.target = el;
     TIP.pending = null;
     TIP.shown = false;
-    TIP.side = null;
+    TIP.ang = null;
     TIP.text.textContent = text;
     el.setAttribute("aria-describedby", "tip");
     TIP.node.hidden = false;
@@ -311,22 +308,16 @@
       if (m === dl) px = r.left; else if (m === dr) px = r.right;
       else if (m === dt) py = r.top; else py = r.bottom;
     }
-    var dx = px - cx, dy = py - cy;
+    // старт нити - ближайшая к точке на объекте точка края подсказки:
+    // строка всегда «край -> край», центр подсказки в геометрии не участвует
+    var sx = Math.max(TIP.x, Math.min(px, TIP.x + w));
+    var sy = Math.max(TIP.y, Math.min(py, TIP.y + h));
+    var dx = px - sx, dy = py - sy;
     var len = Math.hypot(dx, dy);
     if (len < 1) {
       TIP.line.setAttribute("d", "");
       TIP.head.setAttribute("d", "");
       return;
-    }
-    // выход луча из рамки подсказки (старт нити)
-    var sx, sy;
-    if (dx === 0) { sx = cx; sy = cy + (dy < 0 ? -h / 2 : h / 2); }
-    else if (dy === 0) { sx = cx + (dx < 0 ? -w / 2 : w / 2); sy = cy; }
-    else {
-      var tx0 = (w / 2) / Math.abs(dx), ty0 = (h / 2) / Math.abs(dy);
-      var t0 = Math.min(tx0, ty0);
-      sx = cx + dx * t0;
-      sy = cy + dy * t0;
     }
     TIP.line.setAttribute("d", "M " + sx.toFixed(1) + " " + sy.toFixed(1)
       + " L " + px.toFixed(1) + " " + py.toFixed(1));
