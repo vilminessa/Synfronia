@@ -71,6 +71,19 @@ def main() -> int:
     ok("v*" in tags, "триггер по тегам v*", str(tags))
     ok("workflow_dispatch" in (trig or {}), "триггер workflow_dispatch (проба без публикации)")
 
+    ver_file = ROOT / "version.py"
+    ok(ver_file.is_file(), "version.py существует (единственный источник версии)")
+    if ver_file.is_file():
+        m = re.search(r'__version__\s*=\s*"(\d+)\.(\d+)\.(\d+)"',
+                      ver_file.read_text(encoding="utf-8"))
+        ok(m is not None, "__version__ в формате X.Y.Z", str(m))
+    steps = jobs.get("verify", {}).get("steps") or []
+    vsteps = [s for s in steps if "Версия совпадает с тегом" in str(s.get("name", ""))]
+    ok(bool(vsteps), "в verify есть шаг сверки версии с тегом")
+    if vsteps:
+        ok("refs/tags/" in str(vsteps[0].get("if", "")),
+           "сверка версии выполняется только на тегах", str(vsteps[0].get("if", "")))
+
     section("2. пиннинг внешних экшенов")
     bad: list[str] = []
     for jname, job in jobs.items():

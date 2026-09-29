@@ -11,6 +11,7 @@
   "font_mono": "",
   "tip_pull": 50,
   "tip_repel": 100,
+  "app_version": "1.2.7",
   "ftp_active": false,
   "ftp_mode": "batch",
   "ftp_host": "",
