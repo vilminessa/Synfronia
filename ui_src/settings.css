@@ -89,8 +89,10 @@
      чекбокс спрятан (opacity 0), тумблер - SVG 40x20, ровно по пикселям
      темы, поэтому каждый юнит = 1 CSS px. Клики переключают через JS
      (см. renderField), цвета берутся из тех же переменных, что и остальные
-     элементы управления. */
-  .check.pixel-toggle { gap: 0; }
+     элементы управления. width: max-content - бокс обнимает сам тумблер:
+     подсказка (нить) целится в rect носителя data-tip, и без этого rect
+     был бы вся строка карточки, а не переключатель. */
+  .check.pixel-toggle { gap: 0; width: max-content; }
   .check.pixel-toggle input {
     position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0;
   }
