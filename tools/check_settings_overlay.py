@@ -190,9 +190,9 @@ def main() -> int:
     api.save_setting("language", "en")
     ok(api.poll(0)["ui_rev"] > rev0, "смена языка поднимает ui_rev")
     rev1 = api.poll(0)["ui_rev"]
-    api.set_font("font_sans", "Inter")
+    api.set_font("font_sans", "JetBrains Mono")
     ok(api.poll(0)["ui_rev"] > rev1, "смена шрифта поднимает ui_rev")
-    ok(api.poll(0)["settings"]["font_sans"] == "Inter",
+    ok(api.poll(0)["settings"]["font_sans"] == "JetBrains Mono",
        "poll отдаёт и новое значение шрифта")
     ok("open_settings" not in inspect.getsource(gui.Api.set_theme),
        "смена темы не открывает ничего лишнего")

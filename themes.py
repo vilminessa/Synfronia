@@ -40,15 +40,6 @@ _THEME_DEFAULTS = {
     "radius_l": 12,
 }
 THEMES = {
-    "scary_forest": {
-        "label": "Scary Forest",
-        "bg": "#0c1622",
-        "surface": "#1f2b29",
-        "widget": "#23444b",
-        "text": "#dcdedd",
-        "accent": "#628d7c",
-        **_THEME_DEFAULTS,
-    },
     "technology_day": {
         "label": "Technology day",
         "bg": "#00181a",
@@ -92,15 +83,6 @@ THEMES = {
         "widget": "#323756",
         "text": "#fffedd",
         "accent": "#fff2c9",
-        **_THEME_DEFAULTS,
-    },
-    "vilmy": {
-        "label": "Vilmy~",
-        "bg": "#F5F0E6",
-        "surface": "#EFE9DC",
-        "widget": "#EDE5D3",
-        "text": "#1F3A2E",
-        "accent": "#B89968",
         **_THEME_DEFAULTS,
     },
     "liquid_glass": {

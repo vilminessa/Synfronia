@@ -28,7 +28,19 @@
     font-size: 13px; color: var(--accent); opacity: 0; transition: opacity .5s;
     pointer-events: none; white-space: nowrap;
   }
-  .clicker-msg.show { opacity: 1; }
+  .clicker-msg.show {
+    opacity: 1;
+    /* wiggle: реплика-комментарий извивается - прыжок с наклоном и скосом,
+       пока она видна (fade остаётся общим через transition) */
+    animation: msg-wiggle .55s ease-in-out infinite;
+  }
+  @keyframes msg-wiggle {
+    0%, 100% { transform: translate(0, 0) rotate(0deg); }
+    15% { transform: translate(-5px, -4px) rotate(-3deg) skewX(-6deg); }
+    35% { transform: translate(5px, -2px) rotate(3deg) skewX(6deg); }
+    55% { transform: translate(-4px, 2px) rotate(-2deg) skewX(-4deg); }
+    75% { transform: translate(4px, 3px) rotate(2deg) skewX(4deg); }
+  }
   .clicker {
     min-width: 120px; height: 42px; padding: 0 18px; border-radius: var(--radius-l);
     background: var(--surface); border: 1px solid var(--widget); color: var(--text);
@@ -181,7 +193,8 @@
     .dl, .dl-fill, .dl-label, .dl-pct, .dl-icon,
     .dl.dl-indeterminate::after,
     .dl.dl-ok .dl-icon, .dl.dl-err .dl-icon, .dl.dl-warn .dl-icon,
-    .dl.dl-fail .dl-icon, .dl.dl-cancel .dl-icon { animation: none !important; transition: none !important; }
+    .dl.dl-fail .dl-icon, .dl.dl-cancel .dl-icon,
+    .clicker-msg.show { animation: none !important; transition: none !important; }
   }
 
   /* ---- ffmpeg bloom-оверлей: дождь поверх темы ---- */

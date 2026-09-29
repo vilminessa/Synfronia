@@ -50,8 +50,8 @@ for pkg in ("yt_dlp", "webview"):
     datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 datas += [("based_settings.json", ".")]
 
-# Вшитые тестовые шрифты (Inter, JetBrains Mono, Noto Sans; OFL 1.1).
-# При первом запуске fonts.seed_bundled_fonts() раскладывает их в
+# Вшитый тестовый шрифт (JetBrains Mono; OFL 1.1).
+# При первом запуске fonts.seed_bundled_fonts() раскладывает его в
 # %LOCALAPPDATA%\Synfronia\fonts, поэтому свежая установка работает без сети.
 _font_dir = Path(SPECPATH) / "assets" / "fonts"
 if _font_dir.is_dir():

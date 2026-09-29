@@ -46,7 +46,7 @@ def make_tree(root: Path) -> None:
     (root / "fonts").mkdir()
     (root / "logs").mkdir()
     (root / "bin" / "ffmpeg.exe").write_bytes(b"FF" * 100)
-    (root / "fonts" / "Inter.ttf").write_bytes(b"F" * 50)
+    (root / "fonts" / "MyFont.ttf").write_bytes(b"F" * 50)
     (root / "logs" / "app.log").write_text("строка\n", encoding="utf-8")
     (root / "settings.json").write_text("{}", encoding="utf-8")
 
