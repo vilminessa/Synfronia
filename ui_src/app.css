@@ -68,6 +68,63 @@
   }
   .tip.tip-on { opacity: 1; }
   .tip .tip-text { display: block; }
+  /* Волшебная обводка: бегущий по периметру градиентный след (conic-градиент
+     крутится через зарегистрированный угол --tip-spin) плавно мерцает, под
+     ним - мягкое пульсирующее свечение. Из-под подсказки веером идут шесть
+     пылинок (z-index: -1 - под текстом, у краёв, задержки через 0.5 с, чтобы
+     поток был непрерывным). Всё анимированное выключается при
+     prefers-reduced-motion. */
+  @property --tip-spin {
+    syntax: "<angle>";
+    initial-value: 0deg;
+    inherits: false;
+  }
+  .tip::before {
+    content: ""; position: absolute; inset: -3px; z-index: -1;
+    padding: 2px; border-radius: calc(var(--radius-s) + 3px);
+    background: conic-gradient(from var(--tip-spin),
+      var(--accent), #fff9c4, var(--accent), #b6f0ff, var(--accent));
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+    animation: tipSpin 4.2s linear infinite, tipShimmer 2.6s ease-in-out infinite alternate;
+  }
+  .tip::after {
+    content: ""; position: absolute; inset: 0; z-index: -1;
+    border-radius: inherit;
+    box-shadow: 0 0 14px 3px var(--accent);
+    pointer-events: none;
+    animation: tipGlow 2.6s ease-in-out infinite alternate;
+  }
+  .tip i.dust {
+    position: absolute; width: 3px; height: 3px; z-index: -1;
+    border-radius: 50%; opacity: 0;
+    background: radial-gradient(circle, #fff, var(--accent));
+    pointer-events: none;
+    animation: tipDust 3s ease-out infinite;
+  }
+  .tip i.dust:nth-of-type(1) { left: 14%; top: -2px;     --dx: -9px; --dy: -20px; animation-delay: 0s; }
+  .tip i.dust:nth-of-type(2) { left: 46%; top: -3px;     --dx: 3px;  --dy: -25px; animation-delay: .5s; }
+  .tip i.dust:nth-of-type(3) { right: 12%; top: -2px;    --dx: 15px; --dy: -18px; animation-delay: 1s; }
+  .tip i.dust:nth-of-type(4) { left: 20%; bottom: -2px;  --dx: -13px; --dy: 21px; animation-delay: 1.5s; }
+  .tip i.dust:nth-of-type(5) { left: 55%; bottom: -3px;  --dx: 7px;  --dy: 24px; animation-delay: 2s; }
+  .tip i.dust:nth-of-type(6) { right: 15%; bottom: -2px; --dx: 17px; --dy: 19px; animation-delay: 2.5s; }
+  @keyframes tipSpin { to { --tip-spin: 360deg; } }
+  @keyframes tipShimmer { from { opacity: .35; } to { opacity: .95; } }
+  @keyframes tipGlow { from { opacity: .15; } to { opacity: .5; } }
+  @keyframes tipDust {
+    0%   { opacity: 0; transform: translate(0, 0) scale(.5); }
+    18%  { opacity: .95; }
+    72%  { opacity: .3; }
+    100% { opacity: 0; transform: translate(var(--dx, 12px), var(--dy, -20px)) scale(1.2); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .tip::before, .tip::after { animation: none; }
+    .tip::after { opacity: .3; }
+    .tip i.dust { animation: none; opacity: 0; }
+  }
   /* Нить между подсказкой и элементом: полноэкранный SVG под подсказкой,
      сам не кликается и не читается скринридером. */
   #tip-thread {

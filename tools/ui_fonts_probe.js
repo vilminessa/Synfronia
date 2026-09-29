@@ -539,6 +539,19 @@ async function waitForPage() {
               x: Math.round(r.left), y: Math.round(r.top),
               inView: r.left >= 0 && r.right <= window.innerWidth + 1 && r.top >= 0};
     })()`);
+    // волшебная обводка мерцает (прозрачность меняется между замерами) и
+    // крутится, из-под подсказки в каждый момент светится пылинка
+    const magicRead = `(function () {
+      var t = document.getElementById("tip");
+      var cs = getComputedStyle(t, "::before");
+      var d = [].slice.call(t.querySelectorAll("i.dust"));
+      var lit = d.filter(function (n) { return parseFloat(getComputedStyle(n).opacity) > 0.05; }).length;
+      return {anim: cs.animationName, play: cs.animationPlayState,
+              op: parseFloat(cs.opacity), n: d.length, lit: lit};
+    })()`;
+    const magic1 = await evaluate(magicRead);
+    await sleep(400);
+    const magic2 = await evaluate(magicRead);
     const tipChecks = [
       ["появляется не сразу (задержка)", tipEarly.hidden === true],
       ["показывается по наведению", tip.hidden === false && tip.on === true],
@@ -549,6 +562,12 @@ async function waitForPage() {
       ["подсказка не накрывает элемент", !tip.overlap],
       ["подсказка помещается в окно", tip.inView],
       ["элемент связан с подсказкой", tip.described === "tip"],
+      ["волшебная обводка есть, крутится и мерцает",
+        magic1.anim.indexOf("tipSpin") >= 0 &&
+        magic1.play.indexOf("running") >= 0 &&
+        Math.abs(magic1.op - magic2.op) > 0.005],
+      ["пылинки исходят из-под подсказки",
+        magic1.n >= 6 && (magic1.lit >= 1 || magic2.lit >= 1)],
     ];
     tipChecks.forEach(([name, okFlag]) => { if (!okFlag) fail(name); });
     // курсор ушёл с кнопки - подсказка обязана исчезнуть вместе с нитью
@@ -695,7 +714,10 @@ async function waitForPage() {
       `нить=${tip.thread} наконечник_у_элемента=${tip.onBorder} ` +
       `следует_за_курсором=${bigMoved && bigEnd.settled} скрыта_после_ухода=${goneOk} ` +
       `орбита=[${orbitSides.join(",")}] наконечник_в_грани=${orbitArrow.ok} ` +
-      `угол_кольца=${cornerRing.atCorner} старт_от_края=${cornerRing.startOk}`);
+      `угол_кольца=${cornerRing.atCorner} старт_от_края=${cornerRing.startOk} ` +
+      `обводка=${magic1.anim.indexOf("tipSpin") >= 0 && magic1.play.indexOf("running") >= 0 ? "ok" : "BAD"}` +
+      `(мерцание ${Math.abs(magic1.op - magic2.op).toFixed(3)})` +
+      ` пылинки=${magic1.n}/${magic2.n} lit=${magic1.lit}+${magic2.lit}`);
 
     // Магнитные силы подсказок (карточка «Подсказки» раздела «Интерфейс»):
     // поля есть и переводятся, дефолты 50/100, правка сохраняется и применяется
