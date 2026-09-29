@@ -9,6 +9,8 @@
   "language": "en",
   "font_sans": "",
   "font_mono": "",
+  "font_heading": "",
+  "font_weight": "400",
   "tip_pull": 50,
   "tip_repel": 100,
   "app_version": "1.2.7",

@@ -204,6 +204,60 @@
     background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 600;
   }
 
+  /* ---- шрифты: две колонки - слева четыре круговых переключателя
+     (заголовки, общий, консольный, толщина), справа предпросмотр. Карточка
+     узнаётся по #font-preview; порядок полей в схеме = порядок строк левой
+     колонки. */
+  .field-card:has(> .field-card-body > #font-preview) .field-card-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+    gap: 4px 18px;
+    align-items: start;
+  }
+  .field-card:has(> .field-card-body > #font-preview) .radio-field { grid-column: 1; }
+  .field-card:has(> .field-card-body > #font-preview) #font-preview {
+    grid-column: 2; grid-row: 1 / span 4;
+    align-self: start; margin-top: 0;
+  }
+  .field-card:has(> .field-card-body > #font-preview)
+    .field-card-body > *:not(.radio-field):not(#font-preview) {
+    grid-column: 1 / -1;
+  }
+  .radio-field label { margin-top: 6px; }
+  .radios { display: flex; flex-direction: column; gap: 3px; }
+  .radios label.radio {
+    display: flex; align-items: center; gap: 8px;
+    margin: 0; padding: 3px 7px; border-radius: var(--radius-s);
+    font-size: 13px; opacity: 1; cursor: pointer;
+  }
+  .radios label.radio:hover { background: var(--surface); }
+  .radios input[type="radio"] {
+    accent-color: var(--accent); width: 14px; height: 14px; margin: 0;
+    cursor: pointer; flex: 0 0 auto;
+  }
+  .radios label.radio span {
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  /* предпросмотр: три строки - заголовок, абзац с весом, строка консоли */
+  #font-preview { font-size: 13px; line-height: 1.4; }
+  #font-preview .fp-head {
+    font-family: var(--font-head, var(--font-sans, "Segoe UI")), system-ui, sans-serif;
+    font-size: 19px; font-weight: 700; margin-bottom: 6px;
+  }
+  #font-preview .fp-text {
+    font-family: var(--font-sans, "Segoe UI"), system-ui, sans-serif;
+    font-weight: var(--font-weight, 400); margin-bottom: 7px;
+  }
+  #font-preview .fp-mono {
+    font-family: var(--font-mono, Consolas), ui-monospace, monospace;
+    font-size: 12px; opacity: .85;
+    white-space: nowrap; overflow-x: auto;
+  }
+  /* шрифт заголовков окна и карточек - как в главном окне */
+  .win-title, .field-card-title, .settings-card h1, .settings-card h2 {
+    font-family: var(--font-head, var(--font-sans, "Segoe UI")), system-ui, sans-serif;
+  }
+
   @media (max-width: 640px) {
     .nav { flex-basis: 128px; }
     .section { padding: 10px; }

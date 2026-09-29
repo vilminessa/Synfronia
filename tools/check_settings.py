@@ -46,7 +46,8 @@ LEGACY_DOM = {
     # раздел «Интерфейс»
     "lang", "theme", "reload-themes", "download-themes", "themes-dl-note",
     "open-themes",
-    "font-sans", "font-mono", "font-note", "font-dl-note",
+    "font-heading", "font-sans", "font-mono", "font-weight", "font-preview",
+    "font-note", "font-dl-note",
     "reload-fonts", "download-fonts", "open-fonts",
     "tip-pull", "tip-pull-range", "tip-repel", "tip-repel-range",
     "app-version",
@@ -198,7 +199,7 @@ def main() -> int:
     doms = _doms()
     ok(len(doms) == len(set(doms)), "dom-id уникальны",
        str([d for d in doms if doms.count(d) > 1]))
-    ok(len(flat_names) == 27, "в схеме 27 сохраняемые настройки", str(len(flat_names)))
+    ok(len(flat_names) == 29, "в схеме 29 сохраняемые настройки", str(len(flat_names)))
 
     # 3. совместимость с текущим файлом
     section("3. плоский формат не поехал")

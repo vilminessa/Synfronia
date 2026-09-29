@@ -432,6 +432,8 @@
       if (LANGS.indexOf(curLang) === -1) curLang = "en";
       FONT_PICK.sans = initData.settings.font_sans || "";
       FONT_PICK.mono = initData.settings.font_mono || "";
+      FONT_PICK.head = initData.settings.font_heading || "";
+      FONT_PICK.weight = initData.settings.font_weight || "";
       applyTheme(initData.settings.theme || "");
       setDownloadState("idle", 0, false);
       applyI18n();

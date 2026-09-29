@@ -85,6 +85,26 @@
   function fillSelect(id, opts, keepValue) {
     fillSelectNode(document.getElementById(id), opts, keepValue);
   }
+  // Круговые переключатели: [["значение", "подпись"], ...] -> radio-inputs в
+  // контейнере. Значения - строки; выбранное помечается по keep (иначе по
+  // текущему checked), отсутствующее значение падает на "" / первый вариант.
+  function fillRadios(wrap, opts, keep) {
+    if (!wrap || !opts || !opts.length) return;
+    var prev = keep !== undefined && keep !== null ? String(keep) : String(wrap.value || "");
+    wrap.innerHTML = "";
+    opts.forEach(function(o) {
+      var lab = el("label", "radio");
+      lab.appendChild(el("input", null, {type: "radio", name: wrap.id, value: String(o[0])}));
+      var txt = el("span");
+      txt.textContent = t(o[1]);
+      lab.appendChild(txt);
+      wrap.appendChild(lab);
+    });
+    var inputs = [].slice.call(wrap.querySelectorAll("input"));
+    var hit = inputs.filter(function(i) { return i.value === prev; })[0];
+    if (!hit) hit = inputs.filter(function(i) { return i.value === ""; })[0] || inputs[0];
+    if (hit) hit.checked = true;
+  }
   function caption(key, cls) {
     var node = el("span", cls, {"data-i18n": key});
     node.textContent = t(key);
@@ -182,6 +202,35 @@
       };
       return {nodes: [labelNode(spec), wrap], input: wrap,
               get: readMode, set: function(v) { setModeValue(wrap, v); }};
+    }
+    if (spec.type === "radio") {
+      // Круговые переключатели: подпись и список живут в одном узле - карточка
+      // шрифтов строит из таких узлов левую колонку (см. settings.css).
+      var grp = el("div", "radios", {id: spec.dom, role: "radiogroup",
+                                     "aria-label": t(spec.label)});
+      fillRadios(grp, spec.options || [], null);
+      Object.defineProperty(grp, "value", {
+        get: function() {
+          var on = grp.querySelector("input:checked");
+          return on ? on.value : "";
+        }
+      });
+      var cell = el("div", "radio-field");
+      cell.appendChild(labelNode(spec));
+      cell.appendChild(grp);
+      if (spec.title) {
+        grp.setAttribute("data-i18n-tip", spec.title);
+        setTip(grp, t(spec.title));
+      }
+      return {nodes: [cell], input: grp,
+              get: function() { return grp.value; },
+              set: function(v) {
+                var want = v === undefined || v === null ? "" : String(v);
+                var inputs = [].slice.call(grp.querySelectorAll("input"));
+                var hit = inputs.filter(function(i) { return i.value === want; })[0];
+                if (!hit) hit = inputs.filter(function(i) { return i.value === ""; })[0] || inputs[0];
+                inputs.forEach(function(i) { i.checked = i === hit; });
+              }};
     }
     if (spec.type === "choice") {
       input = el("select", null, {id: spec.dom});
@@ -426,30 +475,22 @@
     fillSelect("lang", LANGS.map(function(k) { return [k, I18N[k]["thisLang"]]; }));
   }
 
-  // Списки шрифтов: "" = системный. Семейства приходят с Python (папка fonts).
+  // Списки шрифтов: "" = системный. Семейства приходят с Python (папка
+  // fonts) и наполняют три группы круговых переключателей (заголовки,
+  // общий, консольный); вес берёт свои опции прямо из схемы.
   function buildFontOptions() {
     var families = (FONTS && FONTS.families) || [];
     var monoFirst = (FONTS && FONTS.mono) || [];
     var monoAll = monoFirst.concat(families.filter(function(f) {
       return monoFirst.indexOf(f) === -1;
     }));
-    [["font-sans", families], ["font-mono", monoAll]].forEach(function(pair) {
-      var sel = document.getElementById(pair[0]);
-      if (!sel) return;
-      var keep = sel.value;
-      sel.innerHTML = "";
-      var sys = document.createElement("option");
-      sys.value = "";
-      sys.textContent = t("sheet.font.system");
-      sel.appendChild(sys);
-      pair[1].forEach(function(f) {
-        var o = document.createElement("option");
-        o.value = f;
-        o.textContent = f;
-        sel.appendChild(o);
+    var sys = [["", t("sheet.font.system")]];
+    [["font-heading", families], ["font-sans", families], ["font-mono", monoAll]]
+      .forEach(function(pair) {
+        var node = document.getElementById(pair[0]);
+        if (!node || !node.classList.contains("radios")) return;
+        fillRadios(node, sys.concat(pair[1].map(function(f) { return [f, f]; })));
       });
-      sel.value = keep;
-    });
     updateFontNote();
   }
   function updateFontNote() {
@@ -459,6 +500,18 @@
     box.textContent = t("sheet.font.hint").replace("{path}", (FONTS && FONTS.folder) || "");
     box.hidden = false;
   }
+  // Предпросмотр шрифтов: заголовок (шрифт заголовков), абзац (общий шрифт и
+  // толщина) и строка консоли (моно) - по ним видно разницу. Текст не
+  // переводится: он показывает глифы, а не смысл; обновляется при смене
+  // любого из четырёх переключателей (NOTE_FILLERS.fontPreview).
+  function updateFontPreview() {
+    var box = document.getElementById("font-preview");
+    if (!box) return;
+    box.innerHTML = '<div class="fp-head">Synfronia</div>'
+      + '<div class="fp-text">Aa Bb Cc 0123456789 &middot; '
+      + 'Съешь же этих мягких булок, да выпей чаю</div>'
+      + '<div class="fp-mono">$ synfronia --format mp4 --quality lossless</div>';
+  }
 
   // Пересборка списков, опции которых пришли прямо из схемы (ftp.mode и т.п.).
   // Поля со своей логикой (dl.transcode с недоступными кодировщиками) дальше
@@ -466,8 +519,13 @@
   function fillSchemaChoices() {
     Object.keys(panelFields).forEach(function(key) {
       var f = panelFields[key], spec = f.spec;
-      if (spec.type !== "choice" || !spec.options) return;
-      fillSelectNode(f.input, spec.options, true);
+      if (spec.type === "choice" && spec.options) {
+        fillSelectNode(f.input, spec.options, true);
+        return;
+      }
+      if (spec.type === "radio" && spec.options) {
+        fillRadios(f.input, spec.options, f.get ? f.get() : null);
+      }
     });
   }
 
@@ -520,7 +578,7 @@
       }
     }
   };
-  var NOTE_FILLERS = {ftpDirNote: updateFtpDirNote};
+  var NOTE_FILLERS = {ftpDirNote: updateFtpDirNote, fontPreview: updateFontPreview};
   function refreshNotes() {
     Object.keys(noteFillers).forEach(function(src) { NOTE_FILLERS[src](); });
   }
@@ -647,6 +705,13 @@
     });
     onChange("ui.font_sans", function(node) { setFont("font-sans", node.value); });
     onChange("ui.font_mono", function(node) { setFont("font-mono", node.value); });
+    onChange("ui.font_heading", function(node) { setFont("font-heading", node.value); });
+    onChange("ui.font_weight", function(node, spec) {
+      pywebview.api.save_setting(spec.setting, node.value);
+      FONT_PICK.weight = node.value || "";
+      setFontVar("--font-weight", FONT_PICK.weight);
+      refreshNotes();   // предпросмотр сразу показывает новую толщину
+    });
   }
 
   // -- темы и шрифты ---------------------------------------------------------
@@ -712,16 +777,21 @@
   // и без потери состояния интерфейса. Карточка настроек в том же окне, так
   // что список шрифтов и @font-face обновляются на месте.
   function setFont(id, value) {
-    var slot = id === "font-mono" ? "mono" : "sans";
-    pywebview.api.set_font(id === "font-mono" ? "font_mono" : "font_sans", value)
+    var slot = id === "font-mono" ? "mono" : (id === "font-heading" ? "head" : "sans");
+    var key = slot === "mono" ? "font_mono" : (slot === "head" ? "font_heading" : "font_sans");
+    pywebview.api.set_font(key, value)
       .then(function(r) {
         if (r && r.error) { console.error("set font:", r.error); return; }
         FONT_PICK[slot] = value || "";
         if (r && r.css !== undefined) applyFontCss(r.css);
         var th = THEMES[themeKey()] || {};
-        var thFont = slot === "mono" ? th.font_mono : th.font;
-        setFontVar(slot === "mono" ? "--font-mono" : "--font-sans",
-                   quoted(thFont || FONT_PICK[slot]));
+        // тема переопределяет только общий и консольный шрифты - у заголовков
+        // своего поля в theme.json нет
+        var thFont = slot === "mono" ? th.font_mono : (slot === "head" ? "" : th.font);
+        var prop = slot === "mono" ? "--font-mono"
+                 : (slot === "head" ? "--font-head" : "--font-sans");
+        setFontVar(prop, quoted(thFont || FONT_PICK[slot]));
+        refreshNotes();   // предпросмотр показывает новый шрифт сразу
       })
       .catch(function(e) { console.error("set font:", e); });
   }
