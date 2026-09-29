@@ -734,7 +734,11 @@ async function waitForPage() {
       return after;
     }
     const lagLow = await lagAt(0), lagHigh = await lagAt(100);
-    if (!(lagLow.lag > lagHigh.lag + 4)) {
+    if (lagLow.rm) {
+      // при prefers-reduced-motion подсказка снапится мгновенно (snapTip) -
+      // «хвост схождения» не существует, сравнивать нечего
+      console.log("  притяжение: проверка скорости пропущена (reduced motion)");
+    } else if (!(lagLow.lag > lagHigh.lag + 4)) {
       fail(`притяжение не влияет на скорость: pull=0 -> ${lagLow.lag.toFixed(1)}px, ` +
            `pull=100 -> ${lagHigh.lag.toFixed(1)}px ` + JSON.stringify({lagLow, lagHigh}));
     }
