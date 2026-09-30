@@ -2,82 +2,78 @@
 
 # Synfronia
 
-Скачивание видео и целых плейлистов YouTube с **вшиванием метаданных,
-субтитров и обложки**, конвертацией в **HEVC** - десктопное приложение
-Windows с **web-интерфейсом** ([pywebview](https://pywebview.flowrl.com/) /
-EdgeChromium) на основе [yt-dlp](https://github.com/yt-dlp/yt-dlp).
+Download YouTube videos and playlists **with a friendly interface and no
+account** - web UI ([pywebview](https://pywebview.flowrl.com/) /
+EdgeChromium) on top of [yt-dlp](https://github.com/yt-dlp/yt-dlp), with
+merging, metadata, embedded subtitles and optional **HEVC** re-encode.
 
 ![Python](https://img.shields.io/badge/Python-3.14-blue?logo=python&logoColor=white)
-![GUI](https://img.shields.io/badge/UI-web%20%28pywebview%29-8A2BE2)
+![UI](https://img.shields.io/badge/UI-web%20%28pywebview%29-8A2BE2)
 ![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial-important)
 ![Build](https://img.shields.io/badge/build-PyInstaller-orange)
+![Release](https://img.shields.io/github/v/release/vilminessa/Synfronia?label=release)
+
+English · [Русский](README.ru.md)
 
 </div>
 
 ---
 
-## Возможности
+## Features
 
-- **Две вкладки: «Видео» и «Плейлист»** - отдельные конвейеры загрузки:
-  видео (одно видео) и плейлисты (целиком, с опциональной группировкой
-  в подпапку по названию плейлиста).
-- **Локализация интерфейса** - язык выбирается в настройках:
-  **Русский / English / 日本語 / 简体中文 / Español / Deutsch**
-  (сохраняется в настройках).
-- **Настройки карточкой поверх главного окна** - кнопка-шестерёнка справа вверху
-  открывает карточку по центру: список разделов слева (интерфейс, загрузчик, FTP),
-  поля справа, журнал работы - под ней, в том же окне. Всё сохраняется само, по
-  мере изменения полей. Пока карточка открыта, её владелец (`#app`) становится
-  `inert`: поля и кнопки под ней не нажимаются, а закрытие по крестику, Escape
-  или клику по затемнению возвращает фокус. Тема красит карточку, но не может
-  переопределить её разметку.
-- **Качество** - `lossless` (исходное), `2K`, `1080`, `720`, `480`, `240`
-  (понижение разрешения применяется постпроцессором).
-- **Субтитры** - вшиваются в файл: `нет / русские / английские / все`.
-- **Перекодировка** - по умолчанию выключена; на выбор `libx265` (программный
-  HEVC) и аппаратные `NVIDIA NVENC`, `AMD AMF`, `Intel Quick Sync (QSV)`
-  (доступные варианты определяются из установленного ffmpeg).
-- **Метаданные и обложка** - теги (название, автор, дата), превью вшивается
-  как вложение (attached picture).
-- **Модульные темы** - шесть встроенных (Technology day, Technology Pinks,
+- **Videos and playlists, whole or in parts** - paste a URL into the
+  «Video» or «Playlist» tab and the download starts: merged streams
+  (video + audio), metadata, thumbnails, subtitles embedded into the
+  container, and optional playlist archiving. Nothing is required from
+  you besides the link: no login, no cookies, no API keys.
+- **Multilingual interface** - six languages, switchable at runtime:
+  **Russian / English / 日本語 / 简体中文 / Español / Deutsch**
+  (UI and status messages alike).
+- **Modular themes** - six built-in (Technology day, Technology Pinks,
   Scarred Mind, Audrey Main Colours, Basic Night Sky, Liquid Glass)
-  и сколько угодно своих: папка в `%LOCALAPPDATA%\Synfronia\themes\<имя>\`
-  с `theme.json` (+ `custom.css`, `index.html`, слоты и ассеты).
-  Тема задаёт палитру, радиусы, прозрачность, свои шрифты и даже свой HTML.
-  Подробнее - [Модульные темы](#модульные-темы).
-- **Модульные шрифты** - встроенных шрифтов нет: положите `.ttf`, `.otf`,
-  `.woff` или `.woff2` в `%LOCALAPPDATA%\Synfronia\fonts` и выберите семейство
-  в настройках (отдельно обычный и моноширинный). Подробнее - [Шрифты](#шрифты).
-- **Выгрузка на FTP/FTPS** - готовые файлы (после склейки, перекодировки и
-  вшивания субтитров) уходят на сервер: FTP или FTPS, пассивный режим, каталоги
-  создаются автоматически, имя файла и путь задаются шаблонами, есть повторы,
-  проверка подключения и удаление локальных файлов после загрузки.
-  Подробнее - [Выгрузка на FTP](#выгрузка-на-ftp).
-- **Ход загрузки и отмена** - прогресс-бар из логов yt-dlp, кнопка «Стоп».
-- **Настройки сохраняются** в `%LOCALAPPDATA%\Synfronia\settings.json`,
-  журнал работы - в `%LOCALAPPDATA%\Synfronia\logs`; данные WebView2 живут
-  в `%LOCALAPPDATA%\Synfronia\webview`, страница пробников - в
-  `%LOCALAPPDATA%\Synfronia\probe` (в `%TEMP%` приложение ничего не пишет).
+  plus unlimited custom ones: a folder in
+  `%LOCALAPPDATA%\Synfronia\themes\<name>\` with `theme.json`
+  (+ `custom.css`, `index.html`, slots and assets).
+  A theme defines the palette, radii, transparency, its own fonts and
+  even its own HTML.
+  More - [Modular themes](#modular-themes).
+- **Modular fonts** - JetBrains Mono ships with the app; drop your own
+  `.ttf`, `.otf`, `.woff` or `.woff2` into
+  `%LOCALAPPDATA%\Synfronia\fonts` and pick a family for the interface
+  and for the console (or use the system font).
+  More - [Fonts](#fonts).
+- **FTP/FTPS upload** - finished files (after merging, re-encoding and
+  subtitle embedding) go to your server: FTP or FTPS, passive mode,
+  automatic directories, templated path and file name, retries,
+  connection test and optional local cleanup after upload.
+  More - [FTP upload](#ftp-upload).
+- **Progress and cancel** - progress bar driven by yt-dlp logs, a Stop
+  button.
+- **Everything stays local** - settings in
+  `%LOCALAPPDATA%\Synfronia\settings.json`, logs in
+  `%LOCALAPPDATA%\Synfronia\logs`, WebView2 data in
+  `%LOCALAPPDATA%\Synfronia\webview`, probe pages in
+  `%LOCALAPPDATA%\Synfronia\probe` (nothing is ever written to `%TEMP%`).
 
-## Требования
+## Requirements
 
-- Windows 10/11 с **WebView2 Runtime** (по умолчанию входит в состав Edge;
-  для exe-версии больше ничего не нужно).
-- **ffmpeg** - при первом запуске приложение предложит скачать и установить
-  его автоматически (`%LOCALAPPDATA%\Synfronia\bin`). Вручную тоже можно:
-  положите `ffmpeg.exe` в `PATH` или установите через winget/Program Files.
-  Требуется для склейки, метаданных и конвертации.
+- Windows 10/11 with **WebView2 Runtime** (ships with Edge by default;
+  for the exe build nothing else is needed).
+- **ffmpeg** - on first launch the app offers to download and install it
+  automatically into `%LOCALAPPDATA%\Synfronia\bin`. Manual install works
+  too: put `ffmpeg.exe` on `PATH` or install via winget/Program Files.
+  Required for stream merging, metadata and conversion.
 
-## Установка
+## Installation
 
-### Готовый exe
+### Ready-made exe
 
-Скачайте `Synfronia.exe` из [релизов](../../releases), запустите -
-приложение готово к работе. Если ffmpeg не найден, при первом запуске
-появится кнопка «Загрузить FFmpeg» - нажмите её, и всё настроится само.
-Рядом с ним положите `THIRD_PARTY_NOTICES.md` (лицензии компонентов).
+Download `Synfronia.exe` from the [releases](../../releases) page and run
+it - the app is ready. If ffmpeg is missing, a "Download FFmpeg" button
+appears on first launch - press it and everything sets itself up.
+Keep `THIRD_PARTY_NOTICES.md` (component licenses) next to it.
 
-### Из исходников
+### From source
 
 ```bat
 git clone https://github.com/vilminessa/Synfronia.git
@@ -86,151 +82,162 @@ pip install -r requirements.txt
 python gui.py
 ```
 
-## Использование
+## Usage
 
-| Поле / настройка | Описание |
+| Field / setting | Description |
 |---|---|
-| Вкладки | «Видео» - одно видео; «Плейлист» - весь плейлист целиком |
-| Ссылка | URL в соответствующей вкладке (видео или плейлист YouTube) |
-| ⚙ Настройки | шестерёнка справа вверху: язык, папка, тема, шрифты, подсказки, субтитры, качество, перекодировка, сеть |
-| Язык | Русский / English / 日本語 / 简体中文 / Español / Deutsch |
-| Каталог | куда сохранять (по умолчанию `downloads\` рядом с приложением) |
-| Тема | Technology day / Technology Pinks / Scarred Mind / Audrey Main / Night Sky / Liquid Glass + свои папки |
-| Шрифт интерфейса / моноширинный | семейство из папки `fonts` или системный |
-| Качество | `lossless` / 8K / 4K / 2K / 1080p / 720p / 480p / 240p |
-| Субтитры | off / ru / en / all (вшиваются в контейнер) |
-| Перекодировка | none / libx265 / nvenc / amf / qsv (аппаратные - по доступности) |
-| Сгруппировать плейлист | скачать плейлист одним архивом |
+| Tabs | "Video" - a single video; "Playlist" - the entire playlist |
+| URL | the link in the matching tab (YouTube video or playlist) |
+| ⚙ Settings | gear icon, top right: language, folder, theme, fonts, tooltips, subtitles, quality, re-encode, network |
+| Language | Русский / English / 日本語 / 简体中文 / Español / Deutsch |
+| Destination | where to save (defaults to `downloads\` next to the app) |
+| Theme | Technology day / Technology Pinks / Scarred Mind / Audrey Main / Night Sky / Liquid Glass + your own folders |
+| Fonts card | headings / general / console font and weight - knobs on the left, live preview on the right; families from the `fonts` folder or the system font |
+| Quality | `lossless` / 8K / 4K / 2K / 1080p / 720p / 480p / 240p |
+| Subtitles | off / ru / en / all (embedded into the container) |
+| Re-encode | none / libx265 / nvenc / amf / qsv (hardware - by availability) |
+| Group playlist | download a playlist as one archive |
 
-### Модульные темы
+### Modular themes
 
-Тема - это папка `%LOCALAPPDATA%\Synfronia\themes\<имя темы>\`. Кнопки
-«Папка тем…» и «Обновить темы» в настройках открывают её и перечитывают.
+A theme is a folder `%LOCALAPPDATA%\Synfronia\themes\<theme name>\`.
+The "Themes folder..." and "Reload themes" buttons in settings open and
+re-read it.
 
 ```jsonc
 // %LOCALAPPDATA%\Synfronia\themes\my_theme\theme.json
 {
-  "label": "Моя тема",          // имя в списке (обязательное)
-  "author": "Ник", "version": "1.0",   // показываются в настройках
-  "extends": "scarred_mind",    // палитра поверх встроенной темы
+  "label": "My theme",           // name in the list (required)
+  "author": "Nick", "version": "1.0",   // shown in settings
+  "extends": "scarred_mind",     // palette on top of a built-in theme
   "bg": "#101418", "surface": "#1b2228", "widget": "#263038",
   "text": "#e6e9ec", "accent": "#7fd1b9", "warn": "#ffb454",
   "radius_s": 6, "radius_m": 8, "radius_l": 12,   // px, 0..40
-  "opacity": 0.96,              // 0..1 - прозрачность окна
-  "font": "Inter",              // свой шрифт интерфейса (из папки fonts)
+  "opacity": 0.96,              // 0..1 - window transparency
+  "font": "Inter",              // own interface font (from the fonts folder)
   "font_mono": "JetBrains Mono",
-  "hidden": false,              // true - не показывать в списке
-  "entry": "index.html",        // свой HTML-шаблон (необязательно)
-  "css": "body { letter-spacing: .2px; }"          // или custom.css в папке
+  "hidden": false,              // true - hide from the list
+  "entry": "index.html",        // own HTML template (optional)
+  "css": "body { letter-spacing: .2px; }"          // or custom.css in the folder
 }
 ```
 
-- `entry` - полностью своя страница главного окна; в ней доступны плейсхолдеры
-  `__THEME_ROOT__` (палитра в `:root`), `__THEME_CSS__` (CSS темы),
-  `__FONTS_CSS__` (`@font-face`), `__APP_CSS__`, `__MAIN_CSS__`, `__COMMONJS__`,
-  `__APPJS__`, `__I18N__`, `__THEMES__`, `__SETTINGS_SCHEMA__`, а также секции
-  `<!-- SLOT:имя -->` (файл `slots\имя.html`) и `{{asset:путь}}` - ассеты
-  встраиваются как `data:URI`.
-- Карточку настроек тема не подменяет: её поля рисует код по схеме, поэтому
-  разметка всегда от приложения. `__SETTINGS_HTML__`, `__SETTINGS_CSS__` и
-  `__SETTINGS_JS__` подставлять в своём `entry` необязательно - если их нет,
-  приложение допишет оверлей, стили и скрипт сам, иначе шестерёнка в шапке
-  ничего не открыла бы. `slots\settings.html` игнорируется (в журнал пишется
-  предупреждение), а палитра, шрифты и `custom.css` действуют как обычно.
-- Значения проверяются: неизвестные и битые поля не ломают интерфейс, а
-  попадают в журнал и помечаются значком `⚠` в списке тем.
-- Поле `css` может быть строкой или списком файлов; если его нет, читается
-  `custom.css` из папки темы.
-- Переключение темы не перезагружает страницу, кроме тем с `entry`
-  или со своими `font` / `font_mono` - им нужен новый `@font-face`.
+- `entry` - a complete custom main-window page; it supports the
+  placeholders `__THEME_ROOT__` (palette in `:root`), `__THEME_CSS__`
+  (theme CSS), `__FONTS_CSS__` (`@font-face`), `__APP_CSS__`, `__MAIN_CSS__`,
+  `__COMMONJS__`, `__APPJS__`, `__I18N__`, `__THEMES__`,
+  `__SETTINGS_SCHEMA__`, plus sections `<!-- SLOT:name -->`
+  (`slots\name.html` files) and `{{asset:path}}` - assets are inlined as
+  `data:URI`.
+- A theme never replaces the settings card: its fields are rendered by
+  code from the schema, so the markup always belongs to the app.
+  `__SETTINGS_HTML__`, `__SETTINGS_CSS__` and `__SETTINGS_JS__` are
+  optional in your `entry` - if they are missing, the app appends the
+  overlay, styles and script itself (otherwise the gear in the header
+  would open nothing). `slots\settings.html` is ignored (a warning is
+  logged), while the palette, fonts and `custom.css` work as usual.
+- Values are validated: unknown or broken fields do not break the UI -
+  they land in the log and get a `⚠` marker in the theme list.
+- The `css` field may be a string or a list of files; without it,
+  `custom.css` from the theme folder is read.
+- Switching a theme does not reload the page, except for themes with
+  `entry` or their own `font` / `font_mono` - they need a fresh
+  `@font-face`.
 
-### Шрифты
+### Fonts
 
-В сборку вшит один тестовый шрифт (OFL 1.1, ~190 КБ): **JetBrains Mono**
-из `assets/fonts`. При первом запуске он
-раскладывается в `%LOCALAPPDATA%\Synfronia\fonts` вместе с текстами лицензий
-и `README.txt`, поэтому свежая установка работает без сети, а список шрифтов
-не пустой. Уже существующие файлы не трогаются: папка шрифтов принадлежит
-пользователю. Кнопка «Докачать шрифты» в настройках тянет те же файлы из
-сети (`github.com/google/fonts`) - нужно, если файлы удалили или хочется
-проверить скачивание; прогресс и итог видны в журнале, список шрифтов
-обновляется сам. CJK (японский, китайский) эти файлы не покрывают - для них
-приложение откатывается на системный шрифт.
+One test font ships with the app (OFL 1.1, ~190 KB): **JetBrains Mono**
+from `assets/fonts`. On first launch it is laid out into
+`%LOCALAPPDATA%\Synfronia\fonts` together with the license text and a
+`README.txt`, so a fresh install works offline. Existing files are never
+overwritten: the fonts folder belongs to the user. The "Reload fonts"
+button re-scans the folder; "Download fonts" fetches the same file from
+the network (`github.com/google/fonts`) - useful if the file was deleted
+or you want to test downloading; progress and result show up in the log
+and the font list refreshes itself. CJK (Japanese, Chinese) scripts are
+not covered by this file - the app falls back to the system font for
+them.
 
-Свои шрифты кладутся в ту же папку - по одному файлу `.ttf`, `.otf`, `.woff`
-или `.woff2` на начертание. Приложение читает из TTF/OTF таблицы `name`,
-`OS/2`, `head` и `fvar` (семейство, начертание, вес, диапазон веса
-вариативных шрифтов), а из WOFF/WOFF2 - имя файла, и встраивает выбранные
-шрифты прямо в страницу как `@font-face` с `data:URI`.
+Your own fonts go into the same folder - one `.ttf`, `.otf`, `.woff` or
+`.woff2` file per face. The app reads the TTF/OTF `name`, `OS/2`, `head`
+and `fvar` tables (family, face, weight, variable-weight range), and for
+WOFF/WOFF2 falls back to the file name, then inlines the selected fonts
+into the page as `@font-face` with `data:URI`.
 
-В карточке «Шрифты» слева - панелька 2x2 из круговых ручек в стиле FL:
-три ручки шрифтов (заголовков, общий, консольный) и бесконечная ручка
-толщины100..900. Шкала шрифтов конечная: дуга270° со стартом слева-внизу
-(«нулевая точка» снизу) и жёсткими упорами - колесо не крутит бесконечно;
-риски позиций, активная горит, «щелчок» детента, подсказка ручки показывает
-выбранное семейство его же шрифтом. Вращение всех ручек плавное, с
-ограничением максимальной скорости (1080 град/с) - бурст колеса не
-раскручивает ручку быстрее. Крутится колёсиком при наведении,
-перетаскиванием зажатой мышью по горизонтали и стрелками; число толщины
-живёт в подсказке «Толщина шрифта - N%». Справа - предпросмотр:
-«Заголовок - {шрифт}», «Основной текст - {шрифт}», «Консоль - {шрифт}» -
-каждая строка набрана своим шрифтом и обновляется при любом выборе. Тема
-может переопределить общий и консольный своими полями `font` / `font_mono`.
-Лимиты: 8 МБ на файл и 8 МБ на страницу; слишком крупные файлы не
-встраиваются, о чём пишется в журнал.
+Left side of the «Fonts» card: a 2x2 panel of FL-style round knobs:
+three font knobs (headings, general, console) and the endless weight
+knob100..900. The font scale is finite: a270° arc starting at the
+bottom-left (the "zero point") with hard end-stops - the wheel cannot
+spin forever; position ticks light up on the active detent (a visual
+"click"), and the knob's tooltip shows the selected family set in that
+very family. Rotation of every knob is smooth with a capped speed
+(1080 deg/s) - even a wheel burst cannot spin the knob faster. Turn them
+with the wheel while hovering, by dragging the held mouse horizontally,
+or with the arrow keys; the weight number lives in the tooltip
+«Font weight - N%». On the right: the preview -
+«Заголовок - {font}», «Основной текст - {font}», «Консоль - {font}» -
+each line is set in its own font and updates on any choice. A theme may
+override the general and console fonts with its `font` / `font_mono`
+fields. Limits: 8 MB per file and 8 MB per page; oversized files are
+not inlined and a message goes to the log.
 
-Смена шрифта, кнопка «Обновить шрифты» и переключение тем применяются
-сразу: Python отдаёт новый блок `@font-face`, а страница подменяет
-`#fonts-style` без перезагрузки - открытый раздел и заполненные поля
-остаются как есть. Полная пересборка страницы остаётся только для тем
-с собственным `index.html` (`entry`); тогда карточка настроек вернётся
-в том же состоянии, в каком была. Выбор в карточке долетает до главного
-окна по счётчику `ui_rev`.
+Font changes, the "Reload fonts" button and theme switches apply live:
+Python returns a fresh `@font-face` block and the page swaps the
+`#fonts-style` element without reloading - the open section and filled
+fields stay intact. A full page rebuild only happens for themes with
+their own `index.html` (`entry`); then the settings card returns in the
+same state. A choice in the card reaches the main window through the
+`ui_rev` counter.
 
-Проверка: `python tools/check_test_fonts.py` (без сети),
-`set SYNFONIA_FONTS_NETWORK=1` - дополнительно проверить реальную докачку;
-`node tools/ui_fonts_probe.js` - вёрстка главного окна с карточкой настроек
-в headless Edge (нужна страница от `python tools/ui_probe_page.py`, а
-`node tools/ui_themes_probe.js` - та же проверка по всем темам).
+Checks: `python tools/check_test_fonts.py` (offline),
+`set SYNFONIA_FONTS_NETWORK=1` - additionally verify real downloading;
+`node tools/ui_fonts_probe.js` - main-window layout with the settings
+card in headless Edge (needs a page from `python tools/ui_probe_page.py`);
+`node tools/ui_themes_probe.js` - the same check across all themes.
 
-### Выгрузка на FTP
+### FTP upload
 
-Раздел **FTP** в карточке настроек. Выгрузка идёт после того, как файл дополнен
-(склейка дорожек, перекодировка, вшитые субтитры, метаданные и обложка), то есть
-уже готовый результат, а не исходный поток.
+The **FTP** section of the settings card. The upload happens after the
+file is complete (stream merging, re-encoding, embedded subtitles,
+metadata and cover) - the finished result, not the raw stream.
 
-| Поле | Смысл |
+| Field | Meaning |
 | --- | --- |
-| Выгружать на FTP | Общий выключатель; без сервера выгрузка не пойдёт |
-| Режим | `Пакет` - все файлы одним заходом в конце загрузки; `Пофайлово` - отдельное подключение на каждый файл сразу после его загрузки (подробности - в подсказке на кнопке режима) |
-| Сервер / Порт / Логин / Пароль | Обычные параметры подключения (порт по умолчанию 21, логин `anonymous`) |
-| FTPS | Явный TLS (сначала обычный вход, затем `PROT P`) |
-| Проверять сертификат | Выключайте только для сервера с самоподписанным сертификатом |
-| Пассивный режим (PASV) | По умолчанию включён; выключайте, если сервер умеет только активный режим |
-| Папка на сервере | Шаблон пути, вложенные каталоги создаются сами |
-| Имя файла | Шаблон имени, поддерживает формат `{index:02d}` |
-| Удалять локальный файл | Файл удаляется только после подтверждённой загрузки |
-| Таймаут / Повторы | Таймаут сокета и число попыток при обрыве |
-| Проверить подключение | Подключается и сразу отключается, результат - в журнале и под кнопкой |
+| Upload to FTP | master switch; no server, no upload |
+| Mode | `Batch` - all files in one session at the end of a download; `Per-file` - a separate connection per file right after it is downloaded (details in the mode button tooltip) |
+| Host / Port / User / Password | regular connection parameters (port defaults to 21, user `anonymous`) |
+| FTPS | explicit TLS (plain login first, then `PROT P`) |
+| Verify certificate | turn off only for self-signed servers |
+| Passive mode (PASV) | on by default; turn off if the server only supports active mode |
+| Remote folder | path template, nested directories are created automatically |
+| File name | name template, supports the `{index:02d}` format |
+| Delete local file | the file is deleted only after a confirmed upload |
+| Timeout / Retries | socket timeout and number of attempts on connection loss |
+| Test connection | connects and disconnects immediately; result in the log and under the button |
 
-Шаблоны `{title}`, `{ext}`, `{index}`, `{id}`, `{playlist}`, `{date}` работают
-и в папке, и в имени файла (`{index}` - ещё и с форматом, например
-`{index:02d}` → `07`). Символы, которые нельзя в имени файла
-(`<>:"/\|?*`, хвост из точек, зарезервированные `CON`/`NUL`/`COM1`…), заменяются,
-длина ограничивается 180 байтами, сохраняя расширение. Выход за пределы
-базового каталога невозможен: `..` и пустые сегменты выбрасываются.
+Templates `{title}`, `{ext}`, `{index}`, `{id}`, `{playlist}`, `{date}`
+work in both the folder and the file name (`{index}` also takes a
+format, e.g. `{index:02d}` → `07`). Characters that are illegal in file
+names (`<>:"/\|?*`, trailing dots, reserved `CON`/`NUL`/`COM1`…)
+are replaced, the length is capped at 180 bytes keeping the extension.
+Escaping the base folder is impossible: `..` and empty segments are
+dropped.
 
-Особенности:
+Details:
 
-- два файла с одинаковым шаблонным именем не затирают друг друга: второй
-  получит `~2` перед расширением;
-- при обрыве соединения делается новое подключение, а каталоги создаются заново;
-- размер на сервере сверяется с локальным, если сервер его отдаёт;
-- отказ сервера (например, `553`) не повторяется - повторы только на обрыв;
-- пароль хранится в `settings.json` открытым текстом, как и остальные настройки.
+- two files with the same templated name never overwrite each other:
+  the second gets `~2` before the extension;
+- on connection loss a fresh connection is made and directories are
+  re-created;
+- the size on the server is compared with the local one when the server
+  reports it;
+- a server refusal (e.g. `553`) is not retried - retries are for
+  connection loss only;
+- the password is stored in `settings.json` in plain text, like every
+  other setting.
 
-Всё сделано на стандартной библиотеке (`ftplib`): никаких дополнительных
-пакетов для работы с FTP не нужно.
+Everything is built on the standard library (`ftplib`): no extra FTP
+packages are required.
 
 ### CLI
 
@@ -238,182 +245,234 @@ python gui.py
 python download.py <URL> [--dest C:\videos] [--subtitles ru] [--quality 720] [--transcode nvenc] [--lang en] [--no-ftp]
 ```
 
-Те же аргументы принимает `python core.py <URL> ...` - это тот же движок,
-если не нужен web-интерфейс. Выгрузка на FTP берётся из настроек;
-`--no-ftp` её отключает для одного запуска.
+`python core.py <URL> ...` accepts the same arguments - it is the same
+engine for when the web UI is not needed. FTP upload comes from
+settings; `--no-ftp` disables it for a single run.
 
-### Самопроверка (для отладки сборки)
+### Self-check (for build debugging)
 
 ```bat
 Synfronia.exe --selftest C:\videos https://youtu.be/GUS0q7gZdNE --subtitles ru --quality 720 --transcode libx265
 ```
 
-Результаты пишутся в `selftest.log`, файлы - в указанный каталог.
+Results go to `selftest.log`, files go to the given folder.
 
-## Отладочная консоль
+## Debug console
 
-`debug.py` - интерактивное меню по цифрам для обслуживания локальных данных
-и логов (только stdlib, без сторонних библиотек):
+`debug.py` - an interactive numbered menu for maintaining local data
+and logs (stdlib only, no third-party packages):
 
 ```bat
 python debug.py
 ```
 
-| Пункт | Что делает |
+| Item | What it does |
 |-------|-----------|
-| 1 | очистить `%LOCALAPPDATA%\Synfronia` полностью (предпросмотр с размерами + подтверждение) |
-| 2 | то же, но оставить только `bin\` (ffmpeg/ffprobe) |
-| 3-5 | запуск / завершение / состояние приложения (PID, время старта) |
-| 6-9 | логи: хвост последнего файла, список, показ файла целиком, удаление |
-| 10 | следить за логом в реальном времени (Ctrl+C - назад в меню) |
-| 11 | убрать служебные файлы Synfronia из `%TEMP%` (каталоги WebView2, артефакты пробников) |
+| 1 | wipe `%LOCALAPPDATA%\Synfronia` completely (preview with sizes + confirmation) |
+| 2 | the same, but keep only `bin\` (ffmpeg/ffprobe) |
+| 3-5 | start / stop / inspect the app (PID, start time) |
+| 6-9 | logs: tail of the last file, list, show a file fully, delete |
+| 10 | follow the log in real time (Ctrl+C - back to the menu) |
+| 11 | remove Synfronia service files from `%TEMP%` (WebView2 folders, probe artifacts) |
 
-Если приложение запущено, очистка сначала предлагает его завершить (файлы
-иначе заблокированы). Пункт 3 запускает `Synfronia.exe` рядом со скриптом
-либо `python gui.py`, вывод процесса уходит в `logs\launcher.log`, и запуск
-**ждёт окно с живым WebView2 15 с**: если WebView2 завис при старте или упал,
-показав тёмное окно, процесс завершается и запуск повторяется; после второй
-неудачи консоль предлагает `python gui.py --diagnose-freeze`. Пункт 4
-закрывает приложение мягко (WM_CLOSE - WebView2 убирает свой каталог, профиль
-всегда свежий), и только если окно не закрылось за 5 с - `taskkill`.
-
-## Сборка exe
+## Building the exe
 
 ```bat
 python -m PyInstaller Synfronia.spec --distpath . --workpath build --noconfirm
 ```
 
-spec собирает один файл (`--onefile --windowed`), включая yt-dlp, webview
-и рантайм .NET (pythonnet) для EdgeChromium.
+The spec produces a single file (`--onefile --windowed`), bundling
+yt-dlp, webview and the .NET runtime (pythonnet) for EdgeChromium.
 
-**Релиз по тегу.** Push тега `v*` запускает workflow **release**
-(`.github/workflows/release.yml`): проверки и пробники вёрстки → сборка exe →
-публикация exe в GitHub Release тега → **SLSA-провенанс**
-(`Synfronia.exe.intoto.jsonl`, slsa-github-generator v2.1.0, keyless-подпись
-через OIDC) → проверка подписи `gh attestation verify`. Ручной запуск
-(workflow_dispatch) проходит проверки, сборку, **генерацию провенанса и
-проверку подписи без публикации** — так весь конвейер проверяют до выпуска
-тега. Линт самого workflow: `python tools/check_release_yml.py`.
-На теге verify дополнительно сверяет имя тега с `version.py` — расходжение
-падает до сборки.
+**Release by tag.** Pushing a `v*` tag runs the **release** workflow
+(`.github/workflows/release.yml`): checks and layout probes → exe build →
+publishing the exe to the GitHub Release of the tag → **SLSA provenance**
+(`Synfronia.exe.intoto.jsonl`, slsa-github-generator v2.1.0, keyless
+signature via OIDC) → signature verification. A manual run
+(workflow_dispatch) passes checks, build, **provenance generation and
+signature verification without publishing** - the whole pipeline can be
+rehearsed before a tag goes out. The workflow itself is linted by
+`python tools/check_release_yml.py`; on a tag `verify` also cross-checks
+the tag name against `version.py`.
 
-### Выпуск версии
+### Releasing a version
 
-Версия приложения живёт в одном месте — `version.py` (`__version__`).
-От неё питаются: подпись «Synfronia by Vilminessa - vX.Y.Z» слева снизу
-главного окна, ключ `app_version` в `settings.json` (пишется при старте,
-если отличается), VersionInfo в свойствах exe и сверка тега в CI.
+The app version lives in one place - `version.py` (`__version__`).
+It feeds the UI signature, the `app_version` key in `settings.json`,
+the exe VersionInfo and the CI tag check.
 
-1. поднять `__version__` в `version.py` и `app_version` в
-   `based_settings.json` (проверки не дают забыть — умолчания сверяются);
-2. закоммитить;
-3. поставить тег `vX.Y.Z` (ровно `v` + версия из `version.py`) и запушить —
-   workflow release сверит тег и выпустит релиз с exe и провенансом.
+1. bump `__version__` in `version.py` and `app_version` in
+   `based_settings.json` (the checks will not let you forget - defaults
+   are compared);
+2. commit;
+3. tag `vX.Y.Z` (exactly `v` + the version from `version.py`) and push -
+   the release workflow verifies the tag and ships the exe with
+   provenance.
 
-## Состав
+## Project structure
 
 ```
-gui.py            - web-интерфейс (pywebview) + скрытый режим --selftest
-core.py           - фасад над модулями и точка входа `python core.py`
-paths.py          - пути приложения и файловый журнал
-settings.py       - настройки (based_settings.json -> settings.json)
-i18n.py           - переводы интерфейса и статусов (6 языков)
-themes.py         - модульные темы, валидация theme.json, сборка страницы
-fonts.py          - модульные шрифты из папки fonts (@font-face, data:URI),
-                    вшитые тестовые шрифты и докачка из сети
-ftp.py            - выгрузка готовых файлов на FTP/FTPS (ftplib)
-downloader.py     - загрузка через yt-dlp, постпроцессоры, ffmpeg
-download.py       - CLI-обёртка
-ui_src/           - исходники интерфейса: index.html, app.css, app.js
-ui.py             - сгенерированный из ui_src/ интерфейс (в репозитории)
-assets/fonts/     - вшитые тестовые шрифты (OFL 1.1) и их лицензии
-tools/build_ui.py - сборщик ui.py из ui_src/ (нужен только разработчикам)
-tools/utf8_console.py - общий для tools/ перевод вывода в UTF-8: консоль Windows
-  живёт в однобайтовой кодовой странице (cp1251/cp437/cp866), где нет ни
-  кириллицы, ни «✕», и проверки без этого падают с UnicodeEncodeError
-based_settings.json - настройки по умолчанию (копируются в settings.json
-  при первом запуске; недостающие ключи дописываются при обновлении)
-version.py        - версия приложения (единый источник: подпись в UI,
-                    app_version в settings.json, VersionInfo exe, сверка тега)
-requirements.txt  - yt-dlp, pywebview, pyinstaller, pyyaml (инструменты CI)
-Synfronia.spec    - конфиг сборки exe
-LICENSE           - лицензия проекта (PolyForm Noncommercial 1.0.0)
-THIRD_PARTY_NOTICES.md - источники и лицензии всех компонентов
+gui.py            - web UI (pywebview) + hidden --selftest mode
+core.py           - facade over modules and `python core.py` entry point
+paths.py          - app paths and file log
+settings.py       - settings (based_settings.json -> settings.json)
+i18n.py           - UI translations and statuses (6 languages)
+themes.py         - modular themes, theme.json validation, page build
+fonts.py          - modular fonts from the fonts folder (@font-face, data:URI),
+                    bundled test fonts and network fallback
+ftp.py            - upload of finished files to FTP/FTPS (ftplib)
+downloader.py     - downloads via yt-dlp, postprocessors, ffmpeg
+download.py       - CLI wrapper
+ui_src/           - UI sources: index.html, app.css, app.js
+ui.py             - generated UI from ui_src/ (kept in the repository)
+assets/fonts/     - bundled test fonts (OFL 1.1) and their licenses
+tools/build_ui.py - ui.py builder from ui_src/ (developers only)
+tools/utf8_console.py - shared UTF-8 output helper for tools/: the Windows
+  console lives in a single-byte code page (cp1251/cp437/cp866) with no
+  Cyrillic or "✕", and checks fail with UnicodeEncodeError without it
+based_settings.json - default settings (copied to settings.json on the
+  first launch; missing keys are appended on update
+version.py        - app version (single source of truth: UI signature,
+                    app_version in settings.json, exe VersionInfo, CI tag check)
+requirements.txt  - yt-dlp, pywebview, pyinstaller, pyyaml (CI tooling)
+Synfronia.spec    - exe build config
+LICENSE           - project license (PolyForm Noncommercial 1.0.0)
+THIRD_PARTY_NOTICES.md - sources and licenses of all components
 ```
 
-### Правка интерфейса
+### Editing the UI
 
-`ui.py` не редактируется руками: приложение читает страницу из этого модуля,
-поэтому после правки исходников его нужно пересобрать.
+`ui.py` is never edited by hand: the app reads the page from this
+module, so after touching the sources it must be rebuilt.
 
 ```bat
 python tools/build_ui.py            # ui_src/ -> ui.py
-python tools/build_ui.py --check    # проверить, что ui.py актуален (в CI)
+python tools/build_ui.py --check    # verify ui.py is fresh (runs in CI)
 ```
 
-Правки в `ui_src/index.html` попадают в `BASE_TEMPLATE`, `ui_src/app.css` -
-в `APP_CSS`, `ui_src/main.css` - в `MAIN_CSS`, `ui_src/app.js` - в `APP_JS`,
-а `ui_src/settings.html`, `settings.css`, `settings.js` и общий
-`ui_src/common.js` - соответственно в `SETTINGS_HTML`, `SETTINGS_CSS`,
-`SETTINGS_JS` и `COMMON_JS`. Все плейсхолдеры (`__THEME_ROOT__`,
+Edits in `ui_src/index.html` land in `BASE_TEMPLATE`, `ui_src/app.css`
+in `APP_CSS`, `ui_src/main.css` in `MAIN_CSS`, `ui_src/app.js` in
+`APP_JS`, and `ui_src/settings.html`, `settings.css`, `settings.js` and
+`ui_src/common.js` in `SETTINGS_HTML`, `SETTINGS_CSS`, `SETTINGS_JS` and
+`COMMON_JS` respectively. All placeholders (`__THEME_ROOT__`,
 `__THEME_CSS__`, `__FONTS_CSS__`, `__APP_CSS__`, `__MAIN_CSS__`,
 `__SETTINGS_CSS__`, `__SETTINGS_HTML__`, `__COMMONJS__`, `__APPJS__`,
 `__SETTINGS_JS__`, `__I18N__`, `__THEMES__`, `__SETTINGS_SCHEMA__`,
-`__APP_VERSION__`)
-подставляются при сборке страницы.
+`__APP_VERSION__`) are substituted at page build time.
 
-### Проверки для разработчиков
+### Developer checks
 
 ```bat
-python tools/check_settings.py          # схема настроек, переводы, карточка
-python tools/check_settings_overlay.py  # оверлей: сборка, Api, одно окно
-python tools/check_test_fonts.py        # встроенные шрифты и докачка (без сети)
-python tools/check_download_button.py   # кнопка «Скачать»: прогресс и итог
-python tools/check_tools_output.py      # скрипты печатают на любой кодовой странице
-python tools/check_release_yml.py      # линт release.yml: пиннинг, permissions SLSA, ASCII
-python tools/check_debug.py            # отладочная консоль: очистка, логи, меню
-node  tools/ui_themes_probe.js          # вёрстка карточки по всем темам (headless Edge)
+python tools/check_settings.py          # settings schema, translations, card
+python tools/check_settings_overlay.py  # overlay: build, Api, single window
+python tools/check_test_fonts.py        # bundled fonts and download (offline)
+python tools/check_download_button.py   # download button: progress and result
+python tools/check_tools_output.py      # scripts print on any code page
+python tools/check_release_yml.py      # release.yml lint: pinning, SLSA permissions, ASCII
+python tools/check_debug.py            # debug console: cleanup, logs, menu
+node  tools/ui_themes_probe.js          # card layout across all themes (headless Edge)
 ```
 
-## Источники компонентов
+## Legal, licenses & open source
 
-Проект построен на следующих сторонних компонентах
-(полные тексты лицензий - в [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)):
+### Open source - forever
 
-| Компонент | Лицензия | Источник |
-|---|---|---|
-| yt-dlp | Unlicense (public domain) | https://github.com/yt-dlp/yt-dlp |
-| pywebview | BSD-3-Clause | https://github.com/r0x0r/pywebview |
-| pythonnet / pythonnet-clr | MIT | https://github.com/pythonnet/pythonnet |
-| PyInstaller (только сборка) | GPL-2.0+ с исключением | https://github.com/pyinstaller/pyinstaller |
-| ffmpeg (внешний, не входит в exe) | GPL | https://ffmpeg.org/ |
-| JetBrains Mono (вшит, `assets/fonts`) | OFL-1.1 | https://github.com/google/fonts |
-| Python | PSF | https://www.python.org/ |
-| certifi, urllib3, idna, cffi, cryptography | MPL-2.0 / MIT / BSD-3 / MIT-0 / Apache-2.0 | см. notices |
+The sources have been public since the first commit and are meant to
+stay public: the author has no plan to close the repository, move it
+behind an account or switch the project to a proprietary license.
+Forks, offline mirrors, research use and pull requests are welcome;
+every release ships with its sources and a build attestation.
 
-Цвета интерфейса взяты из палитр [color-hex.com](https://color-hex.com/).
+Honest note about the license: the project uses the **PolyForm
+Noncommercial License 1.0.0** (see [`LICENSE`](LICENSE)). This license
+grants free access to the source code but is **source-available, not
+"open source" in the OSI sense** - it forbids commercial use. The
+statement above is about the *availability and openness of the sources*,
+not about an OSI certification.
 
-## Лицензия
+### Third-party components
 
-Проект распространяется по **PolyForm Noncommercial License 1.0.0** -
-разрешено использование, изучение, изменение и распространение в
-**некоммерческих целях** (личные проекты, обучение, научные и
-благотворительные организации и т.д.). **Продажа** этого продукта или
-продуктов на его основе запрещена. Полный текст - в [`LICENSE`](LICENSE).
+The full list with license texts is in
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). The key legal facts:
 
-Примечание: эта лицензия не соответствует определению «Open Source»
-по стандарту OSI и является **source-available** (открытые исходники с
-ограничением на коммерцию).
+| Component | Status |
+|---|---|
+| [yt-dlp](https://github.com/yt-dlp/yt-dlp) | bundled, Unlicense (public domain) |
+| [pywebview](https://github.com/r0x0r/pywebview), pythonnet, bottle, certifi, urllib3, idna, cffi, cryptography | bundled, permissive licenses (BSD/MIT/Apache/MPL - see notices) |
+| [PyInstaller](https://github.com/pyinstaller/pyinstaller) | **build-time only**, GPL-2.0+ with the special build exception - it is not redistributed |
+| [ffmpeg](https://ffmpeg.org/) | **external, NOT bundled** - downloaded by the user or the app at first run; GPL applies to ffmpeg itself, not to this project's binaries |
+| [JetBrains Mono](https://www.jetbrains.com/lp/mono/) | bundled font, OFL-1.1 (attribution shipped next to it) |
+| CPython | bundled runtime, PSF License Agreement |
+
+UI palette inspirations: [color-hex.com](https://color-hex.com/) (see
+notices for the exact palettes and their terms).
+
+### Build provenance - verify what you download
+
+Every `Synfronia.exe` published in the releases is signed with an
+SLSA provenance attestation (Sigstore, keyless OIDC from GitHub
+Actions), so you can verify that the binary really came from this
+public source and was built by the pinned workflow:
+
+```bash
+gh release download v1.2.7 -R vilminessa/Synfronia -p Synfronia.exe -p Synfronia.exe.intoto.jsonl
+gh attestation verify Synfronia.exe \
+  --bundle Synfronia.exe.intoto.jsonl \
+  -R vilminessa/Synfronia \
+  --predicate-type https://slsa.dev/provenance/v0.2 \
+  --signer-repo slsa-framework/slsa-github-generator
+```
+
+The provenance file (`.intoto.jsonl`) is attached to every release.
+
+### Privacy
+
+- **No accounts, no telemetry, no analytics, no tracking.** The app has
+  no server component; it never sends data anywhere on its own.
+- All state lives locally in `%LOCALAPPDATA%\Synfronia` (settings, logs
+  with rotation, WebView2 profile, caches) and in your download folder.
+- Network access is used only for the things you explicitly ask for:
+  the download itself (through yt-dlp), optional font downloads from
+  `github.com/google/fonts` and the optional ffmpeg fetch.
+- Logs are plain text files on your disk; nothing is uploaded.
+- Honest caveat: FTP credentials are stored in `settings.json` in plain
+  text - do not use the app on a shared machine or sync that folder
+  unencrypted.
 
 ## Disclaimer
 
-Этот проект предназначен для личного некоммерческого использования -
-например, для сохранения доступа к контенту. Пожалуйста, соблюдайте
-[Правила сообщества YouTube](https://www.youtube.com/static?template=terms)
-и авторские права: скачивайте только тот контент, который у вас есть
-право сохранять, и не распространяйте полученные файлы без разрешения
-правообладателя. Автор проекта не несёт ответственности за неправомерное
-использование.
+This project is intended for personal, non-commercial use - for
+example, to keep access to content you own or are allowed to keep.
+Please respect the [YouTube Terms of Service](https://www.youtube.com/static?template=terms)
+and copyright: download only content you have the right to archive, and
+do not redistribute obtained files without the rights holder's
+permission. Synfronia is not affiliated with, endorsed by or sponsored
+by YouTube, Google or any other mentioned brand.
+
+The software is provided **"as is", without warranty of any kind**;
+the author is not responsible for illegal use, misuse, or damage arising
+from the use of the software. By using Synfronia you accept the
+PolyForm Noncommercial License 1.0.0.
+
+**About the code**: this project is a **vibe-coded project** - its code
+was written and evolved with the help of AI models (LLM-assisted
+development), and that is its honest, intentional style. "As is" also
+means "AI can be wrong": if you find a bug, an issue or a pull request
+is more valuable than ever.
+
+---
+
+## License
+
+The project is distributed under the **PolyForm Noncommercial License
+1.0.0** - use, study, modification and redistribution are allowed for
+**non-commercial purposes** (personal projects, education, scientific
+and charitable organizations, etc.). **Selling** this product or
+products derived from it is prohibited. Full text - in
+[`LICENSE`](LICENSE).
+
+Note: this license does not meet the OSI definition of "Open Source"
+and is **source-available** (open sources with a commercial restriction).
 
 ---
 
