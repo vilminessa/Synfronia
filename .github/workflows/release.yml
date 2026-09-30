@@ -77,7 +77,9 @@ jobs:
           python -m PyInstaller Synfronia.spec --distpath . --workpath build --noconfirm
       - name: Проверка артефакта
         shell: bash
-        run: python -c "import os; s = os.path.getsize('Synfronia.exe'); print('Synfronia.exe', s, 'bytes'); assert s > 25_000_000, s"
+        # нижняя граница - защита от пустой/обрезанной сборки: после удаления
+        # Inter и Noto Sans из поставки exe весит ~24.8 МБ (было >25 МБ)
+        run: python -c "import os; s = os.path.getsize('Synfronia.exe'); print('Synfronia.exe', s, 'bytes'); assert s > 24_000_000, s"
       - name: Хеш артефакта (формат sha256sum, base64 - для SLSA)
         id: hash
         shell: bash
