@@ -67,6 +67,24 @@
   }
   .tab.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
   .panel { margin-bottom: 4px; }
+  /* Массовая вкладка: список ссылок, счётчик и очистка */
+  #url-batch {
+    width: 100%; min-height: 120px; resize: vertical;
+    padding: 8px 10px; border-radius: var(--radius-s);
+    border: 1px solid var(--surface); background: var(--bg);
+    color: var(--text); font: 13px/1.45 Consolas, "JetBrains Mono", monospace;
+  }
+  #url-batch:focus { outline: none; border-color: var(--accent); }
+  .bulk-row {
+    display: flex; justify-content: space-between;
+    align-items: center; margin-top: 6px;
+  }
+  .bulk-count { font-size: 12px; opacity: .75; }
+  .link-btn {
+    background: none; border: none; padding: 2px 4px;
+    color: var(--accent); font-size: 13px; cursor: pointer; opacity: .9;
+  }
+  .link-btn:hover { text-decoration: underline; opacity: 1; }
   .actions { margin-top: 16px; display: flex; gap: 8px; align-items: center; }
   .pb-wrap { margin-top: 14px; height: 10px; border-radius: var(--radius-s); background: var(--surface); overflow: hidden; }
   #pb { height: 100%; width: 0; background: var(--accent); transition: width .2s; }

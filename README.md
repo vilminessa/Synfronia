@@ -26,6 +26,12 @@ English · [Русский](README.ru.md)
   (video + audio), metadata, thumbnails, subtitles embedded into the
   container, and optional playlist archiving. Nothing is required from
   you besides the link: no login, no cookies, no API keys.
+- **Bulk download** - the third «Batch» tab takes a whole list of links
+  (one per line, `#` for comments, duplicates removed on the fly) and
+  works through them **one URL at a time**: a failed link never stops
+  the rest, the status shows `[i/N]` with the current link, and the
+  same retries, postprocessors and FTP upload apply to every item.
+  A common «Download» button with Stop sits below the window.
 - **Multilingual interface** - six languages, switchable at runtime:
   **Russian / English / 日本語 / 简体中文 / Español / Deutsch**
   (UI and status messages alike).
@@ -86,7 +92,7 @@ python gui.py
 
 | Field / setting | Description |
 |---|---|
-| Tabs | "Video" - a single video; "Playlist" - the entire playlist |
+| Tabs | "Video" - a single video; "Playlist" - the entire playlist; "Batch" - a list of links |
 | URL | the link in the matching tab (YouTube video or playlist) |
 | ⚙ Settings | gear icon, top right: language, folder, theme, fonts, tooltips, subtitles, quality, re-encode, network |
 | Language | Русский / English / 日本語 / 简体中文 / Español / Deutsch |
@@ -97,6 +103,28 @@ python gui.py
 | Subtitles | off / ru / en / all (embedded into the container) |
 | Re-encode | none / libx265 / nvenc / amf / qsv (hardware - by availability) |
 | Group playlist | download a playlist as one archive |
+
+### Bulk download
+
+The «Batch» tab takes a list of links - one per line. Rules: empty lines
+and `#` comments are skipped, anything without `http(s)://` is ignored
+(and counted in the log), duplicates are removed keeping your order; the
+counter «Links: N» updates as you type. Press **Download** at the bottom
+(Ctrl+Enter in the field works too) and the links are fetched strictly
+one after another, each as its own yt-dlp run:
+
+- a failed link does not break the queue - the rest keep going;
+- the status line shows `[i/N] <current link>`, the journal gets a
+  `bulk [i/N] <url>` row per item;
+- Stop interrupts the current link and drops the rest of the queue;
+- retries, postprocessors (including re-encode) and FTP upload behave
+  exactly like a single download;
+- the summary at the end: all good - «Готово», some failed - «Готово с
+  ошибками - скачало X из Y», none - «Не удалось скачать».
+
+The draft list lives in the page memory only: switching a theme with
+`entry` (a page rebuild) clears the textarea. Destination, subtitles,
+quality and re-encode come from the settings card as usual.
 
 ### Modular themes
 

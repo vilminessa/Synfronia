@@ -41,6 +41,7 @@ __SETTINGS_CSS__
 <div class="tabs">
     <button type="button" id="tab-video" class="tab active" data-i18n="tab.video">Видео</button>
     <button type="button" id="tab-playlist" class="tab" data-i18n="tab.playlist">Плейлист</button>
+    <button type="button" id="tab-batch" class="tab" data-i18n="tab.batch">Массовая</button>
   </div>
 <!-- /SLOT:tabs -->
 
@@ -62,6 +63,19 @@ __SETTINGS_CSS__
     <div class="check"><input type="checkbox" id="group"><span data-i18n="group.label">Сгруппировать: плейлист в подпапку с его названием</span></div>
   </div>
 <!-- /SLOT:panel-playlist -->
+
+
+  
+<!-- SLOT:panel-batch -->
+<div id="panel-batch" class="panel" hidden>
+    <label for="url-batch" data-i18n="url.batch.label">Ссылки (по одной на строку):</label>
+    <textarea id="url-batch" rows="7" placeholder="https://www.youtube.com/watch?v=…&#10;https://www.youtube.com/watch?v=…" data-i18n-tip="bulk.hint"></textarea>
+    <div class="bulk-row">
+      <span id="batch-count" class="bulk-count">0</span>
+      <button type="button" id="batch-clear" class="link-btn" data-i18n="bulk.clear">Очистить</button>
+    </div>
+  </div>
+<!-- /SLOT:panel-batch -->
 
 
   

@@ -378,7 +378,8 @@ async function waitForPage() {
     ws.addEventListener("message", (ev) => {
       const msg = JSON.parse(ev.data);
       if (msg.method === "Runtime.exceptionThrown") {
-        errors.push(msg.params.exceptionDetails.text || "exception");
+        var det = msg.params.exceptionDetails || {};
+        errors.push((det.exception && det.exception.description) || det.text || "exception");
       }
       if (msg.id && pending.has(msg.id)) { pending.get(msg.id)(msg); pending.delete(msg.id); }
     });
@@ -1070,6 +1071,85 @@ async function waitForPage() {
       `repel: 0->на_элементе=${repelOff.overlap} 100->вне=${!repelOn.overlap} ` +
       `pull хвост: 0=${lagLow.lag.toFixed(1)}px 100=${lagHigh.lag.toFixed(1)}px ` +
       `дистанция: 0=${Math.round(distCur(far))}px 100=${Math.round(distCur(near))}px`);
+
+    // -- массовая вкладка ----------------------------------------------------
+    console.log("--- массовая вкладка ---");
+    await evaluate('switchTab("batch"); true');
+    await sleep(150);
+    const bulkUI = await evaluate(`(function () {
+      var p = document.getElementById("panel-batch");
+      return {visible: !!p && !p.hidden,
+              tab: !!document.getElementById("tab-batch"),
+              video: document.getElementById("panel-video").hidden,
+              playlist: document.getElementById("panel-playlist").hidden};
+    })()`);
+    if (!(bulkUI.visible && bulkUI.tab && bulkUI.video && bulkUI.playlist)) {
+      fail("вкладка Массовая не открывает свою панель: " + JSON.stringify(bulkUI));
+    }
+    // счётчик: пустые строки, "#" и не-URL пропускаются, дедуп по порядку
+    await evaluate(`(function () {
+      var box = document.getElementById("url-batch");
+      box.value = "https://youtu.be/one\\n\\n# comment\\nhttps://youtu.be/two\\n" +
+                  "https://youtu.be/one\\nnot a link";
+      box.dispatchEvent(new Event("input"));
+      return true;
+    })()`);
+    const bulkCount = await evaluate('document.getElementById("batch-count").textContent');
+    if (bulkCount.indexOf("2") < 0) {
+      fail("счётчик не посчитал 2 (дедуп/пропуски): " + bulkCount);
+    }
+    // пустой ввод: старт не происходит, статус объясняет почему
+    await evaluate(`(function () {
+      var box = document.getElementById("url-batch");
+      box.value = ""; box.dispatchEvent(new Event("input"));
+      return true;
+    })()`);
+    await evaluate('document.getElementById("download").click(); true');
+    const bulkEmpty = await evaluate(`(function () {
+      return {started: (window.__probe.saved || []).filter(function (x) {
+                return x[0] === "bulk"; }).length,
+              status: document.getElementById("status").textContent};
+    })()`);
+    if (bulkEmpty.started !== 0 || !bulkEmpty.status) {
+      fail("пустой ввод повёл себя неверно: " + JSON.stringify(bulkEmpty));
+    }
+    // старт: три ссылки уходят в Api по порядку, статус [1/3], busy с кнопками
+    await evaluate(`(function () {
+      var box = document.getElementById("url-batch");
+      box.value = "https://youtu.be/a\\nhttps://youtu.be/b\\nhttps://youtu.be/c";
+      box.dispatchEvent(new Event("input"));
+      return true;
+    })()`);
+    await evaluate('document.getElementById("download").click(); true');
+    await sleep(450);
+    const bulkStart = await evaluate(`(function () {
+      var saved = (window.__probe.saved || []).filter(function (x) { return x[0] === "bulk"; });
+      return {list: saved.length ? saved[0][1] : null,
+              status: document.getElementById("status").textContent,
+              stopOk: document.getElementById("stop").disabled === false,
+              dlLocked: document.getElementById("download").disabled === true};
+    })()`);
+    const bulkListOk = Array.isArray(bulkStart.list) && bulkStart.list.length === 3 &&
+      bulkStart.list[0] === "https://youtu.be/a" && bulkStart.list[2] === "https://youtu.be/c";
+    if (!(bulkListOk && bulkStart.status.indexOf("[1/3]") === 0 &&
+          bulkStart.stopOk && bulkStart.dlLocked)) {
+      fail("массовый старт прошёл не так: " + JSON.stringify(bulkStart));
+    }
+    // Стоп: кнопка блокируется до реального завершения (итог придёт в poll)
+    await evaluate('document.getElementById("stop").click(); true');
+    const stopLocked = await evaluate('document.getElementById("stop").disabled');
+    if (stopLocked !== true) fail("Стоп не заблокировался после клика");
+    // убираем «висячее» busy стаба и возвращаем кнопку в idle,
+    // чтобы следующие разделы шли с чистым состоянием
+    await evaluate(`(function () {
+      window.__probe.dlState = {busy: false, status: "", result: null,
+                                progress: {mode: "determinate", value: 0}};
+      if (typeof setDownloadState === "function") setDownloadState("idle", 0, false);
+      return true;
+    })()`);
+    await sleep(450);
+    console.log(`  массовая: панель=${bulkUI.visible} счётчик="${bulkCount}" ` +
+      `ссылки=${JSON.stringify(bulkStart.list)} статус="${bulkStart.status}" стоп=${stopLocked}`);
 
     console.log("--- раздел FTP ---");
     const ftp = await evaluate(FTP_VIS);
