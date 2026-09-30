@@ -66,7 +66,8 @@ STUB = """<script>
       fonts_dl: {downloading: false, pct: 0, error: null}}, uiState(), state.dlState)); },
     synf_settings_state: function (open) { state.settingsOpen = !!open; return ok(); },
     set_dest: function (path) { state.dest = path; return ok(); },
-    set_font: function () { return ok({css: state.css}); },
+    set_font: function (key, value) { settings[key] = value;
+      state.saved.push([key, value]); return ok({css: state.css}); },
     reload_fonts: function () { return ok({fonts: FONTS, css: state.css}); },
     font_face_css: function () { return ok(state.css); },
     download_fonts: function () { state.dl = "started"; return ok("started"); },

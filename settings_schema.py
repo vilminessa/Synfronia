@@ -13,7 +13,7 @@ settings.json получается из группы и ключа: у груп�
 
 Описание поля
     key          путь внутри группы
-    type         bool | int | text | password | choice | choice_buttons | radio | knob | actions | note
+    type         bool | int | text | password | choice | choice_buttons | knob | actions | note
     label        ключ i18n с подписью
     title        ключ i18n с подсказкой (необязательно)
     note         ключ i18n с пояснением под полем
@@ -21,9 +21,10 @@ settings.json получается из группы и ключа: у груп�
     default      значение по умолчанию
     min/max/step ограничения для int и knob (knob - круговая ручка:
                  значения квантуются по step)
-    options      [["значение", "подпись"], ...] для choice/choice_buttons/radio; подпись
+    options      [["значение", "подпись"], ...] для choice/choice_buttons; подпись
                  - это ключ i18n, если он есть в языке, иначе сам текст
-    options_source  "langs" | "themes" | "fonts" - список из runtime
+    options_source  "langs" | "themes" | "fonts" - список из runtime;
+                 для knob (ручки шрифтов) - список позиций
     options_of   словарь в модуле-владельце: значения опций должны быть в нём
     dynamic      "transcoders" - часть опций может быть недоступна (ffmpeg)
     placeholder  подсказка внутри поля
@@ -59,7 +60,7 @@ settings.json получается из группы и ключа: у груп�
 
 from version import __version__  # единый источник версии приложения
 
-TYPES = ("bool", "int", "text", "password", "choice", "choice_buttons", "radio", "knob", "actions", "note")
+TYPES = ("bool", "int", "text", "password", "choice", "choice_buttons", "knob", "actions", "note")
 
 # Общие настройки интерфейса. Порядок вкладок задаётся полем order.
 CORE_GROUPS = [
@@ -81,18 +82,19 @@ CORE_GROUPS = [
                 {"dom": "open-themes", "icon": "folder", "label": "sheet.theme.open"},
             ]},
             {"type": "note", "transient": True, "dom": "themes-dl-note", "hidden": True},
-            {"key": "font_heading", "type": "radio", "label": "sheet.font.heading",
+            {"key": "font_heading", "type": "knob", "label": "sheet.font.heading",
              "default": "", "options_source": "fonts", "dom": "font-heading",
-             "box": "fonts", "live": True},
-            {"key": "font_sans", "type": "radio", "label": "sheet.font.sans",
+             "box": "fonts", "row": 1, "row_class": "knob-panel", "live": True},
+            {"key": "font_sans", "type": "knob", "label": "sheet.font.sans",
              "default": "", "options_source": "fonts", "dom": "font-sans",
-             "box": "fonts", "live": True},
-            {"key": "font_mono", "type": "radio", "label": "sheet.font.mono",
+             "box": "fonts", "row": 1, "row_class": "knob-panel", "live": True},
+            {"key": "font_mono", "type": "knob", "label": "sheet.font.mono",
              "default": "", "options_source": "fonts_mono", "dom": "font-mono",
-             "box": "fonts", "live": True},
+             "box": "fonts", "row": 1, "row_class": "knob-panel", "live": True},
             {"key": "font_weight", "type": "knob", "label": "sheet.font.weight",
              "default": 400, "min": 100, "max": 900, "step": 10,
-             "dom": "font-weight", "box": "fonts", "live": True},
+             "dom": "font-weight", "box": "fonts",
+             "row": 1, "row_class": "knob-panel", "live": True},
             # предпросмотр: три строки на выбранных шрифтах, заполняет
             # settings.js (NOTE_FILLERS.fontPreview) и обновляется при смене
             {"type": "note", "transient": True, "dom": "font-preview",
@@ -247,14 +249,21 @@ def coerce(key: str, value):
             return value.strip().lower() in ("1", "true", "on", "yes", "да")
         return bool(value)
     if kind == "knob":
-        # круговая ручка: как int, но значение квантуется по step
-        low, high = int(spec.get("min", 0)), int(spec.get("max", 100))
-        step = max(1, int(spec.get("step", 1)))
-        try:
-            num = int(round(float(value) / step)) * step
-        except (TypeError, ValueError):
-            return spec.get("default", low)
-        return max(low, min(high, num))
+        # числовая ручка (толщина): как int, но значение квантуется по step
+        if spec.get("min") is not None or spec.get("max") is not None:
+            low, high = int(spec.get("min", 0)), int(spec.get("max", 100))
+            step = max(1, int(spec.get("step", 1)))
+            try:
+                num = int(round(float(value) / step)) * step
+            except (TypeError, ValueError):
+                return spec.get("default", low)
+            return max(low, min(high, num))
+        # ручки со списком позиций (шрифты): список приходит из runtime,
+        # чужое значение отбрасываем только у статических options
+        allowed = [opt[0] for opt in spec.get("options", [])]
+        if allowed and value not in allowed:
+            return spec.get("default")
+        return spec.get("default") if value is None else value
     if kind == "int":
         low, high = spec.get("min"), spec.get("max")
         try:
@@ -268,7 +277,7 @@ def coerce(key: str, value):
         return num
     if kind in ("text", "password"):
         return "" if value is None else str(value)
-    if kind in ("choice", "choice_buttons", "radio"):
+    if kind in ("choice", "choice_buttons"):
         # у статических списков (субтитры, качество, кодек, режим FTP) набор
         # значений известен: чужое значение из ручного правки файла -> умолчание.
         # У динамических (язык, тема, шрифты) списка options нет - не проверяем.

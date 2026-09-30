@@ -113,6 +113,13 @@
     return el.closest("[data-tip]");
   }
 
+  // Шрифт подсказки: data-tip-font носителя (ручки шрифтов показывают своё
+  // семейство), пусто - системный шрифт подсказки
+  function tipFontFamily(el) {
+    var fam = ((el && el.getAttribute("data-tip-font")) || "").trim();
+    return fam ? quoted(fam) + ', var(--font-sans, "Segoe UI"), system-ui, sans-serif' : "";
+  }
+
   function tipParts() {
     if (TIP.node) return;
     var node = document.createElement("div");
@@ -212,7 +219,10 @@
         var dA = want - TIP.ang;
         while (dA > Math.PI) dA -= 2 * Math.PI;
         while (dA < -Math.PI) dA += 2 * Math.PI;
-        var step = reducedMotion() ? 4 : 0.45;     // рад за кадр: вокруг, не сквозь
+        // шаг ЗА ВРЕМЯ, а не за кадр: на низком FPS подсказка всё равно
+        // доезжает за полсекунды, а на слабой машине угол не «залипает»
+        var dtA = TIP.lastT ? Math.min(250, performance.now() - TIP.lastT) : 16.7;
+        var step = reducedMotion() ? 4 : Math.min(2 * Math.PI, 0.45 * (dtA / 16.7));
         TIP.ang += Math.max(-step, Math.min(step, dA));
       }
       // Обход кандидатов: желаемый угол, противоположный и боковые. Кламп к
@@ -262,12 +272,9 @@
     TIP.pending = null;
     TIP.shown = false;
     TIP.ang = null;
-    // подсказка может набираться выбранным шрифтом (опции переключателей
-    // шрифтов несут data-tip-font) - иначе название показалось бы системным
-    var fam = (el.getAttribute("data-tip-font") || "").trim();
-    TIP.node.style.fontFamily = fam
-      ? quoted(fam) + ', var(--font-sans, "Segoe UI"), system-ui, sans-serif'
-      : "";
+    // подсказка может набираться выбранным шрифтом (ручки шрифтов несут
+    // data-tip-font) - иначе название показалось бы системным
+    TIP.node.style.fontFamily = tipFontFamily(el);
     TIP.text.textContent = text;
     el.setAttribute("aria-describedby", "tip");
     TIP.node.hidden = false;

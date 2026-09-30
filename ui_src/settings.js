@@ -85,32 +85,6 @@
   function fillSelect(id, opts, keepValue) {
     fillSelectNode(document.getElementById(id), opts, keepValue);
   }
-  // Круговые переключатели: [["значение", "подпись"], ...] -> radio-inputs в
-  // контейнере. Значения - строки; выбранное помечается по keep (иначе по
-  // текущему checked), отсутствующее значение падает на "" / первый вариант.
-  // FL-style: у input - утопленный кружок, рядом огонёк .led (загорается при
-  // checked, «щелчок» - переход с перелётом в CSS); подсказка опции -
-  // название шрифта, набранное этим же шрифтом (data-tip-font).
-  function fillRadios(wrap, opts, keep) {
-    if (!wrap || !opts || !opts.length) return;
-    var prev = keep !== undefined && keep !== null ? String(keep) : String(wrap.value || "");
-    wrap.innerHTML = "";
-    opts.forEach(function(o) {
-      var lab = el("label", "radio");
-      lab.appendChild(el("input", null, {type: "radio", name: wrap.id, value: String(o[0])}));
-      lab.appendChild(el("i", "led"));
-      var txt = el("span");
-      txt.textContent = t(o[1]);
-      lab.appendChild(txt);
-      lab.setAttribute("data-tip-font", String(o[0]));
-      setTip(lab, txt.textContent);
-      wrap.appendChild(lab);
-    });
-    var inputs = [].slice.call(wrap.querySelectorAll("input"));
-    var hit = inputs.filter(function(i) { return i.value === prev; })[0];
-    if (!hit) hit = inputs.filter(function(i) { return i.value === ""; })[0] || inputs[0];
-    if (hit) hit.checked = true;
-  }
   function caption(key, cls) {
     var node = el("span", cls, {"data-i18n": key});
     node.textContent = t(key);
@@ -209,64 +183,89 @@
       return {nodes: [labelNode(spec), wrap], input: wrap,
               get: readMode, set: function(v) { setModeValue(wrap, v); }};
     }
-    if (spec.type === "radio") {
-      // Круговые переключатели: подпись и список живут в одном узле - карточка
-      // шрифтов строит из таких узлов левую колонку (см. settings.css).
-      var grp = el("div", "radios", {id: spec.dom, role: "radiogroup",
-                                     "aria-label": t(spec.label)});
-      fillRadios(grp, spec.options || [], null);
-      Object.defineProperty(grp, "value", {
-        get: function() {
-          var on = grp.querySelector("input:checked");
-          return on ? on.value : "";
-        }
-      });
-      var cell = el("div", "radio-field");
-      cell.appendChild(labelNode(spec));
-      cell.appendChild(grp);
-      if (spec.title) {
-        grp.setAttribute("data-i18n-tip", spec.title);
-        setTip(grp, t(spec.title));
-      }
-      return {nodes: [cell], input: grp,
-              get: function() { return grp.value; },
-              set: function(v) {
-                var want = v === undefined || v === null ? "" : String(v);
-                var inputs = [].slice.call(grp.querySelectorAll("input"));
-                var hit = inputs.filter(function(i) { return i.value === want; })[0];
-                if (!hit) hit = inputs.filter(function(i) { return i.value === ""; })[0] || inputs[0];
-                inputs.forEach(function(i) { i.checked = i === hit; });
-              }};
-    }
     if (spec.type === "knob") {
-      // Бесконечная круговая ручка: угол накапливается без упора (оборот -
-      // ровно одно деление шкалы сверху значения: min..max по кругу, max
-      // замыкается на min), значение квантуется по step. Крутится перетаскиванием
-      // по горизонтали, колёсом при наведении и стрелками с клавиатуры.
+      // Круговая ручка. Два режима: числовая шкала (min/max/step - толщина
+      // шрифта) и позиционный список (шрифты: позиции приходят из runtime,
+      // вокруг риски, активная подсвечена - визуальный «щелчок» детента;
+      // подсказка показывает выбранное семейство его же шрифтом). Крутится
+      // перетаскиванием по горизонтали, колёсом и стрелками; ход без упора.
+      var numeric = spec.min !== undefined && spec.max !== undefined;
       var step = spec.step || 10, lo = spec.min, hi = spec.max;
-      var nSteps = Math.round((hi - lo) / step) + 1;   // позиций на шкале
-      var SA = 360 / nSteps;                            // градусов на шаг
-      var ang = 0, cur = spec.default;
+      var positions = [];              // позиционная: [{value, label}]
+      var ang = 0;
+      var cur = numeric ? spec.default : (spec.default || "");
+      var idx = 0;                     // позиционная: индекс выбранной позиции
       function norm(a) { return ((a % 360) + 360) % 360; }
-      function valueAt(a) { return lo + Math.round(norm(a) / SA) % nSteps * step; }
-      function angleFor(v) { return (v - lo) / step * SA; }
+      function nSteps() {
+        return numeric ? Math.round((hi - lo) / step) + 1 : positions.length;
+      }
+      function sa() { return 360 / Math.max(nSteps(), 1); }
+      function valueAt(a) {
+        return lo + (Math.round(norm(a) / sa()) % nSteps()) * step;
+      }
+      function angleFor(v) { return (v - lo) / step * sa(); }
+      function pct() { return Math.round((cur - lo) / (hi - lo) * 100); }
       var kwrap = el("div", "knob", {
         id: spec.dom, role: "slider", tabindex: "0",
         "aria-label": t(spec.label),
-        "aria-valuemin": String(lo), "aria-valuemax": String(hi)});
+        "aria-valuemin": numeric ? String(lo) : "0",
+        "aria-valuemax": numeric ? String(hi) : "0"});
       var ind = el("i", "knob-ind");
-      var val = el("span", "knob-value");
       kwrap.appendChild(ind);
       Object.defineProperty(kwrap, "value", {get: function() { return cur; }});
+      // риски позиций: активная горит акцентом (детент виден)
+      function renderTicks() {
+        [].slice.call(kwrap.querySelectorAll(".knob-tick")).forEach(function(n) { n.remove(); });
+        if (numeric) return;
+        var n = Math.max(positions.length, 1);
+        for (var i = 0; i < n; i++) {
+          var tk = el("i", "knob-tick" + (i === idx ? " on" : ""));
+          tk.style.transform = "rotate(" + i * 360 / n + "deg) translateY(-14px)";
+          tk.setAttribute("data-value", positions[i] ? String(positions[i].value) : "");
+          kwrap.appendChild(tk);
+        }
+      }
+      function tipText() {
+        if (numeric) return t("sheet.font.weight.tip").replace("{p}", String(pct()));
+        return (positions[idx] && positions[idx].label) || String(cur);
+      }
       function paint() {
         ind.style.transform = "rotate(" + norm(ang).toFixed(2) + "deg)";
-        val.textContent = String(cur);
-        kwrap.setAttribute("aria-valuenow", String(cur));
-        kwrap.setAttribute("aria-valuetext", String(cur));
+        var text = tipText();
+        setTip(kwrap, text);
+        // setTip пишет aria-label узлу без текста - возвращаем подпись поля
+        kwrap.setAttribute("aria-label", t(spec.label));
+        var fontFam = !numeric && cur ? String(cur) : "";
+        if (fontFam) kwrap.setAttribute("data-tip-font", fontFam);
+        else kwrap.removeAttribute("data-tip-font");
+        if (numeric) {
+          kwrap.setAttribute("aria-valuenow", String(cur));
+          kwrap.setAttribute("aria-valuetext", String(cur));
+        } else {
+          kwrap.setAttribute("aria-valuenow", String(idx));
+          kwrap.setAttribute("aria-valuetext", text);
+        }
+        // подсказка живёт при вращении: процент/название меняются на лету
+        if (window.TIP && TIP.target === kwrap && TIP.text) {
+          TIP.text.textContent = text;
+          TIP.node.style.fontFamily = tipFontFamily(kwrap);
+        }
       }
       function commit(nv) {
         if (nv !== cur) {
           cur = nv;
+          kwrap.dispatchEvent(new Event("change", {bubbles: true}));
+        }
+        paint();
+      }
+      function applyAngle() {
+        if (numeric) { commit(valueAt(ang)); return; }
+        var n = Math.max(positions.length, 1);
+        var ni = Math.round(norm(ang) / sa()) % n;
+        if (ni !== idx) {
+          idx = ni;
+          cur = positions[idx] ? positions[idx].value : cur;
+          renderTicks();
           kwrap.dispatchEvent(new Event("change", {bubbles: true}));
         }
         paint();
@@ -279,14 +278,14 @@
         var move = function(e2) {
           ang += (e2.clientX - lx) * 1.2;
           lx = e2.clientX;
-          commit(valueAt(ang));
+          applyAngle();
         };
         var up = function() {
           kwrap.classList.remove("dragging");
           kwrap.removeEventListener("pointermove", move);
           kwrap.removeEventListener("pointerup", up);
           kwrap.removeEventListener("pointercancel", up);
-          ang = angleFor(cur);           // доснапить к ближайшей ступени
+          ang = numeric ? angleFor(cur) : idx * sa();   // доснапить к позиции
           paint();
         };
         kwrap.addEventListener("pointermove", move);
@@ -296,32 +295,66 @@
       kwrap.addEventListener("wheel", function(ev) {
         ev.preventDefault();
         kwrap.focus({preventScroll: true});   // и колесо под фокусом: poll не откатит
-        ang += (ev.deltaY < 0 ? SA : -SA);
-        commit(valueAt(ang));
+        ang += (ev.deltaY < 0 ? sa() : -sa());
+        applyAngle();
       }, {passive: false});
       kwrap.addEventListener("keydown", function(ev) {
+        if (ev.key === "Home") {
+          ev.preventDefault();
+          if (numeric) { ang = angleFor(lo); commit(lo); }
+          else { ang = 0; applyAngle(); }
+          return;
+        }
+        if (ev.key === "End") {
+          ev.preventDefault();
+          if (numeric) { ang = angleFor(hi); commit(hi); }
+          else { ang = (Math.max(positions.length, 1) - 1) * sa(); applyAngle(); }
+          return;
+        }
         var d = 0;
-        if (ev.key === "ArrowUp" || ev.key === "ArrowRight") d = SA;
-        else if (ev.key === "ArrowDown" || ev.key === "ArrowLeft") d = -SA;
-        else if (ev.key === "Home") { ev.preventDefault(); ang = angleFor(lo); commit(lo); return; }
-        else if (ev.key === "End") { ev.preventDefault(); ang = angleFor(hi); commit(hi); return; }
+        if (ev.key === "ArrowUp" || ev.key === "ArrowRight") d = sa();
+        else if (ev.key === "ArrowDown" || ev.key === "ArrowLeft") d = -sa();
         if (!d) return;
         ev.preventDefault();
         ang += d;
-        commit(valueAt(ang));
+        applyAngle();
       });
-      var kcell = el("div", "radio-field");
+      // позиции приходят снаружи (buildFontOptions): пересобираем риски и
+      // возвращаем индекс к текущему значению
+      kwrap._knobSet = function(opts) {
+        positions = (opts || []).map(function(o) {
+          return {value: String(o[0]), label: String(o[1])};
+        });
+        idx = 0;
+        for (var i = 0; i < positions.length; i++) {
+          if (positions[i].value === String(cur)) { idx = i; break; }
+        }
+        kwrap.setAttribute("aria-valuemax", String(Math.max(positions.length - 1, 0)));
+        ang = idx * sa();
+        renderTicks();
+        paint();
+      };
+      var kcell = el("div", "knob-cell");
       kcell.appendChild(labelNode(spec));
-      kcell.appendChild(el("div", "knob-row", [kwrap, val]));
+      kcell.appendChild(kwrap);
       paint();
       return {nodes: [kcell], input: kwrap,
               get: function() { return cur; },
               set: function(v) {
-                var n = Number(v);
-                if (!isFinite(n)) n = spec.default;
-                n = Math.max(lo, Math.min(hi, Math.round(n / step) * step));
-                cur = n;
-                ang = angleFor(n);
+                if (numeric) {
+                  var n = Number(v);
+                  if (!isFinite(n)) n = spec.default;
+                  n = Math.max(lo, Math.min(hi, Math.round(n / step) * step));
+                  cur = n;
+                  ang = angleFor(n);
+                } else {
+                  cur = v === undefined || v === null ? (spec.default || "") : String(v);
+                  idx = 0;
+                  for (var i = 0; i < positions.length; i++) {
+                    if (positions[i].value === cur) { idx = i; break; }
+                  }
+                  ang = idx * sa();
+                }
                 paint();
               }};
     }
@@ -569,8 +602,8 @@
   }
 
   // Списки шрифтов: "" = системный. Семейства приходят с Python (папка
-  // fonts) и наполняют три группы круговых переключателей (заголовки,
-  // общий, консольный); вес берёт свои опции прямо из схемы.
+  // fonts) и наполняют позиции трёх ручек (заголовки, общий, консольный);
+  // вес берёт шкалу прямо из схемы и риски не рисует.
   function buildFontOptions() {
     var families = (FONTS && FONTS.families) || [];
     var monoFirst = (FONTS && FONTS.mono) || [];
@@ -581,10 +614,19 @@
     [["font-heading", families], ["font-sans", families], ["font-mono", monoAll]]
       .forEach(function(pair) {
         var node = document.getElementById(pair[0]);
-        if (!node || !node.classList.contains("radios")) return;
-        fillRadios(node, sys.concat(pair[1].map(function(f) { return [f, f]; })));
+        if (node && node._knobSet) {
+          node._knobSet(sys.concat(pair[1].map(function(f) { return [f, f]; })));
+        }
       });
     updateFontNote();
+  }
+  // Подсказки ручек зависят от языка (и от значения) - после смены языка
+  // перерисовываем их через set(текущее значение)
+  function refreshKnobTips() {
+    Object.keys(panelFields).forEach(function(key) {
+      var f = panelFields[key];
+      if (f.spec.type === "knob" && f.get && f.set) f.set(f.get());
+    });
   }
   function updateFontNote() {
     var box = document.getElementById("font-note");
@@ -593,17 +635,23 @@
     box.textContent = t("sheet.font.hint").replace("{path}", (FONTS && FONTS.folder) || "");
     box.hidden = false;
   }
-  // Предпросмотр шрифтов: заголовок (шрифт заголовков), абзац (общий шрифт и
-  // толщина) и строка консоли (моно) - по ним видно разницу. Текст не
-  // переводится: он показывает глифы, а не смысл; обновляется при смене
-  // любого из четырёх переключателей (NOTE_FILLERS.fontPreview).
+  // Предпросмотр шрифтов: каждая строка - «{заголовок} - {выбранное
+  // семейство}», набранная своими шрифтами (и толщиной - у строки
+  // основного текста). Имя системного шрифта переводится, названия
+  // семейств - как есть; сам текст не переводится, он показывает глифы.
   function updateFontPreview() {
     var box = document.getElementById("font-preview");
     if (!box) return;
-    box.innerHTML = '<div class="fp-head">Synfronia</div>'
-      + '<div class="fp-text">Aa Bb Cc 0123456789 &middot; '
-      + 'Съешь же этих мягких булок, да выпей чаю</div>'
-      + '<div class="fp-mono">$ synfronia --format mp4 --quality lossless</div>';
+    var sysName = t("sheet.font.system");
+    var names = [FONT_PICK.head || sysName, FONT_PICK.sans || sysName,
+                 FONT_PICK.mono || sysName];
+    function esc(s) {
+      return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+    }
+    var heads = ["Заголовок", "Основной текст", "Консоль"];
+    box.innerHTML = '<div class="fp-head">' + heads[0] + " - " + esc(names[0]) + "</div>"
+      + '<div class="fp-text">' + heads[1] + " - " + esc(names[1]) + "</div>"
+      + '<div class="fp-mono">' + heads[2] + " - " + esc(names[2]) + "</div>";
   }
 
   // Пересборка списков, опции которых пришли прямо из схемы (ftp.mode и т.п.).
@@ -630,6 +678,8 @@
     buildTranscodeOptions();
     buildLangOptions();
     buildFontOptions();
+    refreshKnobTips();
+    refreshNotes();   // предпросмотр зависит от языка (имя системного шрифта)
     var lang = document.getElementById("lang");
     if (lang) lang.value = curLang;
     document.documentElement.lang = curLang;

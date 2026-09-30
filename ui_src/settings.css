@@ -204,67 +204,44 @@
     background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 600;
   }
 
-  /* ---- шрифты: две колонки - слева четыре круговых переключателя
-     (заголовки, общий, консольный, толщина), справа предпросмотр. Карточка
-     узнаётся по #font-preview; порядок полей в схеме = порядок строк левой
-     колонки. */
+  /* ---- шрифты: две колонки - слева панелька 2x2 из ручек (заголовки,
+     общий, консольный, толщина), справа предпросмотр. Карточка
+     узнаётся по #font-preview; панелька - строка схемы row_class
+     knob-panel (четыре ячейки в одном контейнере). */
   .field-card:has(> .field-card-body > #font-preview) .field-card-body {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
     gap: 4px 18px;
     align-items: start;
   }
-  .field-card:has(> .field-card-body > #font-preview) .radio-field { grid-column: 1; }
+  .field-card:has(> .field-card-body > #font-preview) .knob-panel {
+    grid-column: 1;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 10px 12px;
+    align-items: start;
+    margin-top: 0;
+    padding: 10px 12px;
+    background: var(--surface);
+    border: 1px solid var(--widget);
+    border-radius: var(--radius-m);
+  }
   .field-card:has(> .field-card-body > #font-preview) #font-preview {
-    grid-column: 2; grid-row: 1 / span 4;
+    grid-column: 2; grid-row: 1;
     align-self: start; margin-top: 0;
   }
   .field-card:has(> .field-card-body > #font-preview)
-    .field-card-body > *:not(.radio-field):not(#font-preview) {
+    .field-card-body > *:not(.knob-panel):not(#font-preview) {
     grid-column: 1 / -1;
   }
-  .radio-field label { margin-top: 6px; }
-  .radios { display: flex; flex-direction: column; gap: 3px; }
-  .radios label.radio {
-    display: flex; align-items: center; gap: 9px; position: relative;
-    margin: 0; padding: 3px 7px; border-radius: var(--radius-s);
-    font-size: 13px; opacity: 1; cursor: pointer;
+  /* ячейка панельки: подпись сверху, ручка под ней по центру */
+  .knob-cell {
+    display: flex; flex-direction: column; align-items: center;
+    gap: 5px; min-width: 0; text-align: center;
   }
-  .radios label.radio:hover { background: var(--surface); }
-  /* FL-style: утопленный тёмный кружок, при выборе загорается янтарный
-     огонёк .led - «щелчок» даёт переход с перелётом (overshoot) */
-  .radios input[type="radio"] {
-    appearance: none; -webkit-appearance: none;
-    position: relative; z-index: 1;
-    width: 15px; height: 15px; margin: 0; flex: 0 0 auto; border-radius: 50%;
-    cursor: pointer;
-    background: radial-gradient(circle at 50% 32%, rgba(255,255,255,.07), rgba(0,0,0,.4) 72%),
-                var(--bg);
-    border: 2px solid var(--widget);
-    box-shadow: inset 0 1px 2px rgba(0,0,0,.55);
-    transition: border-color .14s;
-  }
-  .radios input[type="radio"]:hover { border-color: var(--accent); }
-  .radios input[type="radio"]:checked { border-color: var(--accent); }
-  .radios input[type="radio"]:focus-visible {
-    outline: 2px solid var(--accent); outline-offset: 2px;
-  }
-  .radios .led {
-    position: absolute; left: 14.5px; top: 50%; z-index: 2;
-    width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%;
-    background: var(--accent); box-shadow: 0 0 7px var(--accent);
-    opacity: 0; transform: scale(.2); pointer-events: none;
-    transition: opacity .1s, transform .16s cubic-bezier(.2, 1.9, .4, .9);
-  }
-  .radios input[type="radio"]:checked ~ .led {
-    opacity: 1; transform: scale(1);
-  }
-  .radios label.radio span {
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  }
-  /* Бесконечная круговая ручка толщины шрифта (FL-style): индикатор
-     крутится без упора, шкала min..max замыкается по кругу */
-  .knob-row { display: flex; align-items: center; gap: 10px; }
+  .knob-cell label { margin: 0; }
+  /* Бесконечная круговая ручка (FL-style): индикатор крутится без упора;
+     у ручек со списком позиций по ободу риски, активная горит акцентом. */
   .knob {
     width: 34px; height: 34px; border-radius: 50%; position: relative;
     flex: 0 0 auto; cursor: ew-resize; touch-action: none;
@@ -277,15 +254,20 @@
   .knob.dragging { cursor: grabbing; }
   .knob-ind {
     position: absolute; left: 50%; top: 4px; width: 2px; height: 11px;
-    margin-left: -1px; border-radius: 1px;
+    margin-left: -1px; border-radius: 1px; z-index: 1;
     background: var(--accent); box-shadow: 0 0 5px var(--accent);
     transform-origin: 50% 13px;   /* ось в центре ручки (высота34 -> центр17) */
     transition: transform .18s cubic-bezier(.3, 1.4, .4, 1);
   }
   .knob.dragging .knob-ind { transition: none; }
-  .knob-value {
-    font-size: 13px; font-variant-numeric: tabular-nums;
-    min-width: 3ch; opacity: .9;
+  .knob-tick {
+    position: absolute; left: 50%; top: 50%;
+    width: 1.5px; height: 6px; margin: -3px 0 0 -.75px;
+    background: var(--widget); border-radius: 1px;
+    transform-origin: center; pointer-events: none;
+  }
+  .knob-tick.on {
+    background: var(--accent); box-shadow: 0 0 4px var(--accent);
   }
   /* предпросмотр: три строки - заголовок, абзац с весом, строка консоли */
   #font-preview { font-size: 13px; line-height: 1.4; }
