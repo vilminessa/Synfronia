@@ -14,7 +14,7 @@
   // Выбор шрифтов из настроек (без кавычек) — нужен, чтобы при переключении
   // темы вернуть шрифт, если у темы нет своих font/font_mono, и чтобы запросить
   // @font-face именно для этих семейств.
-  var FONT_PICK = { sans: "", mono: "" };
+  var FONT_PICK = { sans: "", mono: "", head: "", weight: "" };
 
   function t(key) {
     var d = I18N[curLang] || I18N.ru;
@@ -67,26 +67,42 @@
   }
 
   // ---- подсказки -----------------------------------------------------------
-  // Один элемент на страницу (см. initTooltips). В режиме hover догоняет курсор
-  // с инерцией и держится снаружи рамки элемента, чтобы не накрывать его; между
-  // краем подсказки и краем элемента рисуется «нить» (SVG) с наконечником-
-  // стрелкой у элемента. В режиме focus (клавиатура) курсора нет - подсказка
-  // встаёт над/под элементом, нить та же. Скрывается, как только элемент
-  // пропал из-под курсора, узел отсоединён или курсор ушёл из окна, - потому
-  // что pointerout после перерисовки карточки настроек не приходит.
+  // Один элемент на страницу (см. initTooltips). В режиме hover подсказка
+  // «придерживается круговой области» вокруг элемента: цель - кольцо на угле
+  // «центр элемента -> курсор», поэтому прямые грани и углы достижимы
+  // одинаково, при обводе курсором подсказка плавно объезжает угол, а не
+  // срывается на противоположную сторону. Между краем подсказки и краем
+  // элемента рисуется «нить» (SVG) строго от края до края, с наконечником-
+  // стрелкой у элемента. В режиме focus (клавиатура) курсора нет - сторона
+  // выбирается по простору: сверху, иначе снизу, затем по бокам. Скрывается,
+  // как только элемент пропал из-под курсора, узел отсоединён или курсор
+  // ушёл из окна, - потому что pointerout после перерисовки карточки
+  // настроек не приходит.
   var TIP = {node: null, text: null, thread: null, line: null, head: null,
-             target: null, pending: null, mode: "hover",
+             target: null, pending: null, mode: "hover", ang: null,
              cx: 0, cy: 0, x: 0, y: 0, tx: 0, ty: 0,
              raf: 0, timer: 0, shown: false, lastT: 0};
   var SVG_NS = "http://www.w3.org/2000/svg";
   var TIP_GAP = 10;      // минимальный зазор до элемента
   var TIP_MARGIN = 8;    // минимальный отступ от края окна
   var TIP_DELAY = 220;   // задержка появления, чтобы не мигало при проносе
-  var TIP_OFF_X = 16;    // смещение подсказки от курсора
-  var TIP_OFF_Y = 20;
   var TIP_TAU = 70;      // постоянная времени инерции (мс): меньше - короче хвост
   var TIP_HEAD_LEN = 7;  // длина наконечника-стрелки
   var TIP_HEAD_W = 3.5;  // половина ширины наконечника
+  // «Магнитные» силы подсказки - две настройки 0..100 (карточка «Подсказки»).
+  // Дефолты повторяют прежнее поведение: pull 50 - прежняя инерция,
+  // repel 100 - выталкивание из рамки элемента сразу и целиком.
+  var TIP_FORCE = {pull: 50, repel: 100};
+  function setTipForces(pull, repel) {
+    var p = Number(pull), r = Number(repel);
+    if (isFinite(p)) TIP_FORCE.pull = Math.max(0, Math.min(100, p));
+    if (isFinite(r)) TIP_FORCE.repel = Math.max(0, Math.min(100, r));
+    // подсказка может стоять «на месте» (кадры остановлены после схождения) -
+    // без толчка новая сила применится только при следующем движении мыши
+    if (TIP.target && TIP.raf === 0 && !reducedMotion()) {
+      TIP.raf = requestAnimationFrame(tipFrame);
+    }
+  }
 
   function reducedMotion() {
     return window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -95,6 +111,13 @@
   function tipAnchor(el) {
     if (!el || !el.closest) return null;
     return el.closest("[data-tip]");
+  }
+
+  // Шрифт подсказки: data-tip-font носителя (ручки шрифтов показывают своё
+  // семейство), пусто - системный шрифт подсказки
+  function tipFontFamily(el) {
+    var fam = ((el && el.getAttribute("data-tip-font")) || "").trim();
+    return fam ? quoted(fam) + ', var(--font-sans, "Segoe UI"), system-ui, sans-serif' : "";
   }
 
   function tipParts() {
@@ -107,6 +130,13 @@
     var text = document.createElement("span");
     text.className = "tip-text";
     node.appendChild(text);
+    // пылинки: живут в узле подсказки, оживают и гаснут вместе с ней
+    // (анимация и раскладка - в app.css)
+    for (var i = 0; i < 6; i++) {
+      var dust = document.createElement("i");
+      dust.className = "dust";
+      node.appendChild(dust);
+    }
     document.body.appendChild(node);
     TIP.node = node;
     TIP.text = text;
@@ -128,35 +158,103 @@
     TIP.head = head;
   }
 
-  // Куда поставить подсказку. hover: курсор + смещение, но снаружи раздутой
-  // рамки элемента (подсказка не должна накрывать то, на что указывает).
-  // focus: над элементом, если есть место, иначе под ним.
+  // Куда поставить подсказку. hover - кольцо: цель строится в полярных
+  // координатах от центра элемента на угле «центр -> курсор» - расстояние
+  // это выход луча из рамки элемента в этом направлении + зазор силы repel +
+  // проекция самого бокса подсказки, поэтому подсказка придерживается
+  // круговой области одинаково и на гранях, и на углах. Угол ограничен по
+  // скорости (0.45 рад/кадр): при переходе курсора через центр подсказка
+  // объезжает элемент по кольцу, а не летит сквозь него; в центре (курсор
+  // ближе 6px) угол держится прежним, чтобы не дрожать. focus: сверху, если
+  // есть место, иначе снизу, затем по бокам с большим простором.
   function tipTarget() {
     var el = TIP.target;
     var w = TIP.node.offsetWidth;
     var h = TIP.node.offsetHeight;
     var r = el.getBoundingClientRect();
+    // Зазор до элемента (repel) и близость к курсору (pull) меняются по
+    // прогрессии, а не по прямой: концы прежние (repel 0 - лёжа на элементе,
+    // 100 -18px снаружи; pull 50 - дефолт), поэтому обычные настройки не
+    // едутся, но между ними изменение чувствуется сильнее у краёв. pull 0 -
+    // подсказка отдаляется от курсора (50px), 100 - подтягивается вплотную.
+    var gap = 2 * Math.pow(9, TIP_FORCE.repel / 100);
+    var onto = Math.pow(1 - TIP_FORCE.repel / 100, 1.8) * Math.min(w, h) / 2;
+    var pn = (TIP_FORCE.pull - 50) / 50;
+    var away = pn < 0 ? 50 * Math.pow(-pn, 1.8)
+                      : -10 * Math.pow(pn, 1.8);
     var dx, dy;
     if (TIP.mode === "focus") {
-      var below = r.top - h - TIP_GAP < TIP_MARGIN;
-      dy = below ? r.bottom + TIP_GAP : r.top - h - TIP_GAP;
-      dx = r.left + r.width / 2 - w / 2;
-    } else {
-      dx = TIP.cx + TIP_OFF_X;
-      dy = TIP.cy + TIP_OFF_Y;
-      // вытолкнуть из раздутой рамки элемента по наименьшей грани - тогда нить
-      // всегда короткая и указывает на бордюр, а подсказка не перекрывает его
-      var left = r.left - TIP_GAP, top = r.top - TIP_GAP;
-      var right = r.right + TIP_GAP, bottom = r.bottom + TIP_GAP;
-      if (dx < right && dx + w > left && dy < bottom && dy + h > top) {
-        var pushL = right - dx, pushR = dx + w - left;
-        var pushT = bottom - dy, pushB = dy + h - top;
-        var m = Math.min(pushL, pushR, pushT, pushB);
-        if (m === pushL) dx = right;
-        else if (m === pushR) dx = left - w;
-        else if (m === pushT) dy = bottom;
-        else dy = top - h;
+      var sp = {top: r.top - TIP_MARGIN,
+                bottom: window.innerHeight - r.bottom - TIP_MARGIN,
+                left: r.left - TIP_MARGIN,
+                right: window.innerWidth - r.right - TIP_MARGIN};
+      var need = {top: h, bottom: h, left: w, right: w};
+      var fside = null, bestS = null, bestV = -Infinity;
+      ["top", "bottom", "right", "left"].forEach(function(s) {
+        var free = sp[s] - need[s];
+        if (fside === null && free >= TIP_GAP) fside = s;
+        if (free > bestV) { bestV = free; bestS = s; }
+      });
+      fside = fside || bestS;
+      if (fside === "top" || fside === "bottom") {
+        dx = r.left + r.width / 2 - w / 2;
+        dy = fside === "top" ? r.top - TIP_GAP - h : r.bottom + TIP_GAP;
+      } else {
+        dy = r.top + r.height / 2 - h / 2;
+        dx = fside === "right" ? r.right + TIP_GAP : r.left - TIP_GAP - w;
       }
+    } else {
+      // кольцо: цель на угле «центр -> курсор», радиус = выход луча из
+      // рамки + зазор + проекция бокса подсказки на направление
+      var ccx = r.left + r.width / 2, ccy = r.top + r.height / 2;
+      var hw = Math.max(r.width / 2, 1), hh = Math.max(r.height / 2, 1);
+      var vx = TIP.cx - ccx, vy = TIP.cy - ccy;
+      var lv = Math.hypot(vx, vy);
+      var want;
+      if (lv >= 6) want = Math.atan2(vy, vx);
+      else if (TIP.ang !== null) want = TIP.ang;   // курсор в центре - угол держим
+      else want = Math.PI / 2;                     // первый показ - снизу
+      if (TIP.ang === null) TIP.ang = want;
+      else {
+        var dA = want - TIP.ang;
+        while (dA > Math.PI) dA -= 2 * Math.PI;
+        while (dA < -Math.PI) dA += 2 * Math.PI;
+        // шаг ЗА ВРЕМЯ, а не за кадр: на низком FPS подсказка всё равно
+        // доезжает за полсекунды, а на слабой машине угол не «залипает»
+        var dtA = TIP.lastT ? Math.min(250, performance.now() - TIP.lastT) : 16.7;
+        var step = reducedMotion() ? 4 : Math.min(2 * Math.PI, 0.45 * (dtA / 16.7));
+        TIP.ang += Math.max(-step, Math.min(step, dA));
+      }
+      // Обход кандидатов: желаемый угол, противоположный и боковые. Кламп к
+      // краю окна не должен прижимать подсказку на элемент - такую позицию
+      // отбрасываем (перекрытие порождено только клампом), а перекрытие по
+      // воле сил (repel = 0 - «лечь на элемент») оставляем.
+      function ringPos(a) {
+        var ux2 = Math.cos(a), uy2 = Math.sin(a);
+        var tR2 = Math.min(ux2 ? Math.abs(hw / ux2) : Infinity,
+                           uy2 ? Math.abs(hh / uy2) : Infinity);
+        var proj2 = (w / 2) * Math.abs(ux2) + (h / 2) * Math.abs(uy2);
+        var dist2 = tR2 + gap - onto + proj2 + away;
+        return {x: ccx + ux2 * dist2 - w / 2, y: ccy + uy2 * dist2 - h / 2};
+      }
+      function hits(x, y) {
+        return x < r.right && x + w > r.left && y < r.bottom && y + h > r.top;
+      }
+      function clampWin(x, y) {
+        return {x: Math.max(TIP_MARGIN, Math.min(x, window.innerWidth - w - TIP_MARGIN)),
+                y: Math.max(TIP_MARGIN, Math.min(y, window.innerHeight - h - TIP_MARGIN))};
+      }
+      var cands = [TIP.ang, TIP.ang + Math.PI,
+                   TIP.ang + Math.PI / 2, TIP.ang - Math.PI / 2];
+      var place = null;
+      for (var ci = 0; ci < cands.length; ci++) {
+        var raw = ringPos(cands[ci]);
+        var win = clampWin(raw.x, raw.y);
+        if (!hits(win.x, win.y) || hits(raw.x, raw.y)) { place = win; break; }
+      }
+      if (!place) place = clampWin(ringPos(TIP.ang).x, ringPos(TIP.ang).y);
+      dx = place.x;
+      dy = place.y;
     }
     dx = Math.max(TIP_MARGIN, Math.min(dx, window.innerWidth - w - TIP_MARGIN));
     dy = Math.max(TIP_MARGIN, Math.min(dy, window.innerHeight - h - TIP_MARGIN));
@@ -173,6 +271,10 @@
     TIP.target = el;
     TIP.pending = null;
     TIP.shown = false;
+    TIP.ang = null;
+    // подсказка может набираться выбранным шрифтом (ручки шрифтов несут
+    // data-tip-font) - иначе название показалось бы системным
+    TIP.node.style.fontFamily = tipFontFamily(el);
     TIP.text.textContent = text;
     el.setAttribute("aria-describedby", "tip");
     TIP.node.hidden = false;
@@ -220,7 +322,8 @@
     if (!TIP.lastT) TIP.lastT = now;
     var dt = Math.min(50, Math.max(1, now - TIP.lastT));
     TIP.lastT = now;
-    var k = 1 - Math.exp(-dt / TIP_TAU);
+    // притяжение к курсору: множитель к инерции (pull 50 = прежний темп)
+    var k = (1 - Math.exp(-dt / TIP_TAU)) * (0.5 + TIP_FORCE.pull / 100);
     TIP.x += (TIP.tx - TIP.x) * k;
     TIP.y += (TIP.ty - TIP.y) * k;
     var settled = Math.abs(TIP.tx - TIP.x) < 0.5 && Math.abs(TIP.ty - TIP.y) < 0.5;
@@ -236,8 +339,9 @@
     paintThread();
   }
 
-  // Нить: линия от края подсказки до ближайшей точки бордюра элемента плюс
-  // наконечник-стрелка, носик которой упирается в сам элемент.
+  // Нить: кратчайший отрезок между двумя рамками - «край -> край» точно:
+  // по общей оси линия строго горизонтальна/вертикальна, при диагональном
+  // расположении соединяются углы; наконечник-стрелка упирается в элемент.
   function paintThread() {
     var el = TIP.target;
     if (!el) return;
@@ -245,33 +349,36 @@
     if (!r.width && !r.height) return;
     var w = TIP.node.offsetWidth;
     var h = TIP.node.offsetHeight;
-    var cx = TIP.x + w / 2;
-    var cy = TIP.y + h / 2;
-    // ближайшая к центру подсказки точка рамки элемента
-    var px = Math.max(r.left, Math.min(cx, r.right));
-    var py = Math.max(r.top, Math.min(cy, r.bottom));
-    if (px > r.left && px < r.right && py > r.top && py < r.bottom) {
-      var dl = cx - r.left, dr = r.right - cx, dt = cy - r.top, db = r.bottom - cy;
-      var m = Math.min(dl, dr, dt, db);
-      if (m === dl) px = r.left; else if (m === dr) px = r.right;
-      else if (m === dt) py = r.top; else py = r.bottom;
+    var lT = TIP.x, rT = TIP.x + w, tT = TIP.y, bT = TIP.y + h;
+    var toRight = r.left > rT;      // объект правее подсказки
+    var toLeft = lT > r.right;      // подсказка правее объекта
+    var toBelow = r.top > bT;       // объект ниже подсказки
+    var toAbove = tT > r.bottom;
+    var gx = toRight || toLeft, gy = toBelow || toAbove;
+    if (!gx && !gy) {               // рамки пересекаются - нить не нужна
+      TIP.line.setAttribute("d", "");
+      TIP.head.setAttribute("d", "");
+      return;
     }
-    var dx = px - cx, dy = py - cy;
+    var sx, sy, px, py;
+    if (gx) {                       // по X разрыв: ближайшие вертикальные грани
+      sx = toRight ? rT : lT;
+      px = toRight ? r.left : r.right;
+    } else {                        // общая зона по X - одна координата на двоих
+      sx = px = (Math.max(lT, r.left) + Math.min(rT, r.right)) / 2;
+    }
+    if (gy) {
+      sy = toBelow ? bT : tT;
+      py = toBelow ? r.top : r.bottom;
+    } else {
+      sy = py = (Math.max(tT, r.top) + Math.min(bT, r.bottom)) / 2;
+    }
+    var dx = px - sx, dy = py - sy;
     var len = Math.hypot(dx, dy);
     if (len < 1) {
       TIP.line.setAttribute("d", "");
       TIP.head.setAttribute("d", "");
       return;
-    }
-    // выход луча из рамки подсказки (старт нити)
-    var sx, sy;
-    if (dx === 0) { sx = cx; sy = cy + (dy < 0 ? -h / 2 : h / 2); }
-    else if (dy === 0) { sx = cx + (dx < 0 ? -w / 2 : w / 2); sy = cy; }
-    else {
-      var tx0 = (w / 2) / Math.abs(dx), ty0 = (h / 2) / Math.abs(dy);
-      var t0 = Math.min(tx0, ty0);
-      sx = cx + dx * t0;
-      sy = cy + dy * t0;
     }
     TIP.line.setAttribute("d", "M " + sx.toFixed(1) + " " + sy.toFixed(1)
       + " L " + px.toFixed(1) + " " + py.toFixed(1));
@@ -371,6 +478,8 @@
     root.setProperty("--opacity", pick(c.opacity, 1));
     setFontVar("--font-sans", c.font ? quoted(c.font) : quoted(FONT_PICK.sans));
     setFontVar("--font-mono", c.font_mono ? quoted(c.font_mono) : quoted(FONT_PICK.mono));
+    setFontVar("--font-head", quoted(FONT_PICK.head));
+    setFontVar("--font-weight", FONT_PICK.weight);
     var cssEl = document.getElementById("theme-style");
     if (!cssEl) {
       cssEl = document.createElement("style");
@@ -413,7 +522,7 @@
   // @font-face для действующей темы и выбранных шрифтов.
   function fontFacesForTheme() {
     var th = THEMES[themeKey()] || {};
-    return [th.font, th.font_mono, FONT_PICK.sans, FONT_PICK.mono];
+    return [th.font, th.font_mono, FONT_PICK.sans, FONT_PICK.mono, FONT_PICK.head];
   }
   function themeKey() {
     var sel = document.getElementById("theme");

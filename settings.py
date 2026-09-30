@@ -12,6 +12,7 @@ from pathlib import Path
 
 import settings_schema
 from paths import base_dir
+from version import __version__
 
 # Переносы старых ключей в новые: (старый, новый, значение по старому ключу).
 MIGRATIONS = (
@@ -80,6 +81,11 @@ def load_settings() -> dict:
         if fixed != data[key]:
             changed = True  # например, retries: 999 -> 50
         settings[key] = fixed
+    # Версия, записавшая настройки: поднимаем молча (без логов), чтобы
+    # settings.json всегда знал, какой версией он последний раз сохранён.
+    if settings.get("app_version") != __version__:
+        settings["app_version"] = __version__
+        changed = True
     if changed:
         save_settings(settings)  # миграция: дописываем и чиним значения
     return settings

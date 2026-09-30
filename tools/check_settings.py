@@ -36,6 +36,7 @@ sys.path.insert(0, str(ROOT))
 import i18n  # noqa: E402
 import settings  # noqa: E402
 import settings_schema  # noqa: E402
+import version  # noqa: E402
 from ftp import FtpConfig  # noqa: E402
 
 # id, которые рисует окно настроек и на которые завязан settings.js.
@@ -45,8 +46,11 @@ LEGACY_DOM = {
     # раздел «Интерфейс»
     "lang", "theme", "reload-themes", "download-themes", "themes-dl-note",
     "open-themes",
-    "font-sans", "font-mono", "font-note", "font-dl-note",
+    "font-heading", "font-sans", "font-mono", "font-weight", "font-preview",
+    "font-note", "font-dl-note",
     "reload-fonts", "download-fonts", "open-fonts",
+    "tip-pull", "tip-pull-range", "tip-repel", "tip-repel-range",
+    "app-version",
     # раздел «Загрузчик»
     "subs", "qual", "transcode", "transcode-note", "dest", "browse",
     "retries", "retries-range", "socket_timeout", "socket_timeout-range",
@@ -79,6 +83,11 @@ COERCE_CASES = [
     ("ftp_pasv", "нет", False),
     ("quality", "huge", "lossless"),
     ("quality", "1080", "1080"),
+    ("font_weight", "555", 560),     # knob: квантование по step10
+    ("font_weight", "95", 100),      # knob: нижняя граница
+    ("font_weight", "нет", 400),     # knob: битое значение -> умолчание
+    ("font_sans", "JetBrains Mono", "JetBrains Mono"),  # ручка шрифта: pass-through
+    ("font_sans", None, ""),                       # ручка шрифта: None -> умолчание
     ("ftp_mode", "nope", "batch"),
     ("transcode", "av1", "none"),
     ("theme", "моя тема", "моя тема"),   # список опций динамический - не проверяем
@@ -195,7 +204,7 @@ def main() -> int:
     doms = _doms()
     ok(len(doms) == len(set(doms)), "dom-id уникальны",
        str([d for d in doms if doms.count(d) > 1]))
-    ok(len(flat_names) == 24, "в схеме 24 сохраняемые настройки", str(len(flat_names)))
+    ok(len(flat_names) == 29, "в схеме 29 сохраняемые настройки", str(len(flat_names)))
 
     # 3. совместимость с текущим файлом
     section("3. плоский формат не поехал")
@@ -337,6 +346,16 @@ def main() -> int:
         stored = json.loads(path.read_text(encoding="utf-8"))
         ok(stored["retries"] == 50 and stored["quality"] == "lossless",
            "и сразу записываются в файл")
+
+        stored = json.loads(path.read_text(encoding="utf-8"))
+        stored["app_version"] = "1.2.6.4"
+        path.write_text(json.dumps(stored), encoding="utf-8")
+        upgraded = settings.load_settings()
+        ok(upgraded["app_version"] == version.__version__,
+           "файл прошлой версии поднимается до текущей")
+        stored = json.loads(path.read_text(encoding="utf-8"))
+        ok(stored["app_version"] == version.__version__,
+           "и новая версия записывается в файл")
 
         os.utime(path, (1_000_000, 1_000_000))
         stamp = path.stat().st_mtime_ns

@@ -19,9 +19,10 @@ from pathlib import Path
 
 import settings_schema
 import ui as _ui
+from version import __version__
 
 from i18n import I18N
-from fonts import _clean_family, families as _loaded_families, font_css, font_vars
+from fonts import _clean_family, families as _loaded_families, font_css, font_vars, load_fonts
 from paths import _file_log, base_dir
 
 
@@ -39,15 +40,6 @@ _THEME_DEFAULTS = {
     "radius_l": 12,
 }
 THEMES = {
-    "scary_forest": {
-        "label": "Scary Forest",
-        "bg": "#0c1622",
-        "surface": "#1f2b29",
-        "widget": "#23444b",
-        "text": "#dcdedd",
-        "accent": "#628d7c",
-        **_THEME_DEFAULTS,
-    },
     "technology_day": {
         "label": "Technology day",
         "bg": "#00181a",
@@ -91,15 +83,6 @@ THEMES = {
         "widget": "#323756",
         "text": "#fffedd",
         "accent": "#fff2c9",
-        **_THEME_DEFAULTS,
-    },
-    "vilmy": {
-        "label": "Vilmy~",
-        "bg": "#F5F0E6",
-        "surface": "#EFE9DC",
-        "widget": "#EDE5D3",
-        "text": "#1F3A2E",
-        "accent": "#B89968",
         **_THEME_DEFAULTS,
     },
     "liquid_glass": {
@@ -1103,7 +1086,8 @@ def _palette_root_vars(theme: dict, fonts: dict | None = None) -> str:
             if color is not None:
                 parts.append(f"--{f}: {color}")
     if fonts:
-        vars_css = font_vars(fonts.get("sans") or "", fonts.get("mono") or "")
+        vars_css = font_vars(fonts.get("sans") or "", fonts.get("mono") or "",
+                             fonts.get("head") or "", fonts.get("weight") or "")
         if vars_css:
             parts.append(vars_css)
     return " ".join(parts)
@@ -1188,10 +1172,14 @@ def _page_fonts(theme: dict, fonts: dict | None) -> dict:
     if fonts is None:
         from settings import load_settings
         saved = load_settings()
-        fonts = {"sans": saved.get("font_sans") or "", "mono": saved.get("font_mono") or ""}
+        fonts = {"sans": saved.get("font_sans") or "", "mono": saved.get("font_mono") or "",
+                 "head": saved.get("font_heading") or "",
+                 "weight": str(saved.get("font_weight") or "")}
     return {
         "sans": _clean_family(theme.get("font") or fonts.get("sans") or ""),
         "mono": _clean_family(theme.get("font_mono") or fonts.get("mono") or ""),
+        "head": _clean_family(fonts.get("head") or ""),
+        "weight": str(fonts.get("weight") or ""),
     }
 
 
@@ -1202,7 +1190,13 @@ def _fill_placeholders(template: str, theme: dict, picked: dict) -> str:
     раньше отдельное окно: в своём entry-шаблоне темы его может не быть, и
     тогда разметку добавляет _ensure_settings.
     """
-    fonts_css = font_css([picked["sans"], picked["mono"]])
+    # Встраиваем все семейства, а не только выбранные: подсказки опций
+    # переключателей шрифтов набираются самим шрифтом (data-tip-font),
+    # поэтому @font-face нужен каждому семейству из списка. Лимит
+    # fonts.MAX_TOTAL_BYTES защищает от раздувания страницы.
+    all_fams = list((load_fonts() or {}).keys())
+    fonts_css = font_css(list(dict.fromkeys(
+        [picked["sans"], picked["mono"], picked.get("head") or ""] + all_fams)))
     page = template.replace("__THEME_ROOT__", _palette_root_vars(theme, picked))
     page = page.replace("__THEME_CSS__", theme.get("css") or "")
     page = page.replace("__FONTS_CSS__", fonts_css)
@@ -1218,6 +1212,7 @@ def _fill_placeholders(template: str, theme: dict, picked: dict) -> str:
     page = page.replace("__SETTINGS_HTML__", _ui.SETTINGS_HTML)
     page = page.replace("__I18N__", _js_json(I18N))
     page = page.replace("__THEMES__", _js_json(themes_embed()))
+    page = page.replace("__APP_VERSION__", __version__)
     # __SETTINGS_SCHEMA__ лежит внутри settings.js, поэтому подменяем после него
     page = page.replace("__SETTINGS_SCHEMA__", _js_json(settings_schema.schema_json()))
     return page
@@ -1266,7 +1261,8 @@ def build_page(theme_key: str, lang: str | None = None, fonts: dict | None = Non
       темы font / font_mono) встраиваются как @font-face с data:URI;
     • плейсхолдеры (__THEME_ROOT__, __THEME_CSS__, __FONTS_CSS__, __APP_CSS__,
       __MAIN_CSS__, __SETTINGS_CSS__, __COMMONJS__, __APPJS__, __SETTINGS_JS__,
-      __SETTINGS_SCHEMA__, __I18N__, __THEMES__) подставляются простой заменой.
+      __SETTINGS_SCHEMA__, __I18N__, __THEMES__, __APP_VERSION__) подставляются
+      простой заменой.
     """
     theme = _page_theme(theme_key)
     folders = theme.get("_slot_folders") or []

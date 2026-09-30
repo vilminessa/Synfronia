@@ -89,8 +89,10 @@
      чекбокс спрятан (opacity 0), тумблер - SVG 40x20, ровно по пикселям
      темы, поэтому каждый юнит = 1 CSS px. Клики переключают через JS
      (см. renderField), цвета берутся из тех же переменных, что и остальные
-     элементы управления. */
-  .check.pixel-toggle { gap: 0; }
+     элементы управления. width: max-content - бокс обнимает сам тумблер:
+     подсказка (нить) целится в rect носителя data-tip, и без этого rect
+     был бы вся строка карточки, а не переключатель. */
+  .check.pixel-toggle { gap: 0; width: max-content; }
   .check.pixel-toggle input {
     position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0;
   }
@@ -200,6 +202,90 @@
   .mode-switch button:active { transform: scale(.95); }
   .mode-switch button.on {
     background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 600;
+  }
+
+  /* ---- шрифты: две колонки - слева панелька 2x2 из ручек (заголовки,
+     общий, консольный, толщина), справа предпросмотр. Карточка
+     узнаётся по #font-preview; панелька - строка схемы row_class
+     knob-panel (четыре ячейки в одном контейнере). */
+  .field-card:has(> .field-card-body > #font-preview) .field-card-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+    gap: 4px 18px;
+    align-items: start;
+  }
+  .field-card:has(> .field-card-body > #font-preview) .knob-panel {
+    grid-column: 1;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 10px 12px;
+    align-items: start;
+    margin-top: 0;
+    padding: 10px 12px;
+    background: var(--surface);
+    border: 1px solid var(--widget);
+    border-radius: var(--radius-m);
+  }
+  .field-card:has(> .field-card-body > #font-preview) #font-preview {
+    grid-column: 2; grid-row: 1;
+    align-self: start; margin-top: 0;
+  }
+  .field-card:has(> .field-card-body > #font-preview)
+    .field-card-body > *:not(.knob-panel):not(#font-preview) {
+    grid-column: 1 / -1;
+  }
+  /* ячейка панельки: подпись сверху, ручка под ней по центру */
+  .knob-cell {
+    display: flex; flex-direction: column; align-items: center;
+    gap: 5px; min-width: 0; text-align: center;
+  }
+  .knob-cell label { margin: 0; }
+  /* Бесконечная круговая ручка (FL-style): индикатор крутится без упора;
+     у ручек со списком позиций по ободу риски, активная горит акцентом. */
+  .knob {
+    width: 34px; height: 34px; border-radius: 50%; position: relative;
+    flex: 0 0 auto; cursor: ew-resize; touch-action: none;
+    background: radial-gradient(circle at 35% 30%, rgba(255,255,255,.10), rgba(0,0,0,.35) 68%),
+                var(--widget);
+    border: 1px solid var(--surface);
+    box-shadow: 0 2px 5px rgba(0,0,0,.45), inset 0 1px 1px rgba(255,255,255,.08);
+  }
+  .knob:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .knob.dragging { cursor: grabbing; }
+  .knob-ind {
+    position: absolute; left: 50%; top: 4px; width: 2px; height: 11px;
+    margin-left: -1px; border-radius: 1px; z-index: 1;
+    background: var(--accent); box-shadow: 0 0 5px var(--accent);
+    transform-origin: 50% 13px;   /* ось в центре ручки (высота34 -> центр17) */
+    /* без transition: движение ведёт JS (потолок скорости + затухание) */
+  }
+  .knob-tick {
+    position: absolute; left: 50%; top: 50%;
+    width: 1.5px; height: 6px; margin: -3px 0 0 -.75px;
+    background: var(--widget); border-radius: 1px;
+    transform-origin: center; pointer-events: none;
+  }
+  .knob-tick.on {
+    background: var(--accent); box-shadow: 0 0 4px var(--accent);
+  }
+  /* предпросмотр: три строки - заголовок, абзац с весом, строка консоли */
+  #font-preview { font-size: 13px; line-height: 1.4; }
+  #font-preview .fp-head {
+    font-family: var(--font-head, var(--font-sans, "Segoe UI")), system-ui, sans-serif;
+    font-size: 19px; font-weight: 700; margin-bottom: 6px;
+  }
+  #font-preview .fp-text {
+    font-family: var(--font-sans, "Segoe UI"), system-ui, sans-serif;
+    font-weight: var(--font-weight, 400); margin-bottom: 7px;
+  }
+  #font-preview .fp-mono {
+    font-family: var(--font-mono, Consolas), ui-monospace, monospace;
+    font-size: 12px; opacity: .85;
+    white-space: nowrap; overflow-x: auto;
+  }
+  /* шрифт заголовков окна и карточек - как в главном окне */
+  .win-title, .field-card-title, .settings-card h1, .settings-card h2 {
+    font-family: var(--font-head, var(--font-sans, "Segoe UI")), system-ui, sans-serif;
   }
 
   @media (max-width: 640px) {

@@ -1,6 +1,7 @@
 """Web-интерфейс (pywebview/EdgeChromium) для Synfronia. Модульные темы."""
 
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -37,6 +38,7 @@ from core import (
 from core import _file_log as file_log
 from core import _fonts_root as fonts_root
 from core import _themes_root as themes_root
+from paths import logs_dir, webview_child_running
 
 seed_bundled_fonts()   # вшитые шрифты в папку шрифтов: первый запуск работает без сети
 load_languages()
@@ -313,8 +315,13 @@ class Api:
         откатился бы на системный.
         """
         theme = (themes_embed() or {}).get(self.settings.get("theme", "scarred_mind")) or {}
-        return font_css([theme.get("font") or self.settings.get("font_sans") or "",
-                         theme.get("font_mono") or self.settings.get("font_mono") or ""])
+        # все семейства, а не только выбранные: подсказки опций шрифтов
+        # набираются самим шрифтом (см. themes._fill_placeholders)
+        return font_css(list(dict.fromkeys(
+            [theme.get("font") or self.settings.get("font_sans") or "",
+             theme.get("font_mono") or self.settings.get("font_mono") or "",
+             self.settings.get("font_heading") or ""]
+            + list((load_fonts() or {}).keys()))))
 
     def font_face_css(self, families) -> str:
         """@font-face для произвольных семейств.
@@ -325,7 +332,9 @@ class Api:
         """
         if isinstance(families, str):
             families = [families]
-        return font_css([str(f or "") for f in (families or [])])
+        return font_css(list(dict.fromkeys(
+            [str(f or "") for f in (families or [])]
+            + list((load_fonts() or {}).keys()))))
 
     def set_font(self, key: str, value: str) -> dict:
         """Сохраняет выбранный шрифт и отдаёт @font-face для активной темы.
@@ -333,7 +342,7 @@ class Api:
         Страница не перезагружается: JS подменяет блок #fonts-style, поэтому
         выбор шрифта не сбрасывает состояние интерфейса.
         """
-        if key not in ("font_sans", "font_mono"):
+        if key not in ("font_sans", "font_mono", "font_heading"):
             return {"error": "unknown key"}
         self.settings[key] = str(value or "")
         try:
@@ -542,7 +551,55 @@ def main() -> None:
         min_size=(780, 560),
         background_color="#0c1622",
     ))
-    webview.start()
+
+    # Сторож старта: WebView2 создаётся без дефолтного таймаута - если loader
+    # завис, окно не появится вообще («тёмный экран»), а процесс будет жив.
+    # Через 20 с без окна пишем след в gui_diag.log и stderr (в logs\launcher.log,
+    # если запуск шёл из debug.py).
+    def _report_start_problem(msg: str) -> None:
+        line = (f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] сторож: {msg} "
+                "(см. python gui.py --diagnose-freeze)")
+        print(line, file=sys.stderr, flush=True)
+        try:
+            with open(base_dir() / "gui_diag.log", "a", encoding="utf-8") as fh:
+                fh.write(line + "\n")
+        except OSError:
+            pass
+        try:
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(
+                0,
+                f"{msg}\n\nЗакройте окно и запустите приложение заново.",
+                "Synfronia",
+                0x30,   # MB_ICONWARNING
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _guard() -> None:
+        win = webview.windows[-1] if webview.windows else None
+        if win is None:
+            # окно не создавалось - так бывает в тестах с подменённым webview
+            return
+        if not win.events.shown.wait(20):
+            _report_start_problem("окно не появилось за 20 с - WebView2 завис при старте")
+            return
+        # Окно есть - но WebView2 мог упасть сразу после показа (краш в первые
+        # секунды): окно остаётся тёмным, страница не отрисуется. Ловим в
+        # течение 20 с после показа окна.
+        for _ in range(40):
+            if webview_child_running(os.getpid()):
+                return
+            time.sleep(0.5)
+        _report_start_problem(
+            "окно показано, но WebView2 не запустился или упал - "
+            "страница не отрисуется (тёмное окно)")
+
+    threading.Thread(target=_guard, daemon=True, name="start-guard").start()
+    # storage_path: pywebview по умолчанию (private_mode=True) кладёт WebView2
+    # в tempfile.TemporaryDirectory() - после taskkill каталоги копились в
+    # %TEMP% (35 штук). Всё содержимое приложения живёт в %LOCALAPPDATA%\Synfronia.
+    webview.start(storage_path=str(logs_dir().parent / "webview"))
 
 
 def diagnose_freeze() -> None:

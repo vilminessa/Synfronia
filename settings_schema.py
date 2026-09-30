@@ -13,16 +13,18 @@ settings.json получается из группы и ключа: у груп�
 
 Описание поля
     key          путь внутри группы
-    type         bool | int | text | password | choice | choice_buttons | actions | note
+    type         bool | int | text | password | choice | choice_buttons | knob | actions | note
     label        ключ i18n с подписью
     title        ключ i18n с подсказкой (необязательно)
     note         ключ i18n с пояснением под полем
     note_source  имя JS-функции, которая заполняет пояснение (themeMeta, ...)
     default      значение по умолчанию
-    min/max/step ограничения для int
+    min/max/step ограничения для int и knob (knob - круговая ручка:
+                 значения квантуются по step)
     options      [["значение", "подпись"], ...] для choice/choice_buttons; подпись
                  - это ключ i18n, если он есть в языке, иначе сам текст
-    options_source  "langs" | "themes" | "fonts" - список из runtime
+    options_source  "langs" | "themes" | "fonts" - список из runtime;
+                 для knob (ручки шрифтов) - список позиций
     options_of   словарь в модуле-владельце: значения опций должны быть в нём
     dynamic      "transcoders" - часть опций может быть недоступна (ffmpeg)
     placeholder  подсказка внутри поля
@@ -56,7 +58,9 @@ settings.json получается из группы и ключа: у груп�
     browse_dest  True - кнопка выбирает папку загрузки
 """
 
-TYPES = ("bool", "int", "text", "password", "choice", "choice_buttons", "actions", "note")
+from version import __version__  # единый источник версии приложения
+
+TYPES = ("bool", "int", "text", "password", "choice", "choice_buttons", "knob", "actions", "note")
 
 # Общие настройки интерфейса. Порядок вкладок задаётся полем order.
 CORE_GROUPS = [
@@ -64,7 +68,8 @@ CORE_GROUPS = [
         "id": "ui",
         "label": "sheet.tab.ui",
         "order": 10,
-        "boxes": {"look": "sheet.ui.look"},
+        "boxes": {"look": "sheet.ui.look", "fonts": "sheet.font.title",
+                  "tips": "sheet.ui.tips"},
         "fields": [
             {"key": "language", "type": "choice", "label": "sheet.lang.label",
              "default": "en", "options_source": "langs", "dom": "lang", "live": True},
@@ -77,17 +82,48 @@ CORE_GROUPS = [
                 {"dom": "open-themes", "icon": "folder", "label": "sheet.theme.open"},
             ]},
             {"type": "note", "transient": True, "dom": "themes-dl-note", "hidden": True},
-            {"key": "font_sans", "type": "choice", "label": "sheet.font.sans",
-             "default": "", "options_source": "fonts", "dom": "font-sans", "live": True},
-            {"key": "font_mono", "type": "choice", "label": "sheet.font.mono",
-             "default": "", "options_source": "fonts_mono", "dom": "font-mono", "live": True},
-            {"type": "note", "transient": True, "dom": "font-note", "note_source": "fontNote"},
-            {"type": "actions", "transient": True, "buttons": [
+            {"key": "font_heading", "type": "knob", "label": "sheet.font.heading",
+             "default": "", "options_source": "fonts", "dom": "font-heading",
+             "box": "fonts", "row": 1, "row_class": "knob-panel", "live": True},
+            {"key": "font_sans", "type": "knob", "label": "sheet.font.sans",
+             "default": "", "options_source": "fonts", "dom": "font-sans",
+             "box": "fonts", "row": 1, "row_class": "knob-panel", "live": True},
+            {"key": "font_mono", "type": "knob", "label": "sheet.font.mono",
+             "default": "", "options_source": "fonts_mono", "dom": "font-mono",
+             "box": "fonts", "row": 1, "row_class": "knob-panel", "live": True},
+            {"key": "font_weight", "type": "knob", "label": "sheet.font.weight",
+             "default": 400, "min": 100, "max": 900, "step": 10,
+             "dom": "font-weight", "box": "fonts",
+             "row": 1, "row_class": "knob-panel", "live": True},
+            # предпросмотр: три строки на выбранных шрифтах, заполняет
+            # settings.js (NOTE_FILLERS.fontPreview) и обновляется при смене
+            {"type": "note", "transient": True, "dom": "font-preview",
+             "box": "fonts", "note_source": "fontPreview"},
+            {"type": "note", "transient": True, "dom": "font-note",
+             "box": "fonts", "note_source": "fontNote"},
+            {"type": "actions", "transient": True, "box": "fonts", "buttons": [
                 {"dom": "reload-fonts", "icon": "reload", "label": "sheet.font.reload"},
                 {"dom": "download-fonts", "icon": "download", "label": "sheet.font.download"},
                 {"dom": "open-fonts", "icon": "folder", "label": "sheet.font.open"},
             ]},
-            {"type": "note", "transient": True, "dom": "font-dl-note", "hidden": True},
+            {"type": "note", "transient": True, "dom": "font-dl-note",
+             "box": "fonts", "hidden": True},
+            # «магнитные» подсказки: две силы 0..100 (см. TIP_FORCE в common.js),
+            # дефолты повторяют прежнее поведение - pull 50, repel 100
+            {"key": "tip_pull", "type": "int", "label": "sheet.ui.tip_pull",
+             "default": 50, "min": 0, "max": 100, "step": 5, "row": 1,
+             "box": "tips", "mirror": "range", "live": True,
+             "dom": "tip-pull", "dom_range": "tip-pull-range",
+             "title": "sheet.ui.tip_pull.hint"},
+            {"key": "tip_repel", "type": "int", "label": "sheet.ui.tip_repel",
+             "default": 100, "min": 0, "max": 100, "step": 5, "row": 2,
+             "box": "tips", "mirror": "range", "live": True,
+             "dom": "tip-repel", "dom_range": "tip-repel-range",
+             "title": "sheet.ui.tip_repel.hint"},
+            # Версия, записавшая settings.json: в панели не рисуется,
+            # обновляется молча при старте (см. settings.load_settings)
+            {"key": "app_version", "type": "text", "label": "sheet.ui.app_version",
+             "default": __version__, "in_panel": False},
         ],
     },
 ]
@@ -212,6 +248,22 @@ def coerce(key: str, value):
         if isinstance(value, str):
             return value.strip().lower() in ("1", "true", "on", "yes", "да")
         return bool(value)
+    if kind == "knob":
+        # числовая ручка (толщина): как int, но значение квантуется по step
+        if spec.get("min") is not None or spec.get("max") is not None:
+            low, high = int(spec.get("min", 0)), int(spec.get("max", 100))
+            step = max(1, int(spec.get("step", 1)))
+            try:
+                num = int(round(float(value) / step)) * step
+            except (TypeError, ValueError):
+                return spec.get("default", low)
+            return max(low, min(high, num))
+        # ручки со списком позиций (шрифты): список приходит из runtime,
+        # чужое значение отбрасываем только у статических options
+        allowed = [opt[0] for opt in spec.get("options", [])]
+        if allowed and value not in allowed:
+            return spec.get("default")
+        return spec.get("default") if value is None else value
     if kind == "int":
         low, high = spec.get("min"), spec.get("max")
         try:

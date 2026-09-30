@@ -7,7 +7,7 @@ r"""Собирает страницу Synfronia со стабом pywebview дл
 настроек лежит в ней оверлеем, поэтому сценарий открывает её сам (--settings
 или клик по шестерёнке).
 
-    python tools/ui_probe_page.py                      -> %TEMP%\synf_probe_page.html
+    python tools/ui_probe_page.py     -> %LOCALAPPDATA%\Synfronia\probe\page.html
     python tools/ui_probe_page.py out.html             -> свой путь
     python tools/ui_probe_page.py --settings           -> карточка настроек открыта
     python tools/ui_probe_page.py --theme liquid_glass --lang de
@@ -15,7 +15,6 @@ r"""Собирает страницу Synfronia со стабом pywebview дл
 
 import json
 import sys
-import tempfile
 from pathlib import Path
 
 import utf8_console  # локальный помощник tools/, доступен по sys.path[0] скрипта
@@ -26,7 +25,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import settings_schema  # noqa: E402
 import i18n  # noqa: E402
+from paths import logs_dir  # noqa: E402
 from themes import build_page  # noqa: E402
+
+# Страница пробника - в %LOCALAPPDATA%\Synfronia\probe: в %TEMP% ничего не пишем.
+PROBE_DIR = logs_dir().parent / "probe"
 
 # Настройки в стабе берём из схемы: так пробник проверяет настоящие умолчания,
 # а не отдельный список (он уже расходился с приложением).
@@ -40,7 +43,7 @@ def stub_settings(lang: str) -> str:
 # Api.poll.
 STUB = """<script>
 (function () {
-  var FONTS = {families: ["Inter", "JetBrains Mono", "Noto Sans"], mono: ["JetBrains Mono"],
+  var FONTS = {families: ["JetBrains Mono"], mono: ["JetBrains Mono"],
                count: 3, folder: "C:\\\\Synfronia\\\\fonts"};
   var state = {lang: "%(lang)s", css: "", fontsRev: 0, dl: null,
                // ответ poll() для кнопки «Скачать»: сценарий задаёт probe.dl
@@ -63,11 +66,12 @@ STUB = """<script>
       fonts_dl: {downloading: false, pct: 0, error: null}}, uiState(), state.dlState)); },
     synf_settings_state: function (open) { state.settingsOpen = !!open; return ok(); },
     set_dest: function (path) { state.dest = path; return ok(); },
-    set_font: function () { return ok({css: state.css}); },
+    set_font: function (key, value) { settings[key] = value;
+      state.saved.push([key, value]); return ok({css: state.css}); },
     reload_fonts: function () { return ok({fonts: FONTS, css: state.css}); },
     font_face_css: function () { return ok(state.css); },
     download_fonts: function () { state.dl = "started"; return ok("started"); },
-    download_themes: function () { return ok({added: ["scary_forest"], skipped: [], failed: []}); },
+    download_themes: function () { return ok({added: ["technology_day"], skipped: [], failed: []}); },
     apply_theme_css: function () { return ok(); },
     set_theme: function (id) { settings.theme = id; state.saved.push(["theme", id]); return ok("ok"); },
     switch_theme: function () { return ok(); },
@@ -132,7 +136,7 @@ def main(argv: list[str]) -> int:
         else:
             out = Path(args[i])
             i += 1
-    out = out or Path(tempfile.gettempdir()) / "synf_probe_page.html"
+    out = out or PROBE_DIR / "page.html"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(build_page_with_stub(theme=theme, lang=lang, settings_open=settings_open),
                    encoding="utf-8")

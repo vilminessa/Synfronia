@@ -183,6 +183,238 @@
       return {nodes: [labelNode(spec), wrap], input: wrap,
               get: readMode, set: function(v) { setModeValue(wrap, v); }};
     }
+    if (spec.type === "knob") {
+      // Круговая ручка. Два режима. Позиционный (шрифты): конечная дуга
+      // 270° со стартом слева-внизу - «нулевая точка» снизу, упоры на
+      // концах, зацикливания нет; магнит - индикатор всегда сидит на
+      // позиции щелчка. Числовая (толщина): бесконечная - обороты
+      // накапливаются, значение крутится через ноль. Оба режима вращаются
+      // плавно: целевой угол догоняется по rAF с МАКСИМУМОМ скорости
+      // (1080 град/с) и экспоненциальным замедлением - даже бурст колеса
+      // не раскручивает ручку быстрее этого.
+      var numeric = spec.min !== undefined && spec.max !== undefined;
+      var step = spec.step || 10, lo = spec.min, hi = spec.max;
+      var positions = [];              // позиционная: [{value, label}]
+      var A0 = 225, SWEEP = 270;       // дуга:225° - слева-внизу (ноль)
+      var raw = 0;                     // накопленный угол ввода
+      var disp = 0;                    // показываемый угол (анимация)
+      var cur = numeric ? spec.default : (spec.default || "");
+      var idx = 0;                     // позиционная: индекс выбранной позиции
+      var raf = 0, lastT = 0;
+      function norm(a) { return ((a % 360) + 360) % 360; }
+      function nSteps() {
+        return numeric ? Math.round((hi - lo) / step) + 1 : positions.length;
+      }
+      function sa() { return 360 / Math.max(nSteps(), 1); }
+      function sweepStep() { return SWEEP / Math.max(positions.length - 1, 1); }
+      function clampRaw(a) { return Math.max(A0, Math.min(A0 + SWEEP, a)); }
+      function angForIdx(i) { return A0 + i * sweepStep(); }
+      function idxAt(a) {
+        var n = positions.length;
+        if (n <= 1) return 0;
+        return Math.max(0, Math.min(n - 1,
+          Math.round((clampRaw(a) - A0) / SWEEP * (n - 1))));
+      }
+      function valueAt(a) {
+        return lo + (Math.round(norm(a) / sa()) % nSteps()) * step;
+      }
+      function angleFor(v) { return (v - lo) / step * sa(); }
+      // ближайший к текущему raw путь к желаемому углу (Home/End числа)
+      function retarget(desiredNorm) {
+        var d = desiredNorm - norm(raw);
+        while (d > 180) d -= 360;
+        while (d < -180) d += 360;
+        raw += d;
+      }
+      // целевой угол: позиционная - позиция щелчка (магнит), числовая -
+      // ближайшая ступень накопленного угла (обороты не сбрасываются)
+      function targetAng() {
+        return numeric ? Math.round(raw / sa()) * sa() : angForIdx(idx);
+      }
+      function pct() { return Math.round((cur - lo) / (hi - lo) * 100); }
+      var kwrap = el("div", "knob", {
+        id: spec.dom, role: "slider", tabindex: "0",
+        "aria-label": t(spec.label),
+        "aria-valuemin": numeric ? String(lo) : "0",
+        "aria-valuemax": numeric ? String(hi) : "0"});
+      var ind = el("i", "knob-ind");
+      kwrap.appendChild(ind);
+      Object.defineProperty(kwrap, "value", {get: function() { return cur; }});
+      // риски позиций: активная горит акцентом (детент виден)
+      function renderTicks() {
+        [].slice.call(kwrap.querySelectorAll(".knob-tick")).forEach(function(n) { n.remove(); });
+        if (numeric) return;
+        var n = Math.max(positions.length, 1);
+        for (var i = 0; i < n; i++) {
+          var tk = el("i", "knob-tick" + (i === idx ? " on" : ""));
+          tk.style.transform = "rotate(" + angForIdx(i) + "deg) translateY(-14px)";
+          tk.setAttribute("data-value", positions[i] ? String(positions[i].value) : "");
+          kwrap.appendChild(tk);
+        }
+      }
+      function tipText() {
+        if (numeric) return t("sheet.font.weight.tip").replace("{p}", String(pct()));
+        return (positions[idx] && positions[idx].label) || String(cur);
+      }
+      function paint() {
+        ind.style.transform = "rotate(" + disp.toFixed(2) + "deg)";
+        var text = tipText();
+        setTip(kwrap, text);
+        // setTip пишет aria-label узлу без текста - возвращаем подпись поля
+        kwrap.setAttribute("aria-label", t(spec.label));
+        var fontFam = !numeric && cur ? String(cur) : "";
+        if (fontFam) kwrap.setAttribute("data-tip-font", fontFam);
+        else kwrap.removeAttribute("data-tip-font");
+        if (numeric) {
+          kwrap.setAttribute("aria-valuenow", String(cur));
+          kwrap.setAttribute("aria-valuetext", String(cur));
+        } else {
+          kwrap.setAttribute("aria-valuenow", String(idx));
+          kwrap.setAttribute("aria-valuetext", text);
+        }
+        // подсказка живёт при вращении: процент/название меняются на лету
+        if (window.TIP && TIP.target === kwrap && TIP.text) {
+          TIP.text.textContent = text;
+          TIP.node.style.fontFamily = tipFontFamily(kwrap);
+        }
+      }
+      // анимация: к целевому углу - с потолком скорости и затуханием;
+      // на месте точное прилипание (магнит к позиции щелчка)
+      function tick() {
+        raf = 0;
+        var now = performance.now();
+        var dt = Math.min(0.25, Math.max(0.001, (now - lastT) / 1000));
+        lastT = now;
+        var d = targetAng() - disp;
+        if (Math.abs(d) < 0.15) { disp = targetAng(); paint(); return; }
+        var speed = Math.min(1080 * dt, Math.abs(d) * (1 - Math.exp(-dt / 0.09)) + 60 * dt);
+        disp += (d > 0 ? 1 : -1) * Math.min(Math.abs(d), speed);
+        paint();
+        raf = requestAnimationFrame(tick);
+      }
+      function kick() {
+        if (raf) return;
+        lastT = performance.now();
+        raf = requestAnimationFrame(tick);
+      }
+      function commit(nv) {
+        if (nv !== cur) {
+          cur = nv;
+          kwrap.dispatchEvent(new Event("change", {bubbles: true}));
+        }
+      }
+      // ввод изменил raw: новое значение + анимация к позиции
+      function applyInput() {
+        if (numeric) {
+          commit(valueAt(raw));
+        } else {
+          raw = clampRaw(raw);           // упоры: за дугу270° не выходим
+          var ni = idxAt(raw);
+          if (ni !== idx) {
+            idx = ni;
+            cur = positions[idx] ? positions[idx].value : cur;
+            renderTicks();
+            kwrap.dispatchEvent(new Event("change", {bubbles: true}));
+          }
+        }
+        kick();
+        paint();
+      }
+      kwrap.addEventListener("pointerdown", function(ev) {
+        kwrap.focus({preventScroll: true});   // fillSettings не трогает поле в фокусе
+        kwrap.setPointerCapture(ev.pointerId);
+        kwrap.classList.add("dragging");
+        var lx = ev.clientX;
+        var move = function(e2) {
+          raw += (e2.clientX - lx) * 1.2;
+          lx = e2.clientX;
+          applyInput();
+        };
+        var up = function() {
+          kwrap.classList.remove("dragging");
+          kwrap.removeEventListener("pointermove", move);
+          kwrap.removeEventListener("pointerup", up);
+          kwrap.removeEventListener("pointercancel", up);
+          if (numeric) raw = Math.round(raw / sa()) * sa();
+          applyInput();                    // магнит дожимает к позиции
+        };
+        kwrap.addEventListener("pointermove", move);
+        kwrap.addEventListener("pointerup", up);
+        kwrap.addEventListener("pointercancel", up);
+      });
+      kwrap.addEventListener("wheel", function(ev) {
+        ev.preventDefault();
+        kwrap.focus({preventScroll: true});   // и колесо под фокусом: poll не откатит
+        var s = numeric ? sa() : sweepStep();
+        raw += (ev.deltaY < 0 ? s : -s);      // на упоре clampRaw не пустит дальше
+        applyInput();
+      }, {passive: false});
+      kwrap.addEventListener("keydown", function(ev) {
+        if (ev.key === "Home") {
+          ev.preventDefault();
+          if (numeric) { retarget(0); }
+          else { raw = A0; }
+          applyInput();
+          return;
+        }
+        if (ev.key === "End") {
+          ev.preventDefault();
+          if (numeric) { retarget(angleFor(hi)); }
+          else { raw = A0 + SWEEP; }
+          applyInput();
+          return;
+        }
+        var d = 0;
+        if (ev.key === "ArrowUp" || ev.key === "ArrowRight") d = 1;
+        else if (ev.key === "ArrowDown" || ev.key === "ArrowLeft") d = -1;
+        if (!d) return;
+        ev.preventDefault();
+        raw += d * (numeric ? sa() : sweepStep());
+        applyInput();
+      });
+      // позиции приходят снаружи (buildFontOptions): пересобираем риски и
+      // возвращаем индекс к текущему значению
+      kwrap._knobSet = function(opts) {
+        positions = (opts || []).map(function(o) {
+          return {value: String(o[0]), label: String(o[1])};
+        });
+        idx = 0;
+        for (var i = 0; i < positions.length; i++) {
+          if (positions[i].value === String(cur)) { idx = i; break; }
+        }
+        kwrap.setAttribute("aria-valuemax", String(Math.max(positions.length - 1, 0)));
+        raw = angForIdx(idx);
+        renderTicks();
+        kick();
+        paint();
+      };
+      var kcell = el("div", "knob-cell");
+      kcell.appendChild(labelNode(spec));
+      kcell.appendChild(kwrap);
+      raw = numeric ? angleFor(cur) : angForIdx(idx);
+      disp = raw;
+      paint();
+      return {nodes: [kcell], input: kwrap,
+              get: function() { return cur; },
+              set: function(v) {
+                if (numeric) {
+                  var n = Number(v);
+                  if (!isFinite(n)) n = spec.default;
+                  n = Math.max(lo, Math.min(hi, Math.round(n / step) * step));
+                  retarget(angleFor(n));
+                  commit(n);
+                } else {
+                  cur = v === undefined || v === null ? (spec.default || "") : String(v);
+                  idx = 0;
+                  for (var i = 0; i < positions.length; i++) {
+                    if (positions[i].value === cur) { idx = i; break; }
+                  }
+                  raw = angForIdx(idx);
+                }
+                kick();
+                paint();
+              }};
+    }
     if (spec.type === "choice") {
       input = el("select", null, {id: spec.dom});
       // опции из схемы наполняем сразу: иначе у поля без своей функции
@@ -426,31 +658,32 @@
     fillSelect("lang", LANGS.map(function(k) { return [k, I18N[k]["thisLang"]]; }));
   }
 
-  // Списки шрифтов: "" = системный. Семейства приходят с Python (папка fonts).
+  // Списки шрифтов: "" = системный. Семейства приходят с Python (папка
+  // fonts) и наполняют позиции трёх ручек (заголовки, общий, консольный);
+  // вес берёт шкалу прямо из схемы и риски не рисует.
   function buildFontOptions() {
     var families = (FONTS && FONTS.families) || [];
     var monoFirst = (FONTS && FONTS.mono) || [];
     var monoAll = monoFirst.concat(families.filter(function(f) {
       return monoFirst.indexOf(f) === -1;
     }));
-    [["font-sans", families], ["font-mono", monoAll]].forEach(function(pair) {
-      var sel = document.getElementById(pair[0]);
-      if (!sel) return;
-      var keep = sel.value;
-      sel.innerHTML = "";
-      var sys = document.createElement("option");
-      sys.value = "";
-      sys.textContent = t("sheet.font.system");
-      sel.appendChild(sys);
-      pair[1].forEach(function(f) {
-        var o = document.createElement("option");
-        o.value = f;
-        o.textContent = f;
-        sel.appendChild(o);
+    var sys = [["", t("sheet.font.system")]];
+    [["font-heading", families], ["font-sans", families], ["font-mono", monoAll]]
+      .forEach(function(pair) {
+        var node = document.getElementById(pair[0]);
+        if (node && node._knobSet) {
+          node._knobSet(sys.concat(pair[1].map(function(f) { return [f, f]; })));
+        }
       });
-      sel.value = keep;
-    });
     updateFontNote();
+  }
+  // Подсказки ручек зависят от языка (и от значения) - после смены языка
+  // перерисовываем их через set(текущее значение)
+  function refreshKnobTips() {
+    Object.keys(panelFields).forEach(function(key) {
+      var f = panelFields[key];
+      if (f.spec.type === "knob" && f.get && f.set) f.set(f.get());
+    });
   }
   function updateFontNote() {
     var box = document.getElementById("font-note");
@@ -458,6 +691,24 @@
     if ((FONTS && FONTS.count) > 0) { box.textContent = ""; box.hidden = true; return; }
     box.textContent = t("sheet.font.hint").replace("{path}", (FONTS && FONTS.folder) || "");
     box.hidden = false;
+  }
+  // Предпросмотр шрифтов: каждая строка - «{заголовок} - {выбранное
+  // семейство}», набранная своими шрифтами (и толщиной - у строки
+  // основного текста). Имя системного шрифта переводится, названия
+  // семейств - как есть; сам текст не переводится, он показывает глифы.
+  function updateFontPreview() {
+    var box = document.getElementById("font-preview");
+    if (!box) return;
+    var sysName = t("sheet.font.system");
+    var names = [FONT_PICK.head || sysName, FONT_PICK.sans || sysName,
+                 FONT_PICK.mono || sysName];
+    function esc(s) {
+      return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+    }
+    var heads = ["Заголовок", "Основной текст", "Консоль"];
+    box.innerHTML = '<div class="fp-head">' + heads[0] + " - " + esc(names[0]) + "</div>"
+      + '<div class="fp-text">' + heads[1] + " - " + esc(names[1]) + "</div>"
+      + '<div class="fp-mono">' + heads[2] + " - " + esc(names[2]) + "</div>";
   }
 
   // Пересборка списков, опции которых пришли прямо из схемы (ftp.mode и т.п.).
@@ -484,6 +735,8 @@
     buildTranscodeOptions();
     buildLangOptions();
     buildFontOptions();
+    refreshKnobTips();
+    refreshNotes();   // предпросмотр зависит от языка (имя системного шрифта)
     var lang = document.getElementById("lang");
     if (lang) lang.value = curLang;
     document.documentElement.lang = curLang;
@@ -520,7 +773,7 @@
       }
     }
   };
-  var NOTE_FILLERS = {ftpDirNote: updateFtpDirNote};
+  var NOTE_FILLERS = {ftpDirNote: updateFtpDirNote, fontPreview: updateFontPreview};
   function refreshNotes() {
     Object.keys(noteFillers).forEach(function(src) { NOTE_FILLERS[src](); });
   }
@@ -537,11 +790,20 @@
     if (spec.value_source) return extra[spec.value_source];
     return (extra.settings || {})[spec.setting];
   }
+  // Силы подсказок (common.js, TIP_FORCE) применяются сразу при правке поля,
+  // а не с задержкой poll(): fillSettings пропускает поле в фокусе, поэтому
+  // пока тянут слайдер, значения едут в общий движок напрямую.
+  function syncTipForces() {
+    var pull = panelFields["ui.tip_pull"], repel = panelFields["ui.tip_repel"];
+    setTipForces(pull && pull.get ? pull.get() : undefined,
+                 repel && repel.get ? repel.get() : undefined);
+  }
   function saveValue(key, value) {
     var spec = panelFields[key].spec;
     if (spec.setting) pywebview.api.save_setting(spec.setting, value);
     // папка загрузки - не настройка: Python помнит её до конца сеанса
     if (spec.path === "dl.dest") pywebview.api.set_dest(value);
+    syncTipForces();
     applyVisibility();
     refreshNotes();
   }
@@ -576,6 +838,8 @@
         f.range.addEventListener("input", function() {
           node.value = this.value;
           if (spec.setting) pywebview.api.save_setting(spec.setting, this.value);
+          // при перетаскивании силы подсказок применяются на лету
+          syncTipForces();
         });
       }
     });
@@ -636,6 +900,13 @@
     });
     onChange("ui.font_sans", function(node) { setFont("font-sans", node.value); });
     onChange("ui.font_mono", function(node) { setFont("font-mono", node.value); });
+    onChange("ui.font_heading", function(node) { setFont("font-heading", node.value); });
+    onChange("ui.font_weight", function(node, spec) {
+      pywebview.api.save_setting(spec.setting, node.value);
+      FONT_PICK.weight = node.value || "";
+      setFontVar("--font-weight", FONT_PICK.weight);
+      refreshNotes();   // предпросмотр сразу показывает новую толщину
+    });
   }
 
   // -- темы и шрифты ---------------------------------------------------------
@@ -701,16 +972,21 @@
   // и без потери состояния интерфейса. Карточка настроек в том же окне, так
   // что список шрифтов и @font-face обновляются на месте.
   function setFont(id, value) {
-    var slot = id === "font-mono" ? "mono" : "sans";
-    pywebview.api.set_font(id === "font-mono" ? "font_mono" : "font_sans", value)
+    var slot = id === "font-mono" ? "mono" : (id === "font-heading" ? "head" : "sans");
+    var key = slot === "mono" ? "font_mono" : (slot === "head" ? "font_heading" : "font_sans");
+    pywebview.api.set_font(key, value)
       .then(function(r) {
         if (r && r.error) { console.error("set font:", r.error); return; }
         FONT_PICK[slot] = value || "";
         if (r && r.css !== undefined) applyFontCss(r.css);
         var th = THEMES[themeKey()] || {};
-        var thFont = slot === "mono" ? th.font_mono : th.font;
-        setFontVar(slot === "mono" ? "--font-mono" : "--font-sans",
-                   quoted(thFont || FONT_PICK[slot]));
+        // тема переопределяет только общий и консольный шрифты - у заголовков
+        // своего поля в theme.json нет
+        var thFont = slot === "mono" ? th.font_mono : (slot === "head" ? "" : th.font);
+        var prop = slot === "mono" ? "--font-mono"
+                 : (slot === "head" ? "--font-head" : "--font-sans");
+        setFontVar(prop, quoted(thFont || FONT_PICK[slot]));
+        refreshNotes();   // предпросмотр показывает новый шрифт сразу
       })
       .catch(function(e) { console.error("set font:", e); });
   }
@@ -777,6 +1053,7 @@
     bindSettings();
     applySettingsI18n();
     fillSettings();
+    syncTipForces();
     applyVisibility();
     refreshNotes();
   }
@@ -799,6 +1076,7 @@
       applySettingsI18n();
     }
     fillSettings();
+    syncTipForces();
     applyVisibility();
     if (typeof st.ui_rev === "number" && st.ui_rev !== uiRev) {
       uiRev = st.ui_rev;

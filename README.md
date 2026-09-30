@@ -39,8 +39,8 @@ EdgeChromium) на основе [yt-dlp](https://github.com/yt-dlp/yt-dlp).
   (доступные варианты определяются из установленного ffmpeg).
 - **Метаданные и обложка** - теги (название, автор, дата), превью вшивается
   как вложение (attached picture).
-- **Модульные темы** - семь встроенных (Scary Forest, Technology day,
-  Technology Pinks, Scarred Mind, Audrey Main Colours, Basic Night Sky, Vilmy~)
+- **Модульные темы** - шесть встроенных (Technology day, Technology Pinks,
+  Scarred Mind, Audrey Main Colours, Basic Night Sky, Liquid Glass)
   и сколько угодно своих: папка в `%LOCALAPPDATA%\Synfronia\themes\<имя>\`
   с `theme.json` (+ `custom.css`, `index.html`, слоты и ассеты).
   Тема задаёт палитру, радиусы, прозрачность, свои шрифты и даже свой HTML.
@@ -55,7 +55,9 @@ EdgeChromium) на основе [yt-dlp](https://github.com/yt-dlp/yt-dlp).
   Подробнее - [Выгрузка на FTP](#выгрузка-на-ftp).
 - **Ход загрузки и отмена** - прогресс-бар из логов yt-dlp, кнопка «Стоп».
 - **Настройки сохраняются** в `%LOCALAPPDATA%\Synfronia\settings.json`,
-  журнал работы - в `%LOCALAPPDATA%\Synfronia\logs`.
+  журнал работы - в `%LOCALAPPDATA%\Synfronia\logs`; данные WebView2 живут
+  в `%LOCALAPPDATA%\Synfronia\webview`, страница пробников - в
+  `%LOCALAPPDATA%\Synfronia\probe` (в `%TEMP%` приложение ничего не пишет).
 
 ## Требования
 
@@ -90,10 +92,10 @@ python gui.py
 |---|---|
 | Вкладки | «Видео» - одно видео; «Плейлист» - весь плейлист целиком |
 | Ссылка | URL в соответствующей вкладке (видео или плейлист YouTube) |
-| ⚙ Настройки | шестерёнка справа вверху: язык, папка, тема, шрифты, субтитры, качество, перекодировка, сеть |
+| ⚙ Настройки | шестерёнка справа вверху: язык, папка, тема, шрифты, подсказки, субтитры, качество, перекодировка, сеть |
 | Язык | Русский / English / 日本語 / 简体中文 / Español / Deutsch |
 | Каталог | куда сохранять (по умолчанию `downloads\` рядом с приложением) |
-| Тема | Scary Forest / Technology day / Technology Pinks / Scarred Mind / Audrey Main / Night Sky / Vilmy~ + свои папки |
+| Тема | Technology day / Technology Pinks / Scarred Mind / Audrey Main / Night Sky / Liquid Glass + свои папки |
 | Шрифт интерфейса / моноширинный | семейство из папки `fonts` или системный |
 | Качество | `lossless` / 8K / 4K / 2K / 1080p / 720p / 480p / 240p |
 | Субтитры | off / ru / en / all (вшиваются в контейнер) |
@@ -144,9 +146,9 @@ python gui.py
 
 ### Шрифты
 
-В сборку вшиты три тестовых шрифта (OFL 1.1, ~3 МБ): **Inter**,
-**JetBrains Mono** и **Noto Sans** из `assets/fonts`. При первом запуске они
-раскладываются в `%LOCALAPPDATA%\Synfronia\fonts` вместе с текстами лицензий
+В сборку вшит один тестовый шрифт (OFL 1.1, ~190 КБ): **JetBrains Mono**
+из `assets/fonts`. При первом запуске он
+раскладывается в `%LOCALAPPDATA%\Synfronia\fonts` вместе с текстами лицензий
 и `README.txt`, поэтому свежая установка работает без сети, а список шрифтов
 не пустой. Уже существующие файлы не трогаются: папка шрифтов принадлежит
 пользователю. Кнопка «Докачать шрифты» в настройках тянет те же файлы из
@@ -161,10 +163,21 @@ python gui.py
 вариативных шрифтов), а из WOFF/WOFF2 - имя файла, и встраивает выбранные
 шрифты прямо в страницу как `@font-face` с `data:URI`.
 
-В настройках выбираются два семейства: для интерфейса и моноширинный
-(для лога). Пустое значение - системный шрифт. Тема может переопределить
-оба своими полями `font` / `font_mono`. Лимиты: 8 МБ на файл и 8 МБ на
-страницу; слишком крупные файлы не встраиваются, о чём пишется в журнал.
+В карточке «Шрифты» слева - панелька 2x2 из круговых ручек в стиле FL:
+три ручки шрифтов (заголовков, общий, консольный) и бесконечная ручка
+толщины100..900. Шкала шрифтов конечная: дуга270° со стартом слева-внизу
+(«нулевая точка» снизу) и жёсткими упорами - колесо не крутит бесконечно;
+риски позиций, активная горит, «щелчок» детента, подсказка ручки показывает
+выбранное семейство его же шрифтом. Вращение всех ручек плавное, с
+ограничением максимальной скорости (1080 град/с) - бурст колеса не
+раскручивает ручку быстрее. Крутится колёсиком при наведении,
+перетаскиванием зажатой мышью по горизонтали и стрелками; число толщины
+живёт в подсказке «Толщина шрифта - N%». Справа - предпросмотр:
+«Заголовок - {шрифт}», «Основной текст - {шрифт}», «Консоль - {шрифт}» -
+каждая строка набрана своим шрифтом и обновляется при любом выборе. Тема
+может переопределить общий и консольный своими полями `font` / `font_mono`.
+Лимиты: 8 МБ на файл и 8 МБ на страницу; слишком крупные файлы не
+встраиваются, о чём пишется в журнал.
 
 Смена шрифта, кнопка «Обновить шрифты» и переключение тем применяются
 сразу: Python отдаёт новый блок `@font-face`, а страница подменяет
@@ -237,6 +250,33 @@ Synfronia.exe --selftest C:\videos https://youtu.be/GUS0q7gZdNE --subtitles ru -
 
 Результаты пишутся в `selftest.log`, файлы - в указанный каталог.
 
+## Отладочная консоль
+
+`debug.py` - интерактивное меню по цифрам для обслуживания локальных данных
+и логов (только stdlib, без сторонних библиотек):
+
+```bat
+python debug.py
+```
+
+| Пункт | Что делает |
+|-------|-----------|
+| 1 | очистить `%LOCALAPPDATA%\Synfronia` полностью (предпросмотр с размерами + подтверждение) |
+| 2 | то же, но оставить только `bin\` (ffmpeg/ffprobe) |
+| 3-5 | запуск / завершение / состояние приложения (PID, время старта) |
+| 6-9 | логи: хвост последнего файла, список, показ файла целиком, удаление |
+| 10 | следить за логом в реальном времени (Ctrl+C - назад в меню) |
+| 11 | убрать служебные файлы Synfronia из `%TEMP%` (каталоги WebView2, артефакты пробников) |
+
+Если приложение запущено, очистка сначала предлагает его завершить (файлы
+иначе заблокированы). Пункт 3 запускает `Synfronia.exe` рядом со скриптом
+либо `python gui.py`, вывод процесса уходит в `logs\launcher.log`, и запуск
+**ждёт окно с живым WebView2 15 с**: если WebView2 завис при старте или упал,
+показав тёмное окно, процесс завершается и запуск повторяется; после второй
+неудачи консоль предлагает `python gui.py --diagnose-freeze`. Пункт 4
+закрывает приложение мягко (WM_CLOSE - WebView2 убирает свой каталог, профиль
+всегда свежий), и только если окно не закрылось за 5 с - `taskkill`.
+
 ## Сборка exe
 
 ```bat
@@ -245,6 +285,30 @@ python -m PyInstaller Synfronia.spec --distpath . --workpath build --noconfirm
 
 spec собирает один файл (`--onefile --windowed`), включая yt-dlp, webview
 и рантайм .NET (pythonnet) для EdgeChromium.
+
+**Релиз по тегу.** Push тега `v*` запускает workflow **release**
+(`.github/workflows/release.yml`): проверки и пробники вёрстки → сборка exe →
+публикация exe в GitHub Release тега → **SLSA-провенанс**
+(`Synfronia.exe.intoto.jsonl`, slsa-github-generator v2.1.0, keyless-подпись
+через OIDC) → проверка подписи `gh attestation verify`. Ручной запуск
+(workflow_dispatch) проходит проверки, сборку, **генерацию провенанса и
+проверку подписи без публикации** — так весь конвейер проверяют до выпуска
+тега. Линт самого workflow: `python tools/check_release_yml.py`.
+На теге verify дополнительно сверяет имя тега с `version.py` — расходжение
+падает до сборки.
+
+### Выпуск версии
+
+Версия приложения живёт в одном месте — `version.py` (`__version__`).
+От неё питаются: подпись «Synfronia by Vilminessa - vX.Y.Z» слева снизу
+главного окна, ключ `app_version` в `settings.json` (пишется при старте,
+если отличается), VersionInfo в свойствах exe и сверка тега в CI.
+
+1. поднять `__version__` в `version.py` и `app_version` в
+   `based_settings.json` (проверки не дают забыть — умолчания сверяются);
+2. закоммитить;
+3. поставить тег `vX.Y.Z` (ровно `v` + версия из `version.py`) и запушить —
+   workflow release сверит тег и выпустит релиз с exe и провенансом.
 
 ## Состав
 
@@ -269,7 +333,9 @@ tools/utf8_console.py - общий для tools/ перевод вывода в 
   кириллицы, ни «✕», и проверки без этого падают с UnicodeEncodeError
 based_settings.json - настройки по умолчанию (копируются в settings.json
   при первом запуске; недостающие ключи дописываются при обновлении)
-requirements.txt  - yt-dlp, pywebview, pyinstaller
+version.py        - версия приложения (единый источник: подпись в UI,
+                    app_version в settings.json, VersionInfo exe, сверка тега)
+requirements.txt  - yt-dlp, pywebview, pyinstaller, pyyaml (инструменты CI)
 Synfronia.spec    - конфиг сборки exe
 LICENSE           - лицензия проекта (PolyForm Noncommercial 1.0.0)
 THIRD_PARTY_NOTICES.md - источники и лицензии всех компонентов
@@ -292,7 +358,8 @@ python tools/build_ui.py --check    # проверить, что ui.py акту�
 `SETTINGS_JS` и `COMMON_JS`. Все плейсхолдеры (`__THEME_ROOT__`,
 `__THEME_CSS__`, `__FONTS_CSS__`, `__APP_CSS__`, `__MAIN_CSS__`,
 `__SETTINGS_CSS__`, `__SETTINGS_HTML__`, `__COMMONJS__`, `__APPJS__`,
-`__SETTINGS_JS__`, `__I18N__`, `__THEMES__`, `__SETTINGS_SCHEMA__`)
+`__SETTINGS_JS__`, `__I18N__`, `__THEMES__`, `__SETTINGS_SCHEMA__`,
+`__APP_VERSION__`)
 подставляются при сборке страницы.
 
 ### Проверки для разработчиков
@@ -303,6 +370,8 @@ python tools/check_settings_overlay.py  # оверлей: сборка, Api, о�
 python tools/check_test_fonts.py        # встроенные шрифты и докачка (без сети)
 python tools/check_download_button.py   # кнопка «Скачать»: прогресс и итог
 python tools/check_tools_output.py      # скрипты печатают на любой кодовой странице
+python tools/check_release_yml.py      # линт release.yml: пиннинг, permissions SLSA, ASCII
+python tools/check_debug.py            # отладочная консоль: очистка, логи, меню
 node  tools/ui_themes_probe.js          # вёрстка карточки по всем темам (headless Edge)
 ```
 
@@ -318,7 +387,7 @@ node  tools/ui_themes_probe.js          # вёрстка карточки по �
 | pythonnet / pythonnet-clr | MIT | https://github.com/pythonnet/pythonnet |
 | PyInstaller (только сборка) | GPL-2.0+ с исключением | https://github.com/pyinstaller/pyinstaller |
 | ffmpeg (внешний, не входит в exe) | GPL | https://ffmpeg.org/ |
-| Inter, JetBrains Mono, Noto Sans (вшиты, `assets/fonts`) | OFL-1.1 | https://github.com/google/fonts |
+| JetBrains Mono (вшит, `assets/fonts`) | OFL-1.1 | https://github.com/google/fonts |
 | Python | PSF | https://www.python.org/ |
 | certifi, urllib3, idna, cffi, cryptography | MPL-2.0 / MIT / BSD-3 / MIT-0 / Apache-2.0 | см. notices |
 

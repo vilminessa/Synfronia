@@ -22,8 +22,22 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
-const EDGE = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
-const PAGE = process.argv[2] || path.join(os.tmpdir(), "synf_probe_page.html");
+// Кандидаты: путь к Edge зависит от разрядности Windows и версии - на CI
+// и чужих машинах может быть другим.
+const EDGE_CANDIDATES = [
+  "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+  "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+  "C:\\Program Files (x86)\\Microsoft\\Edge Dev\\Application\\msedge.exe",
+];
+const EDGE = EDGE_CANDIDATES.find((p) => fs.existsSync(p));
+if (!EDGE) {
+  console.error("msedge.exe не найден, пробовали:\n  " + EDGE_CANDIDATES.join("\n  "));
+  process.exit(1);
+}
+// Всё служебное пробника - в %LOCALAPPDATA%\Synfronia\probe, в %TEMP% ничего
+// не пишем (страница и профили headless Edge).
+const PROBE_DIR = path.join(process.env.LOCALAPPDATA, "Synfronia", "probe");
+const PAGE = process.argv[2] || path.join(PROBE_DIR, "page.html");
 const PORT = 9337;
 const LANGS = ["ru", "en", "ja", "zh-CN", "es", "de"];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -243,6 +257,10 @@ const FTP_VIS = `(function () {
     activeAria: active ? active.getAttribute("aria-label") || "" : "",
     activeTip: active ? active.getAttribute("data-tip") || "" : "",
     activePixel: active ? active.classList.contains("pixel-toggle") : false,
+    // rect носителя data-tip = куда целится нить подсказки: бокс обязан
+    // обнимать тумблер (40x20), а не тянуться на всю строку карточки
+    activeBox: active ? [Math.round(active.getBoundingClientRect().width),
+                         Math.round(active.getBoundingClientRect().height)] : [0, 0],
     activeText: active ? active.textContent.trim() : "",
     pxNs: pxNs, pxKidsNs: pxKidsNs, trackRect: pxRect(".px-track"),
     knobRect: pxRect(".px-knob-fill"),
@@ -345,7 +363,7 @@ async function waitForPage() {
 
 (async () => {
   if (!fs.existsSync(PAGE)) throw new Error(`нет страницы: ${PAGE} (сначала tools/ui_probe_page.py)`);
-  const profile = path.join(os.tmpdir(), "synf-probe-" + Date.now());
+  const profile = path.join(PROBE_DIR, "profiles", "probe-" + Date.now());
   fs.mkdirSync(profile, { recursive: true });
   const edge = spawn(EDGE, ["--headless=new", "--disable-gpu", "--no-first-run",
     "--no-default-browser-check", "--hide-scrollbars", `--remote-debugging-port=${PORT}`,
@@ -382,10 +400,17 @@ async function waitForPage() {
     await send("Page.enable");
     await send("Runtime.enable");
     await send("Page.navigate", { url: "file:///" + path.resolve(PAGE).replace(/\\/g, "/") });
+    // CI-раннеры отдают prefers-reduced-motion: reduce - все CSS-анимации
+    // погашены, и проверки «анимация играют» ложно падают. Зонд принудительно
+    // нормализует среду до состояния обычного десктопа.
+    await send("Emulation.setEmulatedMedia", {
+      features: [{ name: "prefers-reduced-motion", value: "no-preference" }],
+    });
     // init() асинхронный, а поля рисует скрипт. Ждём и главное окно, и поля
-    // карточки (font-sans заполняется из get_initial).
+    // карточки (ручки шрифтов наполняются позициями из get_initial).
     const READY = '(function () { return !!(window.__initDone && document.getElementById("download")' +
-      ' && document.getElementById("font-sans") && document.getElementById("font-sans").options.length > 1); })()';
+      ' && document.getElementById("font-sans")' +
+      ' && document.getElementById("font-sans").querySelectorAll(".knob-tick").length > 1); })()';
     for (let i = 0; i < 40; i++) {
       if (await evaluate(READY)) break;
       await sleep(100);
@@ -439,8 +464,195 @@ async function waitForPage() {
     console.log("--- разделы и поля ---");
     await evaluate(OVERLAY_OPEN);
     await sleep(300);
-    const seeded = await evaluate('[].slice.call(document.getElementById("font-sans").options).map(function(o){return o.value;}).filter(Boolean)');
+    const seeded = await evaluate('[].slice.call(document.getElementById("font-sans").querySelectorAll(".knob-tick")).map(function(n){return n.getAttribute("data-value");}).filter(Boolean)');
     console.log(`шрифты в списке: ${JSON.stringify(seeded)}`);
+    // две колонки карточки шрифтов: слева панелька 2x2 из ручек, справа
+    // предпросмотр строкой «{заголовок} - {выбранное семейство}»
+    const fontCols = await evaluate(`(function () {
+      function rect(n) {
+        if (!n) return null;
+        var r = n.getBoundingClientRect();
+        return {l: Math.round(r.left), t: Math.round(r.top),
+                r: Math.round(r.right), b: Math.round(r.bottom),
+                role: n.getAttribute("role") || "",
+                ticks: n.querySelectorAll(".knob-tick").length};
+      }
+      var prev = rect(document.getElementById("font-preview"));
+      var groups = ["font-heading", "font-sans", "font-mono", "font-weight"].map(function(id) {
+        return rect(document.getElementById(id));
+      });
+      var cells = [].slice.call(document.querySelectorAll(".knob-cell")).map(rect);
+      var txt = document.getElementById("font-preview");
+      var s = txt ? txt.textContent.replace(/\\s+/g, " ") : "";
+      return {prev: prev, groups: groups, cells: cells,
+              text: s.trim().length,
+              heads: ["Заголовок - ", "Основной текст - ", "Консоль - "].filter(function(h) {
+                return s.indexOf(h) >= 0; }).length,
+              noValue: !document.querySelector(".knob-value")};
+    })()`);
+    const colChecks = [
+      ["карточка шрифтов: четыре ручки slider, у трех есть риски",
+        fontCols.groups.length === 4 &&
+          fontCols.groups.every(function(g) { return g && g.role === "slider"; }) &&
+          fontCols.groups.slice(0, 3).every(function(g) { return g.ticks > 1; })],
+      ["панелька 2x2: две строки по две ячейки",
+        fontCols.cells.length === 4 &&
+          fontCols.cells[0].t === fontCols.cells[1].t &&
+          fontCols.cells[2].t === fontCols.cells[3].t &&
+          fontCols.cells[0].l === fontCols.cells[2].l &&
+          fontCols.cells[1].l === fontCols.cells[3].l &&
+          fontCols.cells[0].l < fontCols.cells[1].l &&
+          fontCols.cells[2].t > fontCols.cells[0].t],
+      ["левая колонка: все ручки слева от предпросмотра",
+        !!fontCols.prev && fontCols.groups.every(function(g) {
+          return g && g.l < fontCols.prev.l && g.r <= fontCols.prev.l + 1; })],
+      ["предпросмотр в правой колонке напротив панельки",
+        !!fontCols.prev && fontCols.prev.t <= fontCols.groups[0].b],
+      ["предпросмотр: три строки «{заголовок} - {шрифт}»",
+        fontCols.heads === 3 && fontCols.text >= 30],
+      ["число веса убрано в подсказку (.knob-value нет)", fontCols.noValue],
+      ["общий шрифт = системный + семейства",
+        fontCols.groups[1] && fontCols.groups[1].ticks === seeded.length + 1],
+    ];
+    colChecks.forEach(([name, okFlag]) => { if (!okFlag) fail(name); });
+    console.log(`  панелька шрифтов: риски=[${fontCols.groups.map(function(g) {
+      return g ? g.ticks : "x"; }).join(",")}] ячеек=${fontCols.cells.length}` +
+      ` предпросмотр l=${fontCols.prev ? fontCols.prev.l : "?"} строк=${fontCols.heads}`);
+    // ручка шрифта: колесо меняет семейство - сохраняется, попадает в
+    // предпросмотр строкой «Заголовок - {семейство}», подсказка ручки
+    // набрана этим же семейством
+    await evaluate('document.getElementById("font-heading").scrollIntoView({block: "center"}); true');
+    await sleep(80);
+    const hBox = await evaluate(`(function () {
+      var k = document.getElementById("font-heading");
+      var r = k.getBoundingClientRect();
+      return {x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2),
+              v0: k.value, ticks: k.querySelectorAll(".knob-tick").length};
+    })()`);
+    await send("Input.dispatchMouseEvent", {type: "mouseMoved", x: hBox.x, y: hBox.y});
+    await sleep(80);
+    await send("Input.dispatchMouseEvent", {type: "mouseWheel", x: hBox.x, y: hBox.y,
+      deltaX: 0, deltaY: -120});
+    await sleep(350);   // больше TIP_DELAY(220): подсказка успевает показаться
+    const fontWheel = await evaluate(`(function () {
+      var k = document.getElementById("font-heading");
+      var s = (window.__probe.saved || []).filter(function (x) {
+        return x[0] === "font_heading"; }).slice(-1)[0];
+      var prev = document.getElementById("font-preview").textContent.replace(/\\s+/g, " ");
+      var tip = document.getElementById("tip");
+      return {v: k.value, saved: s,
+              inPreview: prev.indexOf("Заголовок - " + k.value) >= 0,
+              tipHidden: tip.hidden, tipText: (tip.textContent || "").trim(),
+              tipFont: getComputedStyle(tip).fontFamily};
+    })()`);
+    if (!(typeof fontWheel.v === "string" && fontWheel.v && fontWheel.v !== hBox.v0 &&
+          fontWheel.saved && fontWheel.saved[1] === fontWheel.v && fontWheel.inPreview)) {
+      fail("ручка шрифта: колесо не сменило семейство/не сохранилось/нет в предпросмотре: " +
+           JSON.stringify({hBox: hBox, fontWheel: fontWheel}));
+    }
+    if (!(fontWheel.tipHidden === false && fontWheel.tipText === fontWheel.v &&
+          fontWheel.tipFont.indexOf(fontWheel.v) >= 0)) {
+      fail("подсказка ручки шрифта не показана её же шрифтом: " + JSON.stringify(fontWheel));
+    }
+    // возвращаем семейство: ниже заголовки меряются в шести языках
+    await send("Input.dispatchMouseEvent", {type: "mouseWheel", x: hBox.x, y: hBox.y,
+      deltaX: 0, deltaY: 120});
+    await sleep(200);
+    // упоры шкалы: дуга конечна - вниз от нуля и вверх от максимума
+    // колесо не двигает позицию (зацикливания нет)
+    const readFontKnob = () => evaluate('document.getElementById("font-heading").value');
+    const vAtStop = await readFontKnob();
+    await send("Input.dispatchMouseEvent", {type: "mouseWheel", x: hBox.x, y: hBox.y,
+      deltaX: 0, deltaY: 120});                     // вниз: у нулевой точки
+    await sleep(150);
+    const vLow = await readFontKnob();
+    await send("Input.dispatchMouseEvent", {type: "mouseWheel", x: hBox.x, y: hBox.y,
+      deltaX: 0, deltaY: -120});                    // до максимума...
+    await sleep(150);
+    await send("Input.dispatchMouseEvent", {type: "mouseWheel", x: hBox.x, y: hBox.y,
+      deltaX: 0, deltaY: -120});                    // ...и ещё вверх: упор
+    await sleep(150);
+    const vHigh = await readFontKnob();
+    await send("Input.dispatchMouseEvent", {type: "mouseWheel", x: hBox.x, y: hBox.y,
+      deltaX: 0, deltaY: 120});                     // обратно к нулю
+    await sleep(150);
+    const vBack = await readFontKnob();
+    if (!(vAtStop === "" && vLow === "" && vHigh !== "" && vHigh !== vLow && vBack === "")) {
+      fail("упоры шкалы шрифта не работают (циклирование?): " + JSON.stringify(
+        {vAtStop: vAtStop, vLow: vLow, vHigh: vHigh, vBack: vBack}));
+    }
+    console.log(`  упоры шкалы: "${vAtStop}" -> вниз "${vLow}" -> вверх "${vHigh}" -> "${vBack}"`);
+    // бесконечная ручка толщины: слайдер с диапазоном100..900, колесо и
+    // горизонтальное перетаскивание крутят её, шаг квантован
+    // (scrollIntoView: ручка в конце карточки - ниже фолда, CDP-мышь
+    //  не дотянется до координат за пределами вьюпорта)
+    await evaluate('document.getElementById("font-weight").scrollIntoView({block: "center"}); true');
+    await sleep(80);
+    const knobBox = await evaluate(`(function () {
+      var k = document.getElementById("font-weight");
+      if (!k) return null;
+      var r = k.getBoundingClientRect();
+      var at = document.elementFromPoint(Math.round(r.left + r.width / 2),
+                                         Math.round(r.top + r.height / 2));
+      return {x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2),
+              v0: k.value, role: k.getAttribute("role"),
+              min: k.getAttribute("aria-valuemin"), max: k.getAttribute("aria-valuemax"),
+              ind: !!k.querySelector(".knob-ind"),
+              at: at ? (at.id || at.className || at.tagName) : null,
+              inKnob: !!(at && (at === k || k.contains(at)))};
+    })()`);
+    if (!(knobBox && knobBox.role === "slider" && knobBox.min === "100" &&
+          knobBox.max === "900" && knobBox.ind)) {
+      fail("ручка толщины не slider/без диапазона/без индикатора: " + JSON.stringify(knobBox));
+    } else {
+      await send("Input.dispatchMouseEvent",
+        {type: "mouseMoved", x: knobBox.x, y: knobBox.y});
+      await sleep(80);
+      await send("Input.dispatchMouseEvent", {type: "mouseWheel", x: knobBox.x,
+        y: knobBox.y, deltaX: 0, deltaY: -120});
+      await sleep(120);
+      const v1 = await evaluate('document.getElementById("font-weight").value');
+      if (!(typeof v1 === "number" && v1 !== knobBox.v0 && v1 >= 100 && v1 <= 900 &&
+            v1 % 10 === 0)) {
+        fail("колесо не крутит ручку: " + JSON.stringify({v0: knobBox.v0, v1: v1,
+          at: knobBox.at, inKnob: knobBox.inKnob, xy: [knobBox.x, knobBox.y]}));
+      }
+      // горизонтальное перетаскивание зажатой мышью
+      await send("Input.dispatchMouseEvent", {type: "mousePressed", x: knobBox.x,
+        y: knobBox.y, button: "left", buttons: 1, clickCount: 1});
+      await send("Input.dispatchMouseEvent", {type: "mouseMoved", x: knobBox.x + 170,
+        y: knobBox.y, button: "left", buttons: 1});
+      await sleep(80);
+      await send("Input.dispatchMouseEvent", {type: "mouseReleased", x: knobBox.x + 170,
+        y: knobBox.y, button: "left", buttons: 0, clickCount: 1});
+      await sleep(120);
+      const v2 = await evaluate(`(function () {
+        var k = document.getElementById("font-weight");
+        var s = (window.__probe.saved || []).filter(function (x) {
+          return x[0] === "font_weight"; }).slice(-1)[0];
+        return {v: k.value, saved: s};
+      })()`);
+      if (!(typeof v2.v === "number" && v2.v !== v1 && v2.v >= 100 && v2.v <= 900 &&
+            v2.v % 10 === 0 && v2.saved && v2.saved[1] === v2.v)) {
+        fail("перетаскивание не круто или не сохранилось: " +
+             JSON.stringify({v1: v1, v2: v2}));
+      }
+      console.log(`  ручка толщины: ${knobBox.v0} -> колесо ${v1} -> перетаскивание ${v2.v}` +
+        ` сохранено=${JSON.stringify(v2.saved)}`);
+      // число убрано из-под ручки - подсказка показывает вес в процентах
+      await send("Input.dispatchMouseEvent",
+        {type: "mouseMoved", x: knobBox.x, y: knobBox.y});
+      await sleep(350);
+      const wTip = await evaluate(`(function () {
+        var t = document.getElementById("tip");
+        return {hidden: t.hidden, text: (t.textContent || "").trim()};
+      })()`);
+      if (!(wTip.hidden === false && wTip.text.indexOf("%") === wTip.text.length - 1 &&
+            wTip.text.indexOf("Толщина") >= 0)) {
+        fail("подсказка веса не «Толщина шрифта - N%»: " + JSON.stringify(wTip));
+      }
+      console.log(`  подсказка веса: "${wTip.text}"`);
+    }
     for (const lang of LANGS) {
       const m = await evaluate(`(function () {
         curLang = ${JSON.stringify(lang)}; applyI18n(); return ${WIN_MEASURE};
@@ -515,6 +727,19 @@ async function waitForPage() {
               x: Math.round(r.left), y: Math.round(r.top),
               inView: r.left >= 0 && r.right <= window.innerWidth + 1 && r.top >= 0};
     })()`);
+    // волшебная обводка мерцает (прозрачность меняется между замерами) и
+    // крутится, из-под подсказки в каждый момент светится пылинка
+    const magicRead = `(function () {
+      var t = document.getElementById("tip");
+      var cs = getComputedStyle(t, "::before");
+      var d = [].slice.call(t.querySelectorAll("i.dust"));
+      var lit = d.filter(function (n) { return parseFloat(getComputedStyle(n).opacity) > 0.05; }).length;
+      return {anim: cs.animationName, play: cs.animationPlayState,
+              op: parseFloat(cs.opacity), n: d.length, lit: lit};
+    })()`;
+    const magic1 = await evaluate(magicRead);
+    await sleep(400);
+    const magic2 = await evaluate(magicRead);
     const tipChecks = [
       ["появляется не сразу (задержка)", tipEarly.hidden === true],
       ["показывается по наведению", tip.hidden === false && tip.on === true],
@@ -525,8 +750,34 @@ async function waitForPage() {
       ["подсказка не накрывает элемент", !tip.overlap],
       ["подсказка помещается в окно", tip.inView],
       ["элемент связан с подсказкой", tip.described === "tip"],
+      ["волшебная обводка есть, крутится и мерцает",
+        magic1.anim.indexOf("tipSpin") >= 0 &&
+        magic1.play.indexOf("running") >= 0 &&
+        Math.abs(magic1.op - magic2.op) > 0.005],
+      ["пылинки исходят из-под подсказки",
+        magic1.n >= 6 && (magic1.lit >= 1 || magic2.lit >= 1)],
     ];
     tipChecks.forEach(([name, okFlag]) => { if (!okFlag) fail(name); });
+    // wiggle реплики кликера: каждые 500-й клик показывает комментарий с
+    // анимацией msg-wiggle, и она правда двигает текст (замер трансформа)
+    await evaluate(`(function () {
+      var btn = document.getElementById("clicker");
+      for (var i = 0; i < 500; i++) btn.click();
+      return true;
+    })()`);
+    await sleep(300);
+    const wig = await evaluate(`(function () {
+      var m = document.getElementById("clicker-msg");
+      var cs = getComputedStyle(m);
+      return {shown: m.classList.contains("show"), anim: cs.animationName,
+              t1: cs.transform, text: (m.textContent || "").trim().length > 0};
+    })()`);
+    await sleep(150);
+    const wig2 = await evaluate(
+      'getComputedStyle(document.getElementById("clicker-msg")).transform');
+    if (!(wig.shown && wig.anim.indexOf("msg-wiggle") >= 0 && wig.text && wig.t1 !== wig2)) {
+      fail("реплика кликера без wiggle: " + JSON.stringify({wig: wig, t2: wig2}));
+    }
     // курсор ушёл с кнопки - подсказка обязана исчезнуть вместе с нитью
     await mouseMove(6, 6);
     await sleep(250);
@@ -592,6 +843,67 @@ async function waitForPage() {
     } else {
       fail("подсказка не потянулась за курсором");
     }
+    // Орбита: курсор по осям - подсказка переходит на другие грани, и нить
+    // после перехода целится в грань, а не в угол. Слева у кнопки (left: 40)
+    // нет места - там подсказка уходит на смежную грань, поэтому верх, право
+    // и низ.
+    const orbitSides = [];
+    for (const [ox, oy] of [[0, -30], [100, 0], [0, 30]]) {
+      await mouseMove(bigBtn.cx + ox, bigBtn.cy + oy);
+      await sleep(450);
+      orbitSides.push(await evaluate(`(function () {
+        var t = document.getElementById("tip").getBoundingClientRect();
+        var b = document.getElementById("probe-tip-big").getBoundingClientRect();
+        if (t.top >= b.bottom - 1) return "bottom";
+        if (t.bottom <= b.top + 1) return "top";
+        if (t.left >= b.right - 1) return "right";
+        if (t.right <= b.left + 1) return "left";
+        return "overlap";
+      })()`));
+    }
+    if (new Set(orbitSides).size < 3 || orbitSides.includes("overlap")) {
+      fail("подсказка не крутится вокруг элемента: " + orbitSides.join(","));
+    }
+    const orbitArrow = await evaluate(`(function () {
+      var d = document.querySelector(".tip-thread-head").getAttribute("d") || "";
+      var m = d.match(/L\\s*(-?[\\d.]+)\\s+(-?[\\d.]+)\\s+L/);
+      var b = document.getElementById("probe-tip-big").getBoundingClientRect();
+      if (!m) return {ok: false};
+      var x = parseFloat(m[1]), y = parseFloat(m[2]);
+      var onEdge = Math.abs(y - b.top) < 1.5 || Math.abs(y - b.bottom) < 1.5 ||
+                   Math.abs(x - b.left) < 1.5 || Math.abs(x - b.right) < 1.5;
+      var atCorner = (Math.abs(x - b.left) < 1.5 || Math.abs(x - b.right) < 1.5) &&
+                     (Math.abs(y - b.top) < 1.5 || Math.abs(y - b.bottom) < 1.5);
+      return {ok: onEdge && !atCorner, x: Math.round(x), y: Math.round(y)};
+    })()`);
+    if (!orbitArrow.ok) fail("нить целится не в грань (орбита): " + JSON.stringify(orbitArrow));
+    // угол кольца достижим (наконечник - в угол объекта), а строка начинается
+    // строго от края подсказки, а не из её центра
+    await mouseMove(bigBtn.cx + 80, bigBtn.cy - 23);
+    await sleep(450);
+    const cornerRing = await evaluate(`(function () {
+      var b = document.getElementById("probe-tip-big").getBoundingClientRect();
+      var t = document.getElementById("tip").getBoundingClientRect();
+      var hd = document.querySelector(".tip-thread-head").getAttribute("d") || "";
+      var hm = hd.match(/L\\s*(-?[\\d.]+)\\s+(-?[\\d.]+)\\s+L/);
+      var ld = document.querySelector(".tip-thread-line").getAttribute("d") || "";
+      var lm = ld.match(/^M\\s*(-?[\\d.]+)\\s+(-?[\\d.]+)/);
+      var atCorner = false;
+      if (hm) {
+        var x = parseFloat(hm[1]), y = parseFloat(hm[2]);
+        atCorner = Math.abs(x - b.right) < 1.5 && Math.abs(y - b.top) < 1.5;
+      }
+      var startOk = false;
+      if (lm) {
+        var sx = parseFloat(lm[1]), sy = parseFloat(lm[2]);
+        startOk = Math.abs(sx - t.left) < 0.7 || Math.abs(sx - t.right) < 0.7 ||
+                  Math.abs(sy - t.top) < 0.7 || Math.abs(sy - t.bottom) < 0.7;
+      }
+      return {atCorner: atCorner, startOk: startOk,
+              arrow: hm ? [Math.round(parseFloat(hm[1])), Math.round(parseFloat(hm[2]))] : null};
+    })()`);
+    if (!cornerRing.atCorner) fail("угол кольца недоступен: " + JSON.stringify(cornerRing));
+    if (!cornerRing.startOk) fail("нить начинается не от края подсказки: " + JSON.stringify(cornerRing));
     // Перерисовка карточки: элемент исчезает из-под курсора без pointerout,
     // подсказка не имеет права висеть на мёртвом узле.
     await evaluate('var b = document.getElementById("probe-tip-big"); if (b) b.remove(); true');
@@ -608,7 +920,156 @@ async function waitForPage() {
     if (!detachOk) fail("подсказка висит после перерисовки элемента");
     console.log(`  задержка=${tipEarly.hidden ? "есть" : "нет"} текст="${tip.text}" ` +
       `нить=${tip.thread} наконечник_у_элемента=${tip.onBorder} ` +
-      `следует_за_курсором=${bigMoved && bigEnd.settled} скрыта_после_ухода=${goneOk}`);
+      `следует_за_курсором=${bigMoved && bigEnd.settled} скрыта_после_ухода=${goneOk} ` +
+      `орбита=[${orbitSides.join(",")}] наконечник_в_грани=${orbitArrow.ok} ` +
+      `угол_кольца=${cornerRing.atCorner} старт_от_края=${cornerRing.startOk} ` +
+      `обводка=${magic1.anim.indexOf("tipSpin") >= 0 && magic1.play.indexOf("running") >= 0 ? "ok" : "BAD"}` +
+      `(мерцание ${Math.abs(magic1.op - magic2.op).toFixed(3)})` +
+      ` пылинки=${magic1.n}/${magic2.n} lit=${magic1.lit}+${magic2.lit}`);
+
+    // Магнитные силы подсказок (карточка «Подсказки» раздела «Интерфейс»):
+    // поля есть и переводятся, дефолты 50/100, правка сохраняется и применяется
+    // сразу, а поведение правда меняется: repel держит подсказку вне элемента,
+    // pull ускоряет схождение за курсором.
+    console.log("--- силы подсказок ---");
+    const forceFields = await evaluate(`(function () {
+      var pull = document.getElementById("tip-pull"), repel = document.getElementById("tip-repel");
+      var pr = document.getElementById("tip-pull-range"), rr = document.getElementById("tip-repel-range");
+      function tipAttr(n) { return n ? (n.getAttribute("data-i18n-tip") || "") : ""; }
+      var row = pull ? pull.closest(".range-row") : null;
+      return {pull: !!pull, repel: !!repel, range: !!pr && !!rr,
+              pullType: pull ? pull.type : "",
+              pullTip: tipAttr(pull), repelTip: tipAttr(repel),
+              label: row ? !!row.querySelector("label") : false,
+              force: {pull: TIP_FORCE.pull, repel: TIP_FORCE.repel}};
+    })()`);
+    const forceChecks = [
+      ["поля сил подсказок есть (число + ползунок)",
+        forceFields.pull && forceFields.repel && forceFields.range &&
+        forceFields.pullType === "number" && forceFields.label],
+      ["поля сил подсказок переведены", forceFields.pullTip.length > 0 && forceFields.repelTip.length > 0],
+      ["силы по умолчанию 50/100",
+        forceFields.force.pull === 50 && forceFields.force.repel === 100],
+    ];
+    forceChecks.forEach(([name, okFlag]) => { if (!okFlag) fail(name); });
+    const forceSaved = await evaluate(`(function () {
+      window.__probe.saved = [];
+      var n = document.getElementById("tip-pull");
+      n.value = "85"; n.dispatchEvent(new Event("change"));
+      return {saved: window.__probe.saved.slice(-1)[0], pull: TIP_FORCE.pull};
+    })()`);
+    if (!forceSaved.saved || forceSaved.saved[0] !== "tip_pull" || +forceSaved.saved[1] !== 85) {
+      fail("правка силы притяжения не сохраняется");
+    }
+    if (forceSaved.pull !== 85) fail("сила притяжения не применилась сразу после правки");
+    // поведение: временная кнопка под курсором, замер перекрытия и скорости.
+    // Кнопка стоит высоко: окно пробника низкое, прижатие к нижнему краю окна
+    // (clamp) не даст вытолкнуть подсказку вниз и проверка соврала бы.
+    await evaluate(`(function () {
+      var b = document.createElement("button");
+      b.id = "probe-tip-force";
+      b.setAttribute("data-tip", "проверка сил");
+      b.style.cssText = "position:fixed;left:40px;top:120px;width:360px;height:80px;z-index:2147483000;";
+      document.body.appendChild(b);
+      return true;
+    })()`);
+    const forceBtn = await evaluate(`(function () {
+      var b = document.getElementById("probe-tip-force").getBoundingClientRect();
+      return {cx: Math.round(b.left + b.width / 2), cy: Math.round(b.top + b.height / 2)};
+    })()`);
+    // Силы задаются через стаб настроек, а не только setTipForces: poll() каждые
+    // 200 мс возвращает TIP_FORCE из настроек и затирал бы временные значения.
+    async function setForces(pull, repel) {
+      await evaluate(`(function () {
+        pywebview.api.save_setting("tip_pull", ${pull});
+        pywebview.api.save_setting("tip_repel", ${repel});
+        setTipForces(${pull}, ${repel});
+        var a = document.getElementById("tip-pull"), b = document.getElementById("tip-repel");
+        if (a) a.value = ${pull};
+        if (b) b.value = ${repel};
+        return TIP_FORCE.pull + "/" + TIP_FORCE.repel;
+      })()`);
+    }
+    async function forceProbe(pull, repel) {
+      await setForces(pull, repel);
+      await mouseMove(forceBtn.cx - 9, forceBtn.cy - 7);   // встряска: иначе
+      await sleep(80);                                     // pointermove в точку
+      await mouseMove(forceBtn.cx, forceBtn.cy);           // не перезапускает кадры
+      // углу нужно сойтись к новой стороне (0.45 рад/кадр ~6 кадров); под
+      // нагрузкой кадры идут медленнее -800 мс запас против флаки
+      await sleep(800);
+      return evaluate(`(function () {
+        var t = document.getElementById("tip"), el = document.getElementById("probe-tip-force");
+        var tr = t.getBoundingClientRect(), er = el.getBoundingClientRect();
+        var overlap = !(tr.right <= er.left || tr.left >= er.right ||
+                        tr.bottom <= er.top || tr.top >= er.bottom);
+        return {hidden: t.hidden, overlap: overlap,
+                tx: TIP.tx, ty: TIP.ty,
+                ang: Math.round(TIP.ang * 180 / Math.PI),
+                target: TIP.target ? (TIP.target.id || "") : "",
+                raf: TIP.raf,
+                force: {pull: TIP_FORCE.pull, repel: TIP_FORCE.repel},
+                rect: [Math.round(tr.left), Math.round(tr.top),
+                       Math.round(tr.width), Math.round(tr.height)]};
+      })()`);
+    }
+    const repelOff = await forceProbe(50, 0);
+    if (repelOff.hidden || !repelOff.overlap) {
+      fail("repel=0 не ослабляет отталкивание (подсказка не ляжет на элемент)");
+    }
+    const repelOn = await forceProbe(50, 100);
+    if (repelOn.hidden || repelOn.overlap) {
+      fail("repel=100 не держит подсказку вне элемента " + JSON.stringify(repelOn));
+    }
+    // pull: подсказка уже показана на кнопке, прыжок курсора внутри неё -
+    // хвост расстояния через 150 мс должен быть больше при слабом притяжении
+    async function lagAt(pull) {
+      await setForces(pull, 100);
+      await mouseMove(forceBtn.cx - 90, forceBtn.cy + 10);
+      await sleep(500);                                  // показ и схождение
+      const before = await evaluate('({x: Math.round(TIP.x), tx: Math.round(TIP.tx), shown: TIP.node.classList.contains("tip-on")})');
+      await mouseMove(forceBtn.cx + 90, forceBtn.cy + 10);
+      await sleep(150);
+      const after = await evaluate('({lag: Math.hypot(TIP.tx - TIP.x, TIP.ty - TIP.y), ' +
+        'pull: TIP_FORCE.pull, rm: reducedMotion(), mode: TIP.mode, raf: TIP.raf, ' +
+        'at: [Math.round(TIP.x), Math.round(TIP.y)], tx: [Math.round(TIP.tx), Math.round(TIP.ty)], ' +
+        'cx: Math.round(TIP.cx), cy: Math.round(TIP.cy), ' +
+        'target: TIP.target ? (TIP.target.id || TIP.target.tagName) : "нет", ' +
+        'hover: TIP.target ? TIP.target.matches(":hover") : null, ' +
+        'hidden: document.getElementById("tip").hidden, ' +
+        'shown: document.getElementById("tip").classList.contains("tip-on")})');
+      after.before = before;
+      return after;
+    }
+    const lagLow = await lagAt(0), lagHigh = await lagAt(100);
+    if (lagLow.rm) {
+      // при prefers-reduced-motion подсказка снапится мгновенно (snapTip) -
+      // «хвост схождения» не существует, сравнивать нечего
+      console.log("  притяжение: проверка скорости пропущена (reduced motion)");
+    } else if (!(lagLow.lag > lagHigh.lag + 4)) {
+      fail(`притяжение не влияет на скорость: pull=0 -> ${lagLow.lag.toFixed(1)}px, ` +
+           `pull=100 -> ${lagHigh.lag.toFixed(1)}px ` + JSON.stringify({lagLow, lagHigh}));
+    }
+    // прогрессия притяжения: на том же repel подсказка при pull=0 стоит
+    // заметно дальше курсора (центр кнопки), чем при pull=100
+    const far = await forceProbe(0, 100);
+    const near = await forceProbe(100, 100);
+    const distCur = (p) => Math.hypot(p.rect[0] + p.rect[2] / 2 - forceBtn.cx,
+                                      p.rect[1] + p.rect[3] / 2 - forceBtn.cy);
+    if (far.hidden || near.hidden || !(distCur(far) > distCur(near) + 15)) {
+      fail("pull не меняет расстояние до курсора в прогрессии: " +
+           JSON.stringify({far: Math.round(distCur(far)), near: Math.round(distCur(near)),
+             farA: far.ang, nearA: near.ang, farF: far.force, nearF: near.force,
+             farT: far.target, farRaf: far.raf, farRect: far.rect}));
+    }
+    await setForces(50, 100);                            // вернуть дефолты
+    await evaluate('var b = document.getElementById("probe-tip-force"); if (b) b.remove(); true');
+    await mouseMove(12, 12);
+    await sleep(200);
+    console.log(`  поля=есть сохранение=${JSON.stringify(forceSaved.saved)} ` +
+      `repel: 0->на_элементе=${repelOff.overlap} 100->вне=${!repelOn.overlap} ` +
+      `pull хвост: 0=${lagLow.lag.toFixed(1)}px 100=${lagHigh.lag.toFixed(1)}px ` +
+      `дистанция: 0=${Math.round(distCur(far))}px 100=${Math.round(distCur(near))}px`);
 
     console.log("--- раздел FTP ---");
     const ftp = await evaluate(FTP_VIS);
@@ -631,6 +1092,8 @@ async function waitForPage() {
       ["выгрузка: пиксельный переключатель без подписи",
         ftp.hints.activePixel && !ftp.hints.activeText &&
         ftp.hints.activeAria.length > 0 && ftp.hints.activeTip.length > 0],
+      ["бокс подсказки тумблера обнимает переключатель, а не строку карточки",
+        ftp.hints.activeBox[0] <= 48 && ftp.hints.activeBox[1] <= 28],
       ["тумблер рисуется: SVG-namespace и размеры фигур > 0",
         ftp.hints.pxNs === "http://www.w3.org/2000/svg" &&
         ftp.hints.pxKidsNs.length === 4 &&
@@ -654,7 +1117,8 @@ async function waitForPage() {
       ` -> en ${ftp.modeEn.n} [${ftp.modeEn.texts.join(" | ")}]` +
       ` -> клик "${ftp.clicked.value}" сохранено=${JSON.stringify(ftp.saved)}`);
     console.log(`  выгрузка: пиксельный=${ftp.hints.activePixel} подпись="${ftp.hints.activeText}" ` +
-      `aria="${ftp.hints.activeAria}" подсказка=${ftp.hints.activeTip.length > 0}; ` +
+      `aria="${ftp.hints.activeAria}" подсказка=${ftp.hints.activeTip.length > 0} ` +
+      `бокс=${ftp.hints.activeBox.join("x")}; ` +
       `svg-ns=${ftp.hints.pxNs === "http://www.w3.org/2000/svg" ? "ok" : "BAD"} ` +
       `дорожка=${ftp.hints.trackRect.join("x")} ползунок=${ftp.hints.knobRect.join("x")}; ` +
       `цвета: дорожка=${ftp.hints.trackFill}/${ftp.hints.trackStroke} ползунок ${ftp.hints.knobOff}->${ftp.hints.knobOn}` +
