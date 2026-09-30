@@ -83,6 +83,17 @@ STUB = """<script>
       // его (иначе fillSettings() на поллу откатил бы переключатель назад)
       settings[key] = value; return ok(); },
     start_download: function () { return ok({}); },
+    // как настоящий start_bulk: парсинг теми же правилами, busy и статус [i/N]
+    start_bulk: function (cfg) {
+      var lines = String((cfg && cfg.urls) || "").split("\\n")
+        .map(function(s) { return s.trim(); })
+        .filter(function(s) { return s && s.charAt(0) !== "#" && /^https?:\\/\\//i.test(s); });
+      if (!lines.length) return Promise.resolve({error: "empty"});
+      state.saved.push(["bulk", lines]);
+      state.dlState = {busy: true, status: "[1/" + lines.length + "] " + lines[0],
+                       result: null, progress: {mode: "indeterminate", value: 0}};
+      return ok({});
+    },
     stop_download: function () { return ok(); },
     browse_folder: function () { return ok("C:\\\\Downloads"); },
     test_ftp: function () { return ok({error: "test"}); },

@@ -867,7 +867,7 @@ CSS наследуется по цепочке extends: файлы родите�
 СЕКЦИИ (slots)
 --------------
 Эти секции базового шаблона можно переопределить файлами slots\\<имя>.html:
-  head, tabs, panel-video, panel-playlist, warn, ffmpeg-overlay, actions,
+  head, tabs, panel-video, panel-playlist, panel-batch, warn, ffmpeg-overlay, actions,
   progress, clicker, modal.
 Маркеры в шаблоне: <!-- SLOT:<имя> --> ... <!-- /SLOT:<имя> -->.
 Слоты ищутся по цепочке extends: сначала в теме, затем у родителей.

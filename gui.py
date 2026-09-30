@@ -78,6 +78,29 @@ def _summary(dl) -> tuple[str, int, int]:
     return getattr(dl, "summary", None) or ("ok", 0, 0)
 
 
+def _parse_bulk(text: str) -> tuple[list[str], int]:
+    """Список ссылок из текста массовой вкладки: (urls, сколько пропущено).
+
+    Правила (идентичны подсчёту на фронте): одна ссылка на строку, trim,
+    пустые строки и «#» - комментарии пропускаются, принимается только
+    http(s)://, дедуп с сохранением порядка ввода.
+    """
+    urls: list[str] = []
+    seen: set[str] = set()
+    skipped = 0
+    for line in (text or "").splitlines():
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        if not s.lower().startswith(("http://", "https://")):
+            skipped += 1
+            continue
+        if s not in seen:
+            seen.add(s)
+            urls.append(s)
+    return urls, skipped
+
+
 class Api:
     def __init__(self) -> None:
         self.settings = load_settings()
@@ -92,6 +115,8 @@ class Api:
         # итог прошлой загрузки для кнопки: None | "ok" | "error" | "cancelled"
         self._result: str | None = None
         self._cancel = False
+        # массовая загрузка: None вне цикла, иначе счётчики для poll()
+        self._bulk: dict | None = None
         self._progress = {"mode": "determinate", "value": 0.0}
         self._ffmpeg = {"downloading": False, "extracting": False, "pct": 0.0, "ok": False, "error": None}
         self._fonts_dl = {"downloading": False, "pct": 0.0, "error": None}
@@ -178,6 +203,8 @@ class Api:
                 "ffmpeg": dict(self._ffmpeg),
                 "fonts_dl": dict(self._fonts_dl),
                 "fonts_rev": self._fonts_rev,
+                # массовая: None вне цикла, иначе {total,index,done,failed}
+                "bulk": dict(self._bulk) if self._bulk else None,
                 # значения для карточки настроек: тот же словарь, что и на
                 # диске, поэтому поля не могут разойтись с настройками, по
                 # которым идёт загрузка
@@ -451,6 +478,41 @@ class Api:
         ).start()
         return {}
 
+    def start_bulk(self, cfg: dict) -> dict:
+        """Массовая загрузка: список ссылок, каждая - отдельным запуском.
+
+        Текст из textarea парсится здесь (см. _parse_bulk): фронтенд считает
+        счётчик теми же правилами, но источник истины - Python. Каждая ссылка
+        идёт своим запуском yt-dlp: упавшая не прерывает остальные, повторы
+        и постпроцессоры (включая FTP) работают как в одиночной загрузке.
+        """
+        urls, skipped = _parse_bulk(cfg.get("urls") or "")
+        if skipped:
+            self._log("warning", tr(self._lang, "p.bulk_skip", n=skipped))
+        if not urls:
+            return {"error": tr(self._lang, "status.enter.bulk")}
+        dest = self._dest or str(default_download_dir())
+        subtitles = str(settings_schema.value(self.settings, "dl.subtitles") or "en")
+        quality = str(settings_schema.value(self.settings, "dl.quality") or "lossless")
+        transcode = str(settings_schema.value(self.settings, "dl.transcode") or "none")
+        with self._lock:
+            self._busy = True
+            self._result = None
+            self._cancel = False
+            self._status = tr(self._lang, "p.start")
+            self._progress = {"mode": "indeterminate"}
+            self._bulk = {"total": len(urls), "index": 0,
+                          "done": 0, "failed": 0, "current": ""}
+        self.dl = Downloader(on_log=self._log, on_progress=self._on_progress, lang=self._lang)
+        ftp = FtpConfig(self.settings, self._lang)
+        threading.Thread(
+            target=lambda: self._run_bulk(urls, dest, bool(cfg.get("group", True)),
+                                          subtitles, quality, transcode, ftp),
+            daemon=True,
+            name="yt-dlp-bulk",
+        ).start()
+        return {}
+
     def _run(self, url, dest, playlist, group, subtitles, quality, transcode, ftp=None) -> None:
         crashed = False
         try:
@@ -492,6 +554,66 @@ class Api:
                     self._status = tr(self._lang, key, ok=got, total=all_got)
                 self._progress = {"mode": "determinate", "value": 100.0}
 
+    def _run_bulk(self, urls, dest, group, subtitles, quality, transcode, ftp=None) -> None:
+        """Воркер массовой загрузки: последовательно, по ссылке на запуск.
+
+        Ошибки ссылки не прерывают цикл: итог считается по каждой, детали - в
+        журнале (строки «bulk [i/N]»). Остановка (stop_download) гасит цикл на
+        текущей ссылке и не берёт остаток очереди.
+        """
+        total = len(urls)
+        done = failed = 0
+        cancelled = False
+        try:
+            for i, url in enumerate(urls, 1):
+                with self._lock:
+                    if self._cancel:
+                        cancelled = True
+                        break
+                    self._bulk["index"] = i
+                    self._bulk["current"] = url
+                    self._status = f"[{i}/{total}] {url}"
+                    self._progress = {"mode": "indeterminate"}
+                self._log("info", f"bulk [{i}/{total}] {url}")
+                try:
+                    self.dl.download(url, dest, playlist=is_playlist(url),
+                                     group=group, subtitles=subtitles,
+                                     quality=quality, transcode=transcode, ftp=ftp)
+                except Exception as exc:  # noqa: BLE001
+                    # упавшая ссылка не должна останавливать остальные
+                    self._log("error", str(exc))
+                if self._cancel or (self.dl and self.dl.stopped):
+                    cancelled = True
+                    break
+                mode, _got, _all = _summary(self.dl)
+                if mode == "ok":
+                    done += 1
+                else:
+                    failed += 1
+                with self._lock:
+                    self._bulk["done"] = done
+                    self._bulk["failed"] = failed
+        finally:
+            with self._lock:
+                cancelled = cancelled or self._cancel
+                self._busy = False
+                self._bulk = None
+                self._progress = {"mode": "determinate", "value": 100.0}
+                if cancelled:
+                    self._result = "cancelled"
+                    self._status = tr(self._lang, "p.cancelled")
+                elif failed == 0:
+                    self._result = "ok"
+                    self._status = tr(self._lang, "p.done.playlist",
+                                      n=done, dest=os.path.basename(dest))
+                elif done == 0:
+                    self._result = _RESULT_MODE.get("failed", "failed")
+                    self._status = tr(self._lang, "p.failed")
+                else:
+                    self._result = _RESULT_MODE.get("partial", "warn")
+                    self._status = tr(self._lang, "p.done_partial",
+                                      ok=done, total=total)
+
     def test_ftp(self) -> dict:
         """Проверка настроек FTP: подключается и сразу отключается."""
         cfg = FtpConfig(self.settings, self._lang)
@@ -520,11 +642,15 @@ class Api:
     def _on_progress(self, d: dict) -> None:
         status = d.get("status")
         with self._lock:
+            # во время массовой каждая строка статуса знает свой номер
+            prefix = ""
+            if self._bulk and self._bulk.get("index"):
+                prefix = f"[{self._bulk['index']}/{self._bulk['total']}] "
             if status == "downloading":
                 percent = d.get("percent")
                 name = d.get("filename") or ""
                 if percent is None:
-                    self._status = f"{name} · {tr(self._lang, 'p.going')}"
+                    self._status = f"{prefix}{name} · {tr(self._lang, 'p.going')}"
                     self._progress = {"mode": "indeterminate"}
                 else:
                     self._progress = {"mode": "determinate", "value": percent}
@@ -532,7 +658,7 @@ class Api:
                     spd = f"{d['speed'] / 1024 / 1024:.1f} {tr(self._lang, 'p.mbps')}" if d.get("speed") else ""
                     eta = (f" {tr(self._lang, 'p.eta_prefix')} {int(d['eta'])}{tr(self._lang, 'p.eta_sec')}"
                            if d.get("eta") else "")
-                    self._status = f"{name} · {bits}{(' | ' + spd) if spd else ''}{eta}"
+                    self._status = f"{prefix}{name} · {bits}{(' | ' + spd) if spd else ''}{eta}"
             elif status == "postprocessing":
                 self._status = d.get("msg") or tr(self._lang, "p.post")
                 self._progress = {"mode": "indeterminate"}

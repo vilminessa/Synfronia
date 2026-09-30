@@ -150,6 +150,7 @@
     translateStatic();
     renderClicker();
     updateDownloadTitle();
+    updateBulkCount();
     // Карточка настроек в этом же окне: её списки и подписи тоже переводим
     if (typeof applySettingsI18n === "function") applySettingsI18n();
     if (!busy) document.getElementById("status").textContent = t("status.ready");
@@ -251,17 +252,50 @@
     busy = b;
     document.getElementById("download").disabled = b;
     document.getElementById("stop").disabled = !b;
-    ["tab-video", "tab-playlist", "url-video", "url-playlist", "settings-btn", "group"]
-      .forEach(function(id) { document.getElementById(id).disabled = b; });
+    ["tab-video", "tab-playlist", "tab-batch", "url-video", "url-playlist",
+     "url-batch", "batch-clear", "settings-btn", "group"]
+      .forEach(function(id) {
+        var n = document.getElementById(id);
+        if (n) n.disabled = b;   // у тем со своим entry слота batch может не быть
+      });
+  }
+
+  // Правила массовой вкладки - зеркало _parse_bulk в gui.py: одна ссылка на
+  // строку, trim, "#" - комментарий, только http(s), дедуп по порядку ввода.
+  // Фронтенд считает счётчик, Python - источник истины для старта.
+  function parseBulk(text) {
+    var seen = Object.create(null);
+    var out = [];
+    String(text || "").split("\n").forEach(function(line) {
+      var s = line.trim();
+      if (!s || s.charAt(0) === "#") return;
+      if (!/^https?:\/\//i.test(s)) return;
+      if (seen[s]) return;
+      seen[s] = 1;
+      out.push(s);
+    });
+    return out;
+  }
+  function updateBulkCount() {
+    var box = document.getElementById("batch-count");
+    if (!box) return;
+    box.textContent = t("bulk.count").replace("{n}", String(
+      parseBulk((document.getElementById("url-batch") || {}).value).length));
   }
 
   function switchTab(name) {
     activeTab = name;
     document.getElementById("tab-video").classList.toggle("active", name === "video");
     document.getElementById("tab-playlist").classList.toggle("active", name === "playlist");
+    document.getElementById("tab-batch").classList.toggle("active", name === "batch");
     document.getElementById("panel-video").hidden = name !== "video";
     document.getElementById("panel-playlist").hidden = name !== "playlist";
-    if (!busy) document.getElementById(name === "video" ? "url-video" : "url-playlist").focus();
+    document.getElementById("panel-batch").hidden = name !== "batch";
+    if (!busy) {
+      var focusId = name === "video" ? "url-video"
+                  : name === "batch" ? "url-batch" : "url-playlist";
+      document.getElementById(focusId).focus();
+    }
   }
 
   /* ---- оверлей настроек ---------------------------------------------------
@@ -457,6 +491,20 @@
       // субтитры, качество, кодек и сеть живут в настройках, и Python берёт
       // их сам - значения в обоих окнах не могут разойтись.
       document.getElementById("download").addEventListener("click", async function() {
+        if (activeTab === "batch") {
+          var text = document.getElementById("url-batch").value;
+          var list = parseBulk(text);
+          if (!list.length) {
+            document.getElementById("status").textContent = t("status.enter.bulk");
+            return;
+          }
+          var bulkRes = await pywebview.api.start_bulk({
+            urls: text,
+            group: document.getElementById("group").checked,
+          });
+          if (bulkRes && bulkRes.error) document.getElementById("status").textContent = bulkRes.error;
+          return;
+        }
         var url = document.getElementById(activeTab === "video" ? "url-video" : "url-playlist").value.trim();
         if (!url) {
           document.getElementById("status").textContent = activeTab === "video"
@@ -506,6 +554,21 @@
       });
       document.getElementById("tab-video").addEventListener("click", function() { switchTab("video"); });
       document.getElementById("tab-playlist").addEventListener("click", function() { switchTab("playlist"); });
+      document.getElementById("tab-batch").addEventListener("click", function() { switchTab("batch"); });
+      // массовая вкладка: счётчик на вводе, Ctrl+Enter - старт, очистка
+      var batchBox = document.getElementById("url-batch");
+      batchBox.addEventListener("input", updateBulkCount);
+      batchBox.addEventListener("keydown", function(ev) {
+        if (ev.key === "Enter" && ev.ctrlKey) {
+          ev.preventDefault();
+          document.getElementById("download").click();
+        }
+      });
+      document.getElementById("batch-clear").addEventListener("click", function() {
+        batchBox.value = "";
+        updateBulkCount();
+        batchBox.focus();
+      });
     }).catch(function(e) { console.error("init error:", e); });
   }
   // Стартуем только когда выполнились все <script>: колбэк get_initial() - это
