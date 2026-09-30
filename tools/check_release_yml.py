@@ -11,7 +11,8 @@
      Actions;
   4. публикация ограждена if на теге; генератор провенанса ранится и на
      dispatch (if допускает skipped), upload-assets отключён вне тега,
-     а проверка подписи не привязана к тегу - проба конвейера до выпуска;
+     а проверка подписи привязана к тегу и верифицирует интота-бандл из
+     ассетов релиза (bundle + predicate v0.2 + signer-repo);
   5. в шагах python -c только ASCII - консоль CI cp1252, кириллица роняет
      уже собранный артефакт;
   6. зонд ui_fonts_probe эмулирует prefers-reduced-motion: no-preference -
@@ -119,9 +120,18 @@ def main() -> int:
     ok("python-publish.result" in gen_if and "skipped" in gen_if,
        "генератор ждёт публикацию, но допускает её пропуск на dispatch", gen_if)
     attest_if = str(jobs.get("verify-attestation", {}).get("if", ""))
-    ok("refstags" not in attest_if,
-       "проверка подписи ранится и на dispatch (проба до тега)",
-       attest_if or "без if")
+    ok("refstags" in attest_if.replace("/", ""),
+       "проверка подписи на теге (на dispatch ассетов релиза нет)", attest_if or "без if")
+    attest_steps = jobs.get("verify-attestation", {}).get("steps") or []
+    attest_run = " ".join(str(s.get("run", "")) for s in attest_steps)
+    ok("gh release download" in attest_run,
+       "verify качает exe и провенанс из релиза")
+    ok("--bundle" in attest_run and "intoto" in attest_run,
+       "verify верифицирует интота-бандл, а не реестр")
+    ok("provenance/v0.2" in attest_run,
+       "verify фильтрует predicate v0.2 (так подписывает генератор)")
+    ok("--signer-repo" in attest_run and "slsa-github-generator" in attest_run,
+       "verify указывает signer-repo (генератор - reusable workflow)")
     ok("needs.build.outputs.digests" in str(with_.get("base64-subjects", "")),
        "subjects берутся из хеша build-джоба")
 
