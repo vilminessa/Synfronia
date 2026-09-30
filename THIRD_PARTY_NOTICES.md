@@ -13,6 +13,7 @@ requirements of each license.
 | bottle | 0.13.4 (bundled) | MIT | https://github.com/bottlepy/bottle |
 | proxy_tools | 0.1.0 (bundled) | MIT | https://github.com/TkTech/proxy_tools |
 | [PyInstaller](https://github.com/pyinstaller/pyinstaller) | 6.22.2 (build-time only) | GPL-2.0-or-later with special exception | https://github.com/pyinstaller/pyinstaller |
+| [PyYAML](https://github.com/yaml/pyyaml) | 6.x (dev/CI tooling only, not bundled) | MIT | https://github.com/yaml/pyyaml |
 | certifi | 2026.7.22 (bundled) | MPL-2.0 | https://github.com/certifi/python-certifi |
 | urllib3 | 2.7.0 (bundled) | MIT | https://github.com/urllib3/urllib3 |
 | idna | 3.19 (bundled) | BSD-3-Clause | https://github.com/kjd/idna |
@@ -20,9 +21,7 @@ requirements of each license.
 | cryptography | 50.0.1 (bundled) | Apache-2.0 OR BSD-3-Clause | https://github.com/pyca/cryptography |
 | CPython | 3.14.2 (bundled) | PSF License Agreement | https://www.python.org/ |
 | ffmpeg | any recent build (external, NOT bundled) | GPL-2.0-or-later | https://ffmpeg.org/ |
-| [Inter](https://rsms.me/inter/) | variable (bundled, `assets/fonts`) | OFL-1.1 | https://github.com/google/fonts/tree/main/ofl/inter |
 | [JetBrains Mono](https://www.jetbrains.com/lp/mono/) | variable (bundled, `assets/fonts`) | OFL-1.1 | https://github.com/google/fonts/tree/main/ofl/jetbrainsmono |
-| [Noto Sans](https://fonts.google.com/noto/specimen/Noto+Sans) | variable (bundled, `assets/fonts`) | OFL-1.1 | https://github.com/google/fonts/tree/main/ofl/notosans |
 
 ## yt-dlp — Unlicense
 
@@ -270,28 +269,29 @@ Full text: https://www.gnu.org/licenses/gpl-3.0.html
 
 ## Bundled test fonts — SIL Open Font License 1.1
 
-Three variable fonts are bundled in `assets/fonts` and are laid out into
+One variable font is bundled in `assets/fonts` and is laid out into
 `%LOCALAPPDATA%\Synfronia\fonts` on first launch, so a clean install works
-offline and the font list is never empty. The "Докачать шрифты" button
-re-downloads the same files from the sources below.
+offline and the font list is never empty. The "Reload fonts" button
+re-scans the folder; the "Download fonts" button re-downloads the same
+file from the source below.
 
 | File | Family | Coverage | Upstream file |
 |---|---|---|---|
-| `Inter.ttf` | Inter | Latin, Greek, Cyrillic | `ofl/inter/Inter[opsz,wght].ttf` |
 | `JetBrainsMono.ttf` | JetBrains Mono | Latin, Greek, Cyrillic | `ofl/jetbrainsmono/JetBrainsMono[wght].ttf` |
-| `NotoSans.ttf` | Noto Sans | Latin, Greek, Cyrillic | `ofl/notosans/NotoSans[wdth,wght].ttf` |
 
-Sources: https://github.com/google/fonts (files are unmodified upstream
-binaries). The full license texts are shipped next to the fonts as
-`OFL-Inter.txt`, `OFL-JetBrainsMono.txt`, `OFL-NotoSans.txt` and are copied
-into the user's fonts folder on first launch. Copyright of each font stays
-with its upstream authors:
+Source: https://github.com/google/fonts (unmodified upstream binary).
+The full license text is shipped next to the font as
+`OFL-JetBrainsMono.txt` and is copied into the user's fonts folder on
+first launch. Copyright of the font stays with its upstream authors:
 
-- Inter — Copyright (c) 2016 The Inter Project Authors (https://github.com/rsms/inter)
 - JetBrains Mono — Copyright (c) 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)
-- Noto Sans — Copyright (c) 2012 Google Inc. (https://github.com/notofonts/latin-greek-cyrillic)
 
-CJK glyphs (Japanese, Chinese, Korean) are not covered by these files; the
+Releases up to (but not including) v1.2.7 also bundled Inter and Noto
+Sans under the same OFL-1.1; they were removed from the distribution, so
+their licenses apply only to those older builds (their texts remain in
+the git history and in the corresponding tags).
+
+CJK glyphs (Japanese, Chinese, Korean) are not covered by this file; the
 app falls back to the system font for those scripts.
 
 ## CSS / visual references (rain & liquid-glass effects)
@@ -318,7 +318,7 @@ drop emission effects were re-implemented from scratch.
 ## Color palettes (UI themes)
 
 UI themes are based on publicly shared color palettes published on
-color-hex.com ("Scary Forest", "Technology Day", "Technology Pinks").
+color-hex.com ("Technology Day", "Technology Pinks").
 Palettes are used for UI colors only and are subject to the palettes'
 own terms of use (personal/non-commercial use as stated on
 color-hex.com). Source: https://color-hex.com/
