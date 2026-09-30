@@ -407,10 +407,10 @@ async function waitForPage() {
       features: [{ name: "prefers-reduced-motion", value: "no-preference" }],
     });
     // init() асинхронный, а поля рисует скрипт. Ждём и главное окно, и поля
-    // карточки (группы шрифтов наполняются из get_initial - это radio-inputs).
+    // карточки (ручки шрифтов наполняются позициями из get_initial).
     const READY = '(function () { return !!(window.__initDone && document.getElementById("download")' +
       ' && document.getElementById("font-sans")' +
-      ' && document.getElementById("font-sans").querySelectorAll("input").length > 1); })()';
+      ' && document.getElementById("font-sans").querySelectorAll(".knob-tick").length > 1); })()';
     for (let i = 0; i < 40; i++) {
       if (await evaluate(READY)) break;
       await sleep(100);
@@ -464,45 +464,100 @@ async function waitForPage() {
     console.log("--- разделы и поля ---");
     await evaluate(OVERLAY_OPEN);
     await sleep(300);
-    const seeded = await evaluate('[].slice.call(document.getElementById("font-sans").querySelectorAll("input")).map(function(i){return i.value;}).filter(Boolean)');
+    const seeded = await evaluate('[].slice.call(document.getElementById("font-sans").querySelectorAll(".knob-tick")).map(function(n){return n.getAttribute("data-value");}).filter(Boolean)');
     console.log(`шрифты в списке: ${JSON.stringify(seeded)}`);
-    // две колонки карточки шрифтов: слева четыре группы круговых
-    // переключателей (по строке на группу), справа - предпросмотр
+    // две колонки карточки шрифтов: слева панелька 2x2 из ручек, справа
+    // предпросмотр строкой «{заголовок} - {выбранное семейство}»
     const fontCols = await evaluate(`(function () {
-      function rect(id) {
-        var n = document.getElementById(id);
+      function rect(n) {
         if (!n) return null;
         var r = n.getBoundingClientRect();
         return {l: Math.round(r.left), t: Math.round(r.top),
                 r: Math.round(r.right), b: Math.round(r.bottom),
-                n: n.querySelectorAll("input[type=radio]").length};
+                role: n.getAttribute("role") || "",
+                ticks: n.querySelectorAll(".knob-tick").length};
       }
-      var prev = rect("font-preview");
-      var groups = ["font-heading", "font-sans", "font-mono", "font-weight"].map(rect);
+      var prev = rect(document.getElementById("font-preview"));
+      var groups = ["font-heading", "font-sans", "font-mono", "font-weight"].map(function(id) {
+        return rect(document.getElementById(id));
+      });
+      var cells = [].slice.call(document.querySelectorAll(".knob-cell")).map(rect);
       var txt = document.getElementById("font-preview");
-      return {prev: prev, groups: groups,
-              text: txt ? txt.textContent.replace(/\\s+/g, " ").trim().length : 0};
+      var s = txt ? txt.textContent.replace(/\\s+/g, " ") : "";
+      return {prev: prev, groups: groups, cells: cells,
+              text: s.trim().length,
+              heads: ["Заголовок - ", "Основной текст - ", "Консоль - "].filter(function(h) {
+                return s.indexOf(h) >= 0; }).length,
+              noValue: !document.querySelector(".knob-value")};
     })()`);
     const colChecks = [
-      ["карточка шрифтов: три группы круговых переключателей и ручка",
+      ["карточка шрифтов: четыре ручки slider, у трех есть риски",
         fontCols.groups.length === 4 &&
-          fontCols.groups.slice(0, 3).every(function(g) { return g && g.n > 1; }) &&
-          !!fontCols.groups[3]],
-      ["левая колонка: все группы слева от предпросмотра",
+          fontCols.groups.every(function(g) { return g && g.role === "slider"; }) &&
+          fontCols.groups.slice(0, 3).every(function(g) { return g.ticks > 1; })],
+      ["панелька 2x2: две строки по две ячейки",
+        fontCols.cells.length === 4 &&
+          fontCols.cells[0].t === fontCols.cells[1].t &&
+          fontCols.cells[2].t === fontCols.cells[3].t &&
+          fontCols.cells[0].l === fontCols.cells[2].l &&
+          fontCols.cells[1].l === fontCols.cells[3].l &&
+          fontCols.cells[0].l < fontCols.cells[1].l &&
+          fontCols.cells[2].t > fontCols.cells[0].t],
+      ["левая колонка: все ручки слева от предпросмотра",
         !!fontCols.prev && fontCols.groups.every(function(g) {
           return g && g.l < fontCols.prev.l && g.r <= fontCols.prev.l + 1; })],
-      ["предпросмотр в правой колонке напротив строк",
-        !!fontCols.prev && fontCols.prev.t <= fontCols.groups[0].b &&
-        fontCols.prev.t < fontCols.groups[3].t],
-      ["в предпросмотре есть текст (заголовок, абзац, консоль)",
-        fontCols.text >= 30],
+      ["предпросмотр в правой колонке напротив панельки",
+        !!fontCols.prev && fontCols.prev.t <= fontCols.groups[0].b],
+      ["предпросмотр: три строки «{заголовок} - {шрифт}»",
+        fontCols.heads === 3 && fontCols.text >= 30],
+      ["число веса убрано в подсказку (.knob-value нет)", fontCols.noValue],
       ["общий шрифт = системный + семейства",
-        fontCols.groups[1] && fontCols.groups[1].n === seeded.length + 1],
+        fontCols.groups[1] && fontCols.groups[1].ticks === seeded.length + 1],
     ];
     colChecks.forEach(([name, okFlag]) => { if (!okFlag) fail(name); });
-    console.log(`  колонки шрифтов: группы=[${fontCols.groups.map(function(g) {
-      return g ? g.n : "x"; }).join(",")}] предпросмотр l=${fontCols.prev ? fontCols.prev.l : "?"}` +
-      ` текст=${fontCols.text}`);
+    console.log(`  панелька шрифтов: риски=[${fontCols.groups.map(function(g) {
+      return g ? g.ticks : "x"; }).join(",")}] ячеек=${fontCols.cells.length}` +
+      ` предпросмотр l=${fontCols.prev ? fontCols.prev.l : "?"} строк=${fontCols.heads}`);
+    // ручка шрифта: колесо меняет семейство - сохраняется, попадает в
+    // предпросмотр строкой «Заголовок - {семейство}», подсказка ручки
+    // набрана этим же семейством
+    await evaluate('document.getElementById("font-heading").scrollIntoView({block: "center"}); true');
+    await sleep(80);
+    const hBox = await evaluate(`(function () {
+      var k = document.getElementById("font-heading");
+      var r = k.getBoundingClientRect();
+      return {x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2),
+              v0: k.value, ticks: k.querySelectorAll(".knob-tick").length};
+    })()`);
+    await send("Input.dispatchMouseEvent", {type: "mouseMoved", x: hBox.x, y: hBox.y});
+    await sleep(80);
+    await send("Input.dispatchMouseEvent", {type: "mouseWheel", x: hBox.x, y: hBox.y,
+      deltaX: 0, deltaY: -120});
+    await sleep(350);   // больше TIP_DELAY(220): подсказка успевает показаться
+    const fontWheel = await evaluate(`(function () {
+      var k = document.getElementById("font-heading");
+      var s = (window.__probe.saved || []).filter(function (x) {
+        return x[0] === "font_heading"; }).slice(-1)[0];
+      var prev = document.getElementById("font-preview").textContent.replace(/\\s+/g, " ");
+      var tip = document.getElementById("tip");
+      return {v: k.value, saved: s,
+              inPreview: prev.indexOf("Заголовок - " + k.value) >= 0,
+              tipHidden: tip.hidden, tipText: (tip.textContent || "").trim(),
+              tipFont: getComputedStyle(tip).fontFamily};
+    })()`);
+    if (!(typeof fontWheel.v === "string" && fontWheel.v && fontWheel.v !== hBox.v0 &&
+          fontWheel.saved && fontWheel.saved[1] === fontWheel.v && fontWheel.inPreview)) {
+      fail("ручка шрифта: колесо не сменило семейство/не сохранилось/нет в предпросмотре: " +
+           JSON.stringify({hBox: hBox, fontWheel: fontWheel}));
+    }
+    if (!(fontWheel.tipHidden === false && fontWheel.tipText === fontWheel.v &&
+          fontWheel.tipFont.indexOf(fontWheel.v) >= 0)) {
+      fail("подсказка ручки шрифта не показана её же шрифтом: " + JSON.stringify(fontWheel));
+    }
+    // возвращаем семейство: ниже заголовки меряются в шести языках
+    await send("Input.dispatchMouseEvent", {type: "mouseWheel", x: hBox.x, y: hBox.y,
+      deltaX: 0, deltaY: 120});
+    await sleep(200);
     // бесконечная ручка толщины: слайдер с диапазоном100..900, колесо и
     // горизонтальное перетаскивание крутят её, шаг квантован
     // (scrollIntoView: ручка в конце карточки - ниже фолда, CDP-мышь
@@ -560,6 +615,19 @@ async function waitForPage() {
       }
       console.log(`  ручка толщины: ${knobBox.v0} -> колесо ${v1} -> перетаскивание ${v2.v}` +
         ` сохранено=${JSON.stringify(v2.saved)}`);
+      // число убрано из-под ручки - подсказка показывает вес в процентах
+      await send("Input.dispatchMouseEvent",
+        {type: "mouseMoved", x: knobBox.x, y: knobBox.y});
+      await sleep(350);
+      const wTip = await evaluate(`(function () {
+        var t = document.getElementById("tip");
+        return {hidden: t.hidden, text: (t.textContent || "").trim()};
+      })()`);
+      if (!(wTip.hidden === false && wTip.text.indexOf("%") === wTip.text.length - 1 &&
+            wTip.text.indexOf("Толщина") >= 0)) {
+        fail("подсказка веса не «Толщина шрифта - N%»: " + JSON.stringify(wTip));
+      }
+      console.log(`  подсказка веса: "${wTip.text}"`);
     }
     for (const lang of LANGS) {
       const m = await evaluate(`(function () {
@@ -903,7 +971,9 @@ async function waitForPage() {
       await mouseMove(forceBtn.cx - 9, forceBtn.cy - 7);   // встряска: иначе
       await sleep(80);                                     // pointermove в точку
       await mouseMove(forceBtn.cx, forceBtn.cy);           // не перезапускает кадры
-      await sleep(450);
+      // углу нужно сойтись к новой стороне (0.45 рад/кадр ~6 кадров); под
+      // нагрузкой кадры идут медленнее -800 мс запас против флаки
+      await sleep(800);
       return evaluate(`(function () {
         var t = document.getElementById("tip"), el = document.getElementById("probe-tip-force");
         var tr = t.getBoundingClientRect(), er = el.getBoundingClientRect();
@@ -911,6 +981,9 @@ async function waitForPage() {
                         tr.bottom <= er.top || tr.top >= er.bottom);
         return {hidden: t.hidden, overlap: overlap,
                 tx: TIP.tx, ty: TIP.ty,
+                ang: Math.round(TIP.ang * 180 / Math.PI),
+                target: TIP.target ? (TIP.target.id || "") : "",
+                raf: TIP.raf,
                 force: {pull: TIP_FORCE.pull, repel: TIP_FORCE.repel},
                 rect: [Math.round(tr.left), Math.round(tr.top),
                        Math.round(tr.width), Math.round(tr.height)]};
@@ -961,7 +1034,9 @@ async function waitForPage() {
                                       p.rect[1] + p.rect[3] / 2 - forceBtn.cy);
     if (far.hidden || near.hidden || !(distCur(far) > distCur(near) + 15)) {
       fail("pull не меняет расстояние до курсора в прогрессии: " +
-           JSON.stringify({far: Math.round(distCur(far)), near: Math.round(distCur(near))}));
+           JSON.stringify({far: Math.round(distCur(far)), near: Math.round(distCur(near)),
+             farA: far.ang, nearA: near.ang, farF: far.force, nearF: near.force,
+             farT: far.target, farRaf: far.raf, farRect: far.rect}));
     }
     await setForces(50, 100);                            // вернуть дефолты
     await evaluate('var b = document.getElementById("probe-tip-force"); if (b) b.remove(); true');
