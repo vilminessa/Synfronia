@@ -262,6 +262,12 @@
     TIP.pending = null;
     TIP.shown = false;
     TIP.ang = null;
+    // подсказка может набираться выбранным шрифтом (опции переключателей
+    // шрифтов несут data-tip-font) - иначе название показалось бы системным
+    var fam = (el.getAttribute("data-tip-font") || "").trim();
+    TIP.node.style.fontFamily = fam
+      ? quoted(fam) + ', var(--font-sans, "Segoe UI"), system-ui, sans-serif'
+      : "";
     TIP.text.textContent = text;
     el.setAttribute("aria-describedby", "tip");
     TIP.node.hidden = false;

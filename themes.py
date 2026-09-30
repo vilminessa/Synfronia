@@ -22,7 +22,7 @@ import ui as _ui
 from version import __version__
 
 from i18n import I18N
-from fonts import _clean_family, families as _loaded_families, font_css, font_vars
+from fonts import _clean_family, families as _loaded_families, font_css, font_vars, load_fonts
 from paths import _file_log, base_dir
 
 
@@ -1190,7 +1190,13 @@ def _fill_placeholders(template: str, theme: dict, picked: dict) -> str:
     раньше отдельное окно: в своём entry-шаблоне темы его может не быть, и
     тогда разметку добавляет _ensure_settings.
     """
-    fonts_css = font_css([picked["sans"], picked["mono"], picked.get("head") or ""])
+    # Встраиваем все семейства, а не только выбранные: подсказки опций
+    # переключателей шрифтов набираются самим шрифтом (data-tip-font),
+    # поэтому @font-face нужен каждому семейству из списка. Лимит
+    # fonts.MAX_TOTAL_BYTES защищает от раздувания страницы.
+    all_fams = list((load_fonts() or {}).keys())
+    fonts_css = font_css(list(dict.fromkeys(
+        [picked["sans"], picked["mono"], picked.get("head") or ""] + all_fams)))
     page = template.replace("__THEME_ROOT__", _palette_root_vars(theme, picked))
     page = page.replace("__THEME_CSS__", theme.get("css") or "")
     page = page.replace("__FONTS_CSS__", fonts_css)

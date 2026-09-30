@@ -13,13 +13,14 @@ settings.json получается из группы и ключа: у груп�
 
 Описание поля
     key          путь внутри группы
-    type         bool | int | text | password | choice | choice_buttons | radio | actions | note
+    type         bool | int | text | password | choice | choice_buttons | radio | knob | actions | note
     label        ключ i18n с подписью
     title        ключ i18n с подсказкой (необязательно)
     note         ключ i18n с пояснением под полем
     note_source  имя JS-функции, которая заполняет пояснение (themeMeta, ...)
     default      значение по умолчанию
-    min/max/step ограничения для int
+    min/max/step ограничения для int и knob (knob - круговая ручка:
+                 значения квантуются по step)
     options      [["значение", "подпись"], ...] для choice/choice_buttons/radio; подпись
                  - это ключ i18n, если он есть в языке, иначе сам текст
     options_source  "langs" | "themes" | "fonts" - список из runtime
@@ -58,7 +59,7 @@ settings.json получается из группы и ключа: у груп�
 
 from version import __version__  # единый источник версии приложения
 
-TYPES = ("bool", "int", "text", "password", "choice", "choice_buttons", "radio", "actions", "note")
+TYPES = ("bool", "int", "text", "password", "choice", "choice_buttons", "radio", "knob", "actions", "note")
 
 # Общие настройки интерфейса. Порядок вкладок задаётся полем order.
 CORE_GROUPS = [
@@ -89,10 +90,9 @@ CORE_GROUPS = [
             {"key": "font_mono", "type": "radio", "label": "sheet.font.mono",
              "default": "", "options_source": "fonts_mono", "dom": "font-mono",
              "box": "fonts", "live": True},
-            {"key": "font_weight", "type": "radio", "label": "sheet.font.weight",
-             "default": "400", "dom": "font-weight", "box": "fonts", "live": True,
-             "options": [["300", "300"], ["400", "400"], ["500", "500"],
-                         ["600", "600"], ["700", "700"]]},
+            {"key": "font_weight", "type": "knob", "label": "sheet.font.weight",
+             "default": 400, "min": 100, "max": 900, "step": 10,
+             "dom": "font-weight", "box": "fonts", "live": True},
             # предпросмотр: три строки на выбранных шрифтах, заполняет
             # settings.js (NOTE_FILLERS.fontPreview) и обновляется при смене
             {"type": "note", "transient": True, "dom": "font-preview",
@@ -246,6 +246,15 @@ def coerce(key: str, value):
         if isinstance(value, str):
             return value.strip().lower() in ("1", "true", "on", "yes", "да")
         return bool(value)
+    if kind == "knob":
+        # круговая ручка: как int, но значение квантуется по step
+        low, high = int(spec.get("min", 0)), int(spec.get("max", 100))
+        step = max(1, int(spec.get("step", 1)))
+        try:
+            num = int(round(float(value) / step)) * step
+        except (TypeError, ValueError):
+            return spec.get("default", low)
+        return max(low, min(high, num))
     if kind == "int":
         low, high = spec.get("min"), spec.get("max")
         try:

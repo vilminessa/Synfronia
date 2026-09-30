@@ -88,6 +88,9 @@
   // Круговые переключатели: [["значение", "подпись"], ...] -> radio-inputs в
   // контейнере. Значения - строки; выбранное помечается по keep (иначе по
   // текущему checked), отсутствующее значение падает на "" / первый вариант.
+  // FL-style: у input - утопленный кружок, рядом огонёк .led (загорается при
+  // checked, «щелчок» - переход с перелётом в CSS); подсказка опции -
+  // название шрифта, набранное этим же шрифтом (data-tip-font).
   function fillRadios(wrap, opts, keep) {
     if (!wrap || !opts || !opts.length) return;
     var prev = keep !== undefined && keep !== null ? String(keep) : String(wrap.value || "");
@@ -95,9 +98,12 @@
     opts.forEach(function(o) {
       var lab = el("label", "radio");
       lab.appendChild(el("input", null, {type: "radio", name: wrap.id, value: String(o[0])}));
+      lab.appendChild(el("i", "led"));
       var txt = el("span");
       txt.textContent = t(o[1]);
       lab.appendChild(txt);
+      lab.setAttribute("data-tip-font", String(o[0]));
+      setTip(lab, txt.textContent);
       wrap.appendChild(lab);
     });
     var inputs = [].slice.call(wrap.querySelectorAll("input"));
@@ -230,6 +236,93 @@
                 var hit = inputs.filter(function(i) { return i.value === want; })[0];
                 if (!hit) hit = inputs.filter(function(i) { return i.value === ""; })[0] || inputs[0];
                 inputs.forEach(function(i) { i.checked = i === hit; });
+              }};
+    }
+    if (spec.type === "knob") {
+      // Бесконечная круговая ручка: угол накапливается без упора (оборот -
+      // ровно одно деление шкалы сверху значения: min..max по кругу, max
+      // замыкается на min), значение квантуется по step. Крутится перетаскиванием
+      // по горизонтали, колёсом при наведении и стрелками с клавиатуры.
+      var step = spec.step || 10, lo = spec.min, hi = spec.max;
+      var nSteps = Math.round((hi - lo) / step) + 1;   // позиций на шкале
+      var SA = 360 / nSteps;                            // градусов на шаг
+      var ang = 0, cur = spec.default;
+      function norm(a) { return ((a % 360) + 360) % 360; }
+      function valueAt(a) { return lo + Math.round(norm(a) / SA) % nSteps * step; }
+      function angleFor(v) { return (v - lo) / step * SA; }
+      var kwrap = el("div", "knob", {
+        id: spec.dom, role: "slider", tabindex: "0",
+        "aria-label": t(spec.label),
+        "aria-valuemin": String(lo), "aria-valuemax": String(hi)});
+      var ind = el("i", "knob-ind");
+      var val = el("span", "knob-value");
+      kwrap.appendChild(ind);
+      Object.defineProperty(kwrap, "value", {get: function() { return cur; }});
+      function paint() {
+        ind.style.transform = "rotate(" + norm(ang).toFixed(2) + "deg)";
+        val.textContent = String(cur);
+        kwrap.setAttribute("aria-valuenow", String(cur));
+        kwrap.setAttribute("aria-valuetext", String(cur));
+      }
+      function commit(nv) {
+        if (nv !== cur) {
+          cur = nv;
+          kwrap.dispatchEvent(new Event("change", {bubbles: true}));
+        }
+        paint();
+      }
+      kwrap.addEventListener("pointerdown", function(ev) {
+        kwrap.focus({preventScroll: true});   // fillSettings не трогает поле в фокусе
+        kwrap.setPointerCapture(ev.pointerId);
+        kwrap.classList.add("dragging");
+        var lx = ev.clientX;
+        var move = function(e2) {
+          ang += (e2.clientX - lx) * 1.2;
+          lx = e2.clientX;
+          commit(valueAt(ang));
+        };
+        var up = function() {
+          kwrap.classList.remove("dragging");
+          kwrap.removeEventListener("pointermove", move);
+          kwrap.removeEventListener("pointerup", up);
+          kwrap.removeEventListener("pointercancel", up);
+          ang = angleFor(cur);           // доснапить к ближайшей ступени
+          paint();
+        };
+        kwrap.addEventListener("pointermove", move);
+        kwrap.addEventListener("pointerup", up);
+        kwrap.addEventListener("pointercancel", up);
+      });
+      kwrap.addEventListener("wheel", function(ev) {
+        ev.preventDefault();
+        kwrap.focus({preventScroll: true});   // и колесо под фокусом: poll не откатит
+        ang += (ev.deltaY < 0 ? SA : -SA);
+        commit(valueAt(ang));
+      }, {passive: false});
+      kwrap.addEventListener("keydown", function(ev) {
+        var d = 0;
+        if (ev.key === "ArrowUp" || ev.key === "ArrowRight") d = SA;
+        else if (ev.key === "ArrowDown" || ev.key === "ArrowLeft") d = -SA;
+        else if (ev.key === "Home") { ev.preventDefault(); ang = angleFor(lo); commit(lo); return; }
+        else if (ev.key === "End") { ev.preventDefault(); ang = angleFor(hi); commit(hi); return; }
+        if (!d) return;
+        ev.preventDefault();
+        ang += d;
+        commit(valueAt(ang));
+      });
+      var kcell = el("div", "radio-field");
+      kcell.appendChild(labelNode(spec));
+      kcell.appendChild(el("div", "knob-row", [kwrap, val]));
+      paint();
+      return {nodes: [kcell], input: kwrap,
+              get: function() { return cur; },
+              set: function(v) {
+                var n = Number(v);
+                if (!isFinite(n)) n = spec.default;
+                n = Math.max(lo, Math.min(hi, Math.round(n / step) * step));
+                cur = n;
+                ang = angleFor(n);
+                paint();
               }};
     }
     if (spec.type === "choice") {
@@ -519,13 +612,8 @@
   function fillSchemaChoices() {
     Object.keys(panelFields).forEach(function(key) {
       var f = panelFields[key], spec = f.spec;
-      if (spec.type === "choice" && spec.options) {
-        fillSelectNode(f.input, spec.options, true);
-        return;
-      }
-      if (spec.type === "radio" && spec.options) {
-        fillRadios(f.input, spec.options, f.get ? f.get() : null);
-      }
+      if (spec.type !== "choice" || !spec.options) return;
+      fillSelectNode(f.input, spec.options, true);
     });
   }
 
