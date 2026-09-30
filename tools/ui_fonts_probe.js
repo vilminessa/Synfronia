@@ -484,8 +484,10 @@ async function waitForPage() {
               text: txt ? txt.textContent.replace(/\\s+/g, " ").trim().length : 0};
     })()`);
     const colChecks = [
-      ["карточка шрифтов: четыре группы круговых переключателей",
-        fontCols.groups.length === 4 && fontCols.groups.every(function(g) { return g && g.n > 1; })],
+      ["карточка шрифтов: три группы круговых переключателей и ручка",
+        fontCols.groups.length === 4 &&
+          fontCols.groups.slice(0, 3).every(function(g) { return g && g.n > 1; }) &&
+          !!fontCols.groups[3]],
       ["левая колонка: все группы слева от предпросмотра",
         !!fontCols.prev && fontCols.groups.every(function(g) {
           return g && g.l < fontCols.prev.l && g.r <= fontCols.prev.l + 1; })],
@@ -494,8 +496,6 @@ async function waitForPage() {
         fontCols.prev.t < fontCols.groups[3].t],
       ["в предпросмотре есть текст (заголовок, абзац, консоль)",
         fontCols.text >= 30],
-      ["группа толщины - пять вариантов (300..700)",
-        fontCols.groups[3] && fontCols.groups[3].n === 5],
       ["общий шрифт = системный + семейства",
         fontCols.groups[1] && fontCols.groups[1].n === seeded.length + 1],
     ];
@@ -503,6 +503,64 @@ async function waitForPage() {
     console.log(`  колонки шрифтов: группы=[${fontCols.groups.map(function(g) {
       return g ? g.n : "x"; }).join(",")}] предпросмотр l=${fontCols.prev ? fontCols.prev.l : "?"}` +
       ` текст=${fontCols.text}`);
+    // бесконечная ручка толщины: слайдер с диапазоном100..900, колесо и
+    // горизонтальное перетаскивание крутят её, шаг квантован
+    // (scrollIntoView: ручка в конце карточки - ниже фолда, CDP-мышь
+    //  не дотянется до координат за пределами вьюпорта)
+    await evaluate('document.getElementById("font-weight").scrollIntoView({block: "center"}); true');
+    await sleep(80);
+    const knobBox = await evaluate(`(function () {
+      var k = document.getElementById("font-weight");
+      if (!k) return null;
+      var r = k.getBoundingClientRect();
+      var at = document.elementFromPoint(Math.round(r.left + r.width / 2),
+                                         Math.round(r.top + r.height / 2));
+      return {x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2),
+              v0: k.value, role: k.getAttribute("role"),
+              min: k.getAttribute("aria-valuemin"), max: k.getAttribute("aria-valuemax"),
+              ind: !!k.querySelector(".knob-ind"),
+              at: at ? (at.id || at.className || at.tagName) : null,
+              inKnob: !!(at && (at === k || k.contains(at)))};
+    })()`);
+    if (!(knobBox && knobBox.role === "slider" && knobBox.min === "100" &&
+          knobBox.max === "900" && knobBox.ind)) {
+      fail("ручка толщины не slider/без диапазона/без индикатора: " + JSON.stringify(knobBox));
+    } else {
+      await send("Input.dispatchMouseEvent",
+        {type: "mouseMoved", x: knobBox.x, y: knobBox.y});
+      await sleep(80);
+      await send("Input.dispatchMouseEvent", {type: "mouseWheel", x: knobBox.x,
+        y: knobBox.y, deltaX: 0, deltaY: -120});
+      await sleep(120);
+      const v1 = await evaluate('document.getElementById("font-weight").value');
+      if (!(typeof v1 === "number" && v1 !== knobBox.v0 && v1 >= 100 && v1 <= 900 &&
+            v1 % 10 === 0)) {
+        fail("колесо не крутит ручку: " + JSON.stringify({v0: knobBox.v0, v1: v1,
+          at: knobBox.at, inKnob: knobBox.inKnob, xy: [knobBox.x, knobBox.y]}));
+      }
+      // горизонтальное перетаскивание зажатой мышью
+      await send("Input.dispatchMouseEvent", {type: "mousePressed", x: knobBox.x,
+        y: knobBox.y, button: "left", buttons: 1, clickCount: 1});
+      await send("Input.dispatchMouseEvent", {type: "mouseMoved", x: knobBox.x + 170,
+        y: knobBox.y, button: "left", buttons: 1});
+      await sleep(80);
+      await send("Input.dispatchMouseEvent", {type: "mouseReleased", x: knobBox.x + 170,
+        y: knobBox.y, button: "left", buttons: 0, clickCount: 1});
+      await sleep(120);
+      const v2 = await evaluate(`(function () {
+        var k = document.getElementById("font-weight");
+        var s = (window.__probe.saved || []).filter(function (x) {
+          return x[0] === "font_weight"; }).slice(-1)[0];
+        return {v: k.value, saved: s};
+      })()`);
+      if (!(typeof v2.v === "number" && v2.v !== v1 && v2.v >= 100 && v2.v <= 900 &&
+            v2.v % 10 === 0 && v2.saved && v2.saved[1] === v2.v)) {
+        fail("перетаскивание не круто или не сохранилось: " +
+             JSON.stringify({v1: v1, v2: v2}));
+      }
+      console.log(`  ручка толщины: ${knobBox.v0} -> колесо ${v1} -> перетаскивание ${v2.v}` +
+        ` сохранено=${JSON.stringify(v2.saved)}`);
+    }
     for (const lang of LANGS) {
       const m = await evaluate(`(function () {
         curLang = ${JSON.stringify(lang)}; applyI18n(); return ${WIN_MEASURE};

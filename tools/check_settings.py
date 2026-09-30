@@ -83,6 +83,9 @@ COERCE_CASES = [
     ("ftp_pasv", "нет", False),
     ("quality", "huge", "lossless"),
     ("quality", "1080", "1080"),
+    ("font_weight", "555", 560),     # knob: квантование по step10
+    ("font_weight", "95", 100),      # knob: нижняя граница
+    ("font_weight", "нет", 400),     # knob: битое значение -> умолчание
     ("ftp_mode", "nope", "batch"),
     ("transcode", "av1", "none"),
     ("theme", "моя тема", "моя тема"),   # список опций динамический - не проверяем

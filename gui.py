@@ -315,9 +315,13 @@ class Api:
         откатился бы на системный.
         """
         theme = (themes_embed() or {}).get(self.settings.get("theme", "scarred_mind")) or {}
-        return font_css([theme.get("font") or self.settings.get("font_sans") or "",
-                         theme.get("font_mono") or self.settings.get("font_mono") or "",
-                         self.settings.get("font_heading") or ""])
+        # все семейства, а не только выбранные: подсказки опций шрифтов
+        # набираются самим шрифтом (см. themes._fill_placeholders)
+        return font_css(list(dict.fromkeys(
+            [theme.get("font") or self.settings.get("font_sans") or "",
+             theme.get("font_mono") or self.settings.get("font_mono") or "",
+             self.settings.get("font_heading") or ""]
+            + list((load_fonts() or {}).keys()))))
 
     def font_face_css(self, families) -> str:
         """@font-face для произвольных семейств.
@@ -328,7 +332,9 @@ class Api:
         """
         if isinstance(families, str):
             families = [families]
-        return font_css([str(f or "") for f in (families or [])])
+        return font_css(list(dict.fromkeys(
+            [str(f or "") for f in (families or [])]
+            + list((load_fonts() or {}).keys()))))
 
     def set_font(self, key: str, value: str) -> dict:
         """Сохраняет выбранный шрифт и отдаёт @font-face для активной темы.
