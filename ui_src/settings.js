@@ -184,26 +184,53 @@
               get: readMode, set: function(v) { setModeValue(wrap, v); }};
     }
     if (spec.type === "knob") {
-      // Круговая ручка. Два режима: числовая шкала (min/max/step - толщина
-      // шрифта) и позиционный список (шрифты: позиции приходят из runtime,
-      // вокруг риски, активная подсвечена - визуальный «щелчок» детента;
-      // подсказка показывает выбранное семейство его же шрифтом). Крутится
-      // перетаскиванием по горизонтали, колёсом и стрелками; ход без упора.
+      // Круговая ручка. Два режима. Позиционный (шрифты): конечная дуга
+      // 270° со стартом слева-внизу - «нулевая точка» снизу, упоры на
+      // концах, зацикливания нет; магнит - индикатор всегда сидит на
+      // позиции щелчка. Числовая (толщина): бесконечная - обороты
+      // накапливаются, значение крутится через ноль. Оба режима вращаются
+      // плавно: целевой угол догоняется по rAF с МАКСИМУМОМ скорости
+      // (1080 град/с) и экспоненциальным замедлением - даже бурст колеса
+      // не раскручивает ручку быстрее этого.
       var numeric = spec.min !== undefined && spec.max !== undefined;
       var step = spec.step || 10, lo = spec.min, hi = spec.max;
       var positions = [];              // позиционная: [{value, label}]
-      var ang = 0;
+      var A0 = 225, SWEEP = 270;       // дуга:225° - слева-внизу (ноль)
+      var raw = 0;                     // накопленный угол ввода
+      var disp = 0;                    // показываемый угол (анимация)
       var cur = numeric ? spec.default : (spec.default || "");
       var idx = 0;                     // позиционная: индекс выбранной позиции
+      var raf = 0, lastT = 0;
       function norm(a) { return ((a % 360) + 360) % 360; }
       function nSteps() {
         return numeric ? Math.round((hi - lo) / step) + 1 : positions.length;
       }
       function sa() { return 360 / Math.max(nSteps(), 1); }
+      function sweepStep() { return SWEEP / Math.max(positions.length - 1, 1); }
+      function clampRaw(a) { return Math.max(A0, Math.min(A0 + SWEEP, a)); }
+      function angForIdx(i) { return A0 + i * sweepStep(); }
+      function idxAt(a) {
+        var n = positions.length;
+        if (n <= 1) return 0;
+        return Math.max(0, Math.min(n - 1,
+          Math.round((clampRaw(a) - A0) / SWEEP * (n - 1))));
+      }
       function valueAt(a) {
         return lo + (Math.round(norm(a) / sa()) % nSteps()) * step;
       }
       function angleFor(v) { return (v - lo) / step * sa(); }
+      // ближайший к текущему raw путь к желаемому углу (Home/End числа)
+      function retarget(desiredNorm) {
+        var d = desiredNorm - norm(raw);
+        while (d > 180) d -= 360;
+        while (d < -180) d += 360;
+        raw += d;
+      }
+      // целевой угол: позиционная - позиция щелчка (магнит), числовая -
+      // ближайшая ступень накопленного угла (обороты не сбрасываются)
+      function targetAng() {
+        return numeric ? Math.round(raw / sa()) * sa() : angForIdx(idx);
+      }
       function pct() { return Math.round((cur - lo) / (hi - lo) * 100); }
       var kwrap = el("div", "knob", {
         id: spec.dom, role: "slider", tabindex: "0",
@@ -220,7 +247,7 @@
         var n = Math.max(positions.length, 1);
         for (var i = 0; i < n; i++) {
           var tk = el("i", "knob-tick" + (i === idx ? " on" : ""));
-          tk.style.transform = "rotate(" + i * 360 / n + "deg) translateY(-14px)";
+          tk.style.transform = "rotate(" + angForIdx(i) + "deg) translateY(-14px)";
           tk.setAttribute("data-value", positions[i] ? String(positions[i].value) : "");
           kwrap.appendChild(tk);
         }
@@ -230,7 +257,7 @@
         return (positions[idx] && positions[idx].label) || String(cur);
       }
       function paint() {
-        ind.style.transform = "rotate(" + norm(ang).toFixed(2) + "deg)";
+        ind.style.transform = "rotate(" + disp.toFixed(2) + "deg)";
         var text = tipText();
         setTip(kwrap, text);
         // setTip пишет aria-label узлу без текста - возвращаем подпись поля
@@ -251,23 +278,46 @@
           TIP.node.style.fontFamily = tipFontFamily(kwrap);
         }
       }
+      // анимация: к целевому углу - с потолком скорости и затуханием;
+      // на месте точное прилипание (магнит к позиции щелчка)
+      function tick() {
+        raf = 0;
+        var now = performance.now();
+        var dt = Math.min(0.25, Math.max(0.001, (now - lastT) / 1000));
+        lastT = now;
+        var d = targetAng() - disp;
+        if (Math.abs(d) < 0.15) { disp = targetAng(); paint(); return; }
+        var speed = Math.min(1080 * dt, Math.abs(d) * (1 - Math.exp(-dt / 0.09)) + 60 * dt);
+        disp += (d > 0 ? 1 : -1) * Math.min(Math.abs(d), speed);
+        paint();
+        raf = requestAnimationFrame(tick);
+      }
+      function kick() {
+        if (raf) return;
+        lastT = performance.now();
+        raf = requestAnimationFrame(tick);
+      }
       function commit(nv) {
         if (nv !== cur) {
           cur = nv;
           kwrap.dispatchEvent(new Event("change", {bubbles: true}));
         }
-        paint();
       }
-      function applyAngle() {
-        if (numeric) { commit(valueAt(ang)); return; }
-        var n = Math.max(positions.length, 1);
-        var ni = Math.round(norm(ang) / sa()) % n;
-        if (ni !== idx) {
-          idx = ni;
-          cur = positions[idx] ? positions[idx].value : cur;
-          renderTicks();
-          kwrap.dispatchEvent(new Event("change", {bubbles: true}));
+      // ввод изменил raw: новое значение + анимация к позиции
+      function applyInput() {
+        if (numeric) {
+          commit(valueAt(raw));
+        } else {
+          raw = clampRaw(raw);           // упоры: за дугу270° не выходим
+          var ni = idxAt(raw);
+          if (ni !== idx) {
+            idx = ni;
+            cur = positions[idx] ? positions[idx].value : cur;
+            renderTicks();
+            kwrap.dispatchEvent(new Event("change", {bubbles: true}));
+          }
         }
+        kick();
         paint();
       }
       kwrap.addEventListener("pointerdown", function(ev) {
@@ -276,17 +326,17 @@
         kwrap.classList.add("dragging");
         var lx = ev.clientX;
         var move = function(e2) {
-          ang += (e2.clientX - lx) * 1.2;
+          raw += (e2.clientX - lx) * 1.2;
           lx = e2.clientX;
-          applyAngle();
+          applyInput();
         };
         var up = function() {
           kwrap.classList.remove("dragging");
           kwrap.removeEventListener("pointermove", move);
           kwrap.removeEventListener("pointerup", up);
           kwrap.removeEventListener("pointercancel", up);
-          ang = numeric ? angleFor(cur) : idx * sa();   // доснапить к позиции
-          paint();
+          if (numeric) raw = Math.round(raw / sa()) * sa();
+          applyInput();                    // магнит дожимает к позиции
         };
         kwrap.addEventListener("pointermove", move);
         kwrap.addEventListener("pointerup", up);
@@ -295,29 +345,32 @@
       kwrap.addEventListener("wheel", function(ev) {
         ev.preventDefault();
         kwrap.focus({preventScroll: true});   // и колесо под фокусом: poll не откатит
-        ang += (ev.deltaY < 0 ? sa() : -sa());
-        applyAngle();
+        var s = numeric ? sa() : sweepStep();
+        raw += (ev.deltaY < 0 ? s : -s);      // на упоре clampRaw не пустит дальше
+        applyInput();
       }, {passive: false});
       kwrap.addEventListener("keydown", function(ev) {
         if (ev.key === "Home") {
           ev.preventDefault();
-          if (numeric) { ang = angleFor(lo); commit(lo); }
-          else { ang = 0; applyAngle(); }
+          if (numeric) { retarget(0); }
+          else { raw = A0; }
+          applyInput();
           return;
         }
         if (ev.key === "End") {
           ev.preventDefault();
-          if (numeric) { ang = angleFor(hi); commit(hi); }
-          else { ang = (Math.max(positions.length, 1) - 1) * sa(); applyAngle(); }
+          if (numeric) { retarget(angleFor(hi)); }
+          else { raw = A0 + SWEEP; }
+          applyInput();
           return;
         }
         var d = 0;
-        if (ev.key === "ArrowUp" || ev.key === "ArrowRight") d = sa();
-        else if (ev.key === "ArrowDown" || ev.key === "ArrowLeft") d = -sa();
+        if (ev.key === "ArrowUp" || ev.key === "ArrowRight") d = 1;
+        else if (ev.key === "ArrowDown" || ev.key === "ArrowLeft") d = -1;
         if (!d) return;
         ev.preventDefault();
-        ang += d;
-        applyAngle();
+        raw += d * (numeric ? sa() : sweepStep());
+        applyInput();
       });
       // позиции приходят снаружи (buildFontOptions): пересобираем риски и
       // возвращаем индекс к текущему значению
@@ -330,13 +383,16 @@
           if (positions[i].value === String(cur)) { idx = i; break; }
         }
         kwrap.setAttribute("aria-valuemax", String(Math.max(positions.length - 1, 0)));
-        ang = idx * sa();
+        raw = angForIdx(idx);
         renderTicks();
+        kick();
         paint();
       };
       var kcell = el("div", "knob-cell");
       kcell.appendChild(labelNode(spec));
       kcell.appendChild(kwrap);
+      raw = numeric ? angleFor(cur) : angForIdx(idx);
+      disp = raw;
       paint();
       return {nodes: [kcell], input: kwrap,
               get: function() { return cur; },
@@ -345,16 +401,17 @@
                   var n = Number(v);
                   if (!isFinite(n)) n = spec.default;
                   n = Math.max(lo, Math.min(hi, Math.round(n / step) * step));
-                  cur = n;
-                  ang = angleFor(n);
+                  retarget(angleFor(n));
+                  commit(n);
                 } else {
                   cur = v === undefined || v === null ? (spec.default || "") : String(v);
                   idx = 0;
                   for (var i = 0; i < positions.length; i++) {
                     if (positions[i].value === cur) { idx = i; break; }
                   }
-                  ang = idx * sa();
+                  raw = angForIdx(idx);
                 }
+                kick();
                 paint();
               }};
     }

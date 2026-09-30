@@ -558,6 +558,30 @@ async function waitForPage() {
     await send("Input.dispatchMouseEvent", {type: "mouseWheel", x: hBox.x, y: hBox.y,
       deltaX: 0, deltaY: 120});
     await sleep(200);
+    // упоры шкалы: дуга конечна - вниз от нуля и вверх от максимума
+    // колесо не двигает позицию (зацикливания нет)
+    const readFontKnob = () => evaluate('document.getElementById("font-heading").value');
+    const vAtStop = await readFontKnob();
+    await send("Input.dispatchMouseEvent", {type: "mouseWheel", x: hBox.x, y: hBox.y,
+      deltaX: 0, deltaY: 120});                     // вниз: у нулевой точки
+    await sleep(150);
+    const vLow = await readFontKnob();
+    await send("Input.dispatchMouseEvent", {type: "mouseWheel", x: hBox.x, y: hBox.y,
+      deltaX: 0, deltaY: -120});                    // до максимума...
+    await sleep(150);
+    await send("Input.dispatchMouseEvent", {type: "mouseWheel", x: hBox.x, y: hBox.y,
+      deltaX: 0, deltaY: -120});                    // ...и ещё вверх: упор
+    await sleep(150);
+    const vHigh = await readFontKnob();
+    await send("Input.dispatchMouseEvent", {type: "mouseWheel", x: hBox.x, y: hBox.y,
+      deltaX: 0, deltaY: 120});                     // обратно к нулю
+    await sleep(150);
+    const vBack = await readFontKnob();
+    if (!(vAtStop === "" && vLow === "" && vHigh !== "" && vHigh !== vLow && vBack === "")) {
+      fail("упоры шкалы шрифта не работают (циклирование?): " + JSON.stringify(
+        {vAtStop: vAtStop, vLow: vLow, vHigh: vHigh, vBack: vBack}));
+    }
+    console.log(`  упоры шкалы: "${vAtStop}" -> вниз "${vLow}" -> вверх "${vHigh}" -> "${vBack}"`);
     // бесконечная ручка толщины: слайдер с диапазоном100..900, колесо и
     // горизонтальное перетаскивание крутят её, шаг квантован
     // (scrollIntoView: ручка в конце карточки - ниже фолда, CDP-мышь

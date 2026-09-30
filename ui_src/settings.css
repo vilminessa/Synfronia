@@ -257,9 +257,8 @@
     margin-left: -1px; border-radius: 1px; z-index: 1;
     background: var(--accent); box-shadow: 0 0 5px var(--accent);
     transform-origin: 50% 13px;   /* ось в центре ручки (высота34 -> центр17) */
-    transition: transform .18s cubic-bezier(.3, 1.4, .4, 1);
+    /* без transition: движение ведёт JS (потолок скорости + затухание) */
   }
-  .knob.dragging .knob-ind { transition: none; }
   .knob-tick {
     position: absolute; left: 50%; top: 50%;
     width: 1.5px; height: 6px; margin: -3px 0 0 -.75px;
