@@ -50,7 +50,7 @@ LEGACY_DOM = {
     "font-note", "font-dl-note",
     "reload-fonts", "download-fonts", "open-fonts",
     "tip-pull", "tip-pull-range", "tip-repel", "tip-repel-range",
-    "render-gpu", "render-note", "render-anim", "render-blur",
+    "render-gpu", "render-anim", "render-blur",
     "app-version",
     # раздел «Загрузчик»
     "subs", "qual", "transcode", "transcode-note", "dest", "browse",

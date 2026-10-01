@@ -177,6 +177,30 @@
     background: rgba(255, 180, 84, .15); border: 1px solid var(--warn); color: var(--warn); font-size: 13px;
   }
 
+  /* ---- полосы прокрутки в палитре темы ----
+     WebView2 рисует системные светлые полосы - они не в тон ни одной теме.
+     Цвета берём из переменных, поэтому стилизованы сразу все темы (и свои
+     тоже). Палец по умолчанию --widget (цвет рамок полей), при наведении
+     --accent; трек прозрачный - подложкой служит фон самого блока. Оттенок
+     под конкретный блок задаётся переменной --sb-thumb, а не селектором
+     #log::-webkit... : у Liquid Glass журнал имеет собственный градиентный
+     палец, её селектор с id равен нашему по весу и решал бы порядок - через
+     переменку авторский стиль темы остаётся главным (id бьёт универсальный).
+     scrollbar-color/width здесь нарочно нет: в Chromium они отключают
+     кастомные правила ::-webkit-scrollbar. */
+  *::-webkit-scrollbar { width: 12px; height: 12px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+  *::-webkit-scrollbar-corner { background: transparent; }
+  *::-webkit-scrollbar-thumb {
+    background: var(--sb-thumb, var(--widget));
+    background-clip: padding-box;
+    border: 2px solid transparent;
+    border-radius: var(--radius-l);
+  }
+  *::-webkit-scrollbar-thumb:hover { background-color: var(--accent); }
+  /* в журнале фон как раз --widget, поэтому палец светлее - иначе слился бы */
+  #log { --sb-thumb: var(--surface); }
+
   /* ---- кнопка «Скачать»: прогресс и итог внутри самой кнопки ----
      Слои: .dl-fill (заливка) -> .dl-label (текст) -> .dl-pct (проценты) ->
      .dl-icon (SVG-результат). Подпись остаётся в потоке - по ней кнопка
