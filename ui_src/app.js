@@ -549,6 +549,8 @@
         if (st.theme) applyTheme(st.theme);
         loadFontFaces(fontFacesForTheme());
       }
+      // настройки рендеринга (анимации, размытие) применяются без перезагрузки
+      applyRenderPrefs(st.settings);
       if (typeof synfSettingsState === "function") synfSettingsState(st);
     } catch (e) {}
     scheduleTick(200);
@@ -566,6 +568,7 @@
       FONT_PICK.head = initData.settings.font_heading || "";
       FONT_PICK.weight = initData.settings.font_weight || "";
       applyTheme(initData.settings.theme || "");
+      applyRenderPrefs(initData.settings);
       setDownloadState("idle", 0, false);
       // черновик массового списка: восстанавливаем до первого подсчёта
       // (переживает закрытие окна и любые перезапуски)

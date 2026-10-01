@@ -7,6 +7,7 @@ r"""Пути приложения и файловый лог.
 """
 
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -94,3 +95,45 @@ def webview_child_running(pid: int) -> bool:
                 return False
     finally:
         k32.CloseHandle(snap)
+
+
+def crash_evidence() -> str:
+    r"""Следы падения WebView2 одной строкой - для gui_diag.log.
+
+    Разбор «тёмного окна» начинается отсюда: свежий дамп Crashpad (в нём
+    причина падения - обычно 0xC0000005 в GPU/ DXGI-пути) и число
+    LiveKernelEvent за последний час (здоровье GPU-движка системы, до
+    краша WebView2 бывает сломано само). PowerShell ограничен таймаутом:
+    диагностика не должна подвешивать надзор окна.
+    """
+    return f"{_crash_dump_info()}; LiveKernelEvent за час: {_live_kernel_count()}"
+
+
+def _crash_dump_info() -> str:
+    """Самый свежий дамп Crashpad профиля приложения и его возраст."""
+    reports = (Path(os.environ.get("LOCALAPPDATA", str(base_dir())))
+               / "Synfronia" / "webview" / "EBWebView" / "Crashpad" / "reports")
+    try:
+        dumps = list(reports.glob("*.dmp"))
+        if not dumps:
+            return "дамп Crashpad: нет"
+        newest = max(dumps, key=lambda p: p.stat().st_mtime)
+        age = max(0.0, time.time() - newest.stat().st_mtime)
+    except OSError:
+        return "дамп Crashpad: недоступен"
+    return f"дамп Crashpad: {newest.name} ({age:.0f} c назад)"
+
+
+def _live_kernel_count(timeout: float = 8.0) -> str:
+    """Сколько LiveKernelEvent в журнале Application за час ('n/a' при ошибке)."""
+    cmd = ("try { (Get-WinEvent -FilterHashtable @{LogName='Application'; "
+           "StartTime=(Get-Date).AddHours(-1)} -ErrorAction Stop | "
+           "Where-Object { $_.ProviderName -eq 'Windows Error Reporting' -and "
+           "$_.Message -match 'LiveKernelEvent' } | "
+           "Measure-Object).Count } catch { 'n/a' }")
+    try:
+        out = subprocess.run(["powershell", "-NoProfile", "-Command", cmd],
+                             capture_output=True, timeout=timeout)
+        return out.stdout.decode("utf-8", "replace").strip() or "n/a"
+    except Exception:  # noqa: BLE001 - диагностика не должна ронять надзор
+        return "n/a"

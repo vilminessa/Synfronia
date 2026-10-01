@@ -32,7 +32,7 @@ import utf8_console  # noqa: E402
 
 utf8_console.force_utf8()
 
-from paths import logs_dir, webview_child_running  # noqa: E402
+from paths import crash_evidence, logs_dir, webview_child_running  # noqa: E402
 from settings import settings_path  # noqa: E402
 
 # PowerShell ищет процессы приложения: exe и запуск из исходников (gui.py).
@@ -462,7 +462,10 @@ def op_run(base: Path) -> None:
         stop_app([{"ProcessId": pid}])
         time.sleep(1)
     else:
-        print("  повтор не помог: запустите python gui.py --diagnose-freeze "
+        # след для разбора: свежий дамп Crashpad и GPU-события за час - по
+        # ним инцидент «тёмного окна» разбирается за минуту
+        print(f"  повтор не помог: {crash_evidence()}")
+        print("  запустите python gui.py --diagnose-freeze "
               "и посмотрите gui_diag.log")
     pause()
 

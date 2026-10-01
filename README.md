@@ -100,6 +100,7 @@ python gui.py
 | Destination | where to save (defaults to `downloads\` next to the app) |
 | Theme | Technology day / Technology Pinks / Scarred Mind / Audrey Main / Night Sky / Liquid Glass + your own folders |
 | Fonts card | headings / general / console font and weight - knobs on the left, live preview on the right; families from the `fonts` folder or the system font |
+| Rendering | "Interface" card: hardware acceleration (GPU) - on the next launch; interface animations and background blur - instantly |
 | Quality | `lossless` / 8K / 4K / 2K / 1080p / 720p / 480p / 240p |
 | Subtitles | off / ru / en / all (embedded into the container) |
 | Re-encode | none / libx265 / nvenc / amf / qsv (hardware - by availability) |

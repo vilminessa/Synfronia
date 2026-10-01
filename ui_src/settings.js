@@ -773,7 +773,14 @@
       }
     }
   };
-  var NOTE_FILLERS = {ftpDirNote: updateFtpDirNote, fontPreview: updateFontPreview};
+  var NOTE_FILLERS = {ftpDirNote: updateFtpDirNote, fontPreview: updateFontPreview,
+                      renderNote: updateRenderNote};
+  // Пояснение карточки «Рендеринг»: статичный перевод, но живёт по тому же
+  // пути, что и остальные пояснения - перерисовывается при смене языка
+  function updateRenderNote() {
+    var note = document.getElementById("render-note");
+    if (note) note.textContent = t("sheet.ui.render.note");
+  }
   function refreshNotes() {
     Object.keys(noteFillers).forEach(function(src) { NOTE_FILLERS[src](); });
   }

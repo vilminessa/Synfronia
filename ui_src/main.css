@@ -296,6 +296,30 @@
     .clicker-msg.show { animation: none !important; transition: none !important; }
   }
 
+  /* Ручка «Анимации интерфейса» (настройки → Интерфейс): обобщённый
+     prefers-reduced-motion, но по классу на <html>. Длительности в 0,01 мс
+     вместо animation:none - иначе for-анимации (✓ в массовой, итоги
+     загрузки) остались бы на нулевом кадре и значок не появился бы:
+     кадр отрисуется, а бесконечные просто остановятся. */
+  html.reduce-motion *,
+  html.reduce-motion *::before,
+  html.reduce-motion *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0s !important;
+    transition-duration: .01ms !important;
+    transition-delay: 0s !important;
+  }
+
+  /* Ручка «Размытие фона»: blur уходит, а там, где он держал читаемость
+     текста (заголовок ffmpeg), подложка становится плотнее */
+  html.no-blur #ffmpeg-overlay,
+  html.no-blur #ffmpeg-head {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+  html.no-blur #ffmpeg-head { background: rgba(12, 16, 28, .78); }
+
   /* ---- ffmpeg bloom-оверлей: дождь поверх темы ---- */
   #ffmpeg-overlay {
     position: fixed; inset: 0; z-index: 999; overflow: hidden;
