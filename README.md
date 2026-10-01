@@ -54,7 +54,8 @@ English · [Русский](README.ru.md)
   connection test and optional local cleanup after upload.
   More - [FTP upload](#ftp-upload).
 - **Progress and cancel** - progress bar driven by yt-dlp logs, a Stop
-  button.
+  button that interrupts the work right away: the current link stops
+  (a running ffmpeg is killed too) and the rest of the queue is dropped.
 - **Everything stays local** - settings in
   `%LOCALAPPDATA%\Synfronia\settings.json`, logs in
   `%LOCALAPPDATA%\Synfronia\logs`, WebView2 data in
@@ -116,7 +117,8 @@ one after another, each as its own yt-dlp run:
 - a failed link does not break the queue - the rest keep going;
 - the status line shows `[i/N] <current link>`, the journal gets a
   `bulk [i/N] <url>` row per item;
-- Stop interrupts the current link and drops the rest of the queue;
+- Stop interrupts the work right away (a running ffmpeg is killed too)
+  and drops the rest of the queue;
 - retries, postprocessors (including re-encode) and FTP upload behave
   exactly like a single download;
 - the summary at the end: all good - «Готово», some failed - «Готово с
@@ -395,6 +397,7 @@ python tools/check_settings.py          # settings schema, translations, card
 python tools/check_settings_overlay.py  # overlay: build, Api, single window
 python tools/check_test_fonts.py        # bundled fonts and download (offline)
 python tools/check_download_button.py   # download button: progress and result
+python tools/check_stop_download.py     # stop: extractor retries, no second attempt, ffmpeg kill
 python tools/check_tools_output.py      # scripts print on any code page
 python tools/check_release_yml.py      # release.yml lint: pinning, SLSA permissions, ASCII
 python tools/check_debug.py            # debug console: cleanup, logs, menu
