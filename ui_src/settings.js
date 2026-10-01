@@ -526,105 +526,143 @@
   // Разделы карточки: слева кнопки, справа содержимое полей. Внутри раздела
   // карточки и строки собираются теми же правилами, что были у вкладок панели:
   // поля одного блока (box) попадают в одну карточку, поля с одинаковым row -
-  // в одну строку.
-  function renderWindow() {
-    hideTip();
-    var nav = document.getElementById("settings-nav");
-    var host = document.getElementById("settings-sections");
-    if (!nav || !host) return;
-    nav.innerHTML = "";
-    host.innerHTML = "";
-    panelFields = {};
-    panelButtons = {};
-    panelWrappers = [];
-    customSave = {};
-    var groups = SETTINGS_SCHEMA.groups.filter(function(group) {
-      return group.in_panel !== false && (group.fields || []).length;
-    });
-    groups.forEach(function(group, gi) {
-      var item = el("button", gi ? "nav-item" : "nav-item active", {type: "button", id: "nav-" + group.id});
-      item.appendChild(caption(group.label));
-      item.addEventListener("click", function() { switchSection(group.id); });
-      nav.appendChild(item);
-
-      var section = el("div", null, {id: "section-" + group.id, role: "tabpanel"});
-      if (gi) section.hidden = true;
-      var out = [];        // карточки раздела: то, что уходит в section
-      var cardEls = {};    // имя блока -> карточка (одна на блок, не на поле)
-      var cur = null;      // текущий блок: с названием (body) или без него
-      var rowNodes = null; // узлы текущей строки
-      var rowKeys = null;  // пути полей строки
-      var rowIdx = null;
-      var rowCls = null;
-      function wrap(list, node, keys) {
-        list.push(node);
-        panelWrappers.push({el: node, keys: keys});
-      }
-      // Смена блока: закрываем предыдущий и открываем новый. Поля копятся в
-      // cur.nodes, а в раздел попадают при flush() - иначе пришлось бы держать
-      // два разных «списка» (массив без названия и <div> тела карточки).
-      function openBlock(name) {
-        flush();
-        if (!name) { cur = {name: null, nodes: [], keys: []}; return; }
-        if (!cardEls[name]) {
-          var body = el("div", "field-card-body");
-          var box = el("div", "field-card", [caption(group.boxes[name], "field-card-title"), body]);
-          cardEls[name] = {name: name, el: box, body: body, keys: [], nodes: []};
-          wrap(out, box, cardEls[name].keys);
-        }
-        cardEls[name].nodes = [];
-        cur = cardEls[name];
-      }
-      function flushRow() {
-        if (!rowNodes || !cur) return;
-        var row = el("div", rowCls, rowNodes);
-        cur.nodes.push(row);
-        panelWrappers.push({el: row, keys: rowKeys});
-        rowNodes = rowKeys = null;
-        rowIdx = rowCls = null;
-      }
-      function flush() {
+  // в одну строку. Ответственность разделили: схема -> чистые данные
+  // (layoutOf), DOM -> Alpine x-for в settings.html (этап 4). Один узел ведёт
+  // только один способ: Alpine рисует структуру, renderField - внутренности
+  // поля, switchSection - видимость секций.
+  function layoutOf(group) {
+    var cards = [], cur = null, curName, row = null, seq = 0;
+    function flushRow() {
+      if (!row || !cur) { row = null; return; }
+      cur.blocks.push({key: "b" + group.id + "-" + (seq++), cls: row.cls,
+                       keys: row.keys, fields: row.fields});
+      row = null;
+    }
+    function flushCard() {
+      flushRow();
+      // блок без полей (все его поля in_panel: false) в раздел не идёт -
+      // иначе в разделе висит рамка с заголовком и пустотой внутри
+      if (cur && cur.blocks.length) cards.push(cur);
+      cur = null;
+    }
+    function openBlock(name) {
+      flushCard();
+      cur = {key: name || ("~" + group.id + "-" + seq), title: name ? group.boxes[name] : null,
+             blocks: [], keys: []};
+      curName = name;
+    }
+    group.fields.forEach(function(spec) {
+      if (spec.in_panel === false) return;
+      var name = spec.box || null;
+      if (!cur || name !== curName) openBlock(name);
+      // у блока кнопок нет ни path, ни dom: в panelFields ему нечего
+      // положить, иначе ключом станет "undefined"
+      var key = spec.path || spec.dom;
+      if (spec.row !== undefined && spec.row !== null) {
+        // поля с одинаковым row встают в одну строку (label + input)
+        if (row && spec.row !== row.idx) flushRow();
+        if (!row) row = {idx: spec.row, cls: spec.row_class || "range-row",
+                         fields: [], keys: []};
+        row.fields.push(spec);
+        if (key) row.keys.push(key);
+      } else {
         flushRow();
-        if (!cur) return;
-        if (cur.body) {
-          // блок без полей (все его поля in_panel: false) в раздел не идёт -
-          // иначе в разделе висит рамка с заголовком и пустотой внутри
-          if (!cur.nodes.length) cur.el.remove();
-          else cur.nodes.forEach(function(n) { cur.body.appendChild(n); });
-        } else if (cur.nodes.length) {
-          wrap(out, el("div", "field-card", [el("div", "field-card-body", cur.nodes)]), cur.keys);
-        }
-        cur = null;
+        cur.blocks.push({key: "b" + group.id + "-" + (seq++), cls: null,
+                         keys: key ? [key] : [], fields: [spec]});
       }
-      group.fields.forEach(function(spec) {
-        if (spec.in_panel === false) return;
-        if (!cur || (spec.box || null) !== cur.name) openBlock(spec.box || null);
-        var part = renderField(spec);
-        // у блока кнопок нет ни path, ни dom: его узлы в раздел попадают, но в
-        // panelFields ему нечего положить, иначе ключом станет "undefined"
-        var key = spec.path || spec.dom;
-        if (key) cur.keys.push(key);
-        if (spec.row !== undefined && spec.row !== null) {
-          // поля с одинаковым row встают в одну строку (label + input)
-          if (rowNodes && spec.row !== rowIdx) flushRow();
-          if (!rowNodes) { rowNodes = []; rowKeys = []; rowIdx = spec.row; rowCls = spec.row_class || "range-row"; }
-          if (key) rowKeys.push(key);
-          part.nodes.forEach(function(n) { rowNodes.push(n); });
-        } else {
-          flushRow();
-          part.nodes.forEach(function(n) { cur.nodes.push(n); });
-        }
-        if (key) {
-          panelFields[key] = {spec: spec, nodes: part.nodes, input: part.input,
-                               range: part.range, get: part.get, set: part.set};
-        }
-      });
-      flush();
-      out.forEach(function(n) { section.appendChild(n); });
-      host.appendChild(section);
+      if (key) cur.keys.push(key);
     });
-    activeSection = groups.length ? groups[0].id : "";
+    flushCard();
+    return cards;
   }
+
+  // Монтирование блока полей в якорь x-for (директива x-mount-block).
+  // Узлы поля рисует renderField как раньше (слушатели вешаются внутри),
+  // якорь гасится: в .field-card-body не остаётся лишних обёрток и прямые
+  // потомки те же, что при императивной сборке (на них завязан CSS
+  // карточки шрифтов). Строка (row_class) - единственный случай, когда
+  // обёртка создаётся здесь же, и она сразу попадает в applyVisibility.
+  function mountBlockInto(anchor, blk) {
+    var row = blk.cls ? el("div", blk.cls) : null;
+    var holder = row || document.createDocumentFragment();
+    blk.fields.forEach(function(spec) {
+      var part = renderField(spec);
+      var key = spec.path || spec.dom;
+      if (key) {
+        panelFields[key] = {spec: spec, nodes: part.nodes, input: part.input,
+                            range: part.range, get: part.get, set: part.set};
+      }
+      part.nodes.forEach(function(n) { holder.appendChild(n); });
+    });
+    if (row) {
+      panelWrappers.push({el: row, keys: blk.keys});
+      anchor.parentNode.insertBefore(row, anchor);
+    } else {
+      anchor.parentNode.insertBefore(holder, anchor);
+    }
+    anchor.remove();
+  }
+  // Обёртка-карточка (x-mount-card) участвует в applyVisibility так же, как
+  // строка: рамка прячется, когда скрыты все её поля
+  function mountCardInto(cardEl, card) {
+    panelWrappers.push({el: cardEl, keys: card.keys});
+  }
+
+  // Готовность панели. Alpine монтирует её сам при старте движка (x-data в
+  // settings.html), сигнал - $nextTick в init() компонента (после полного
+  // рендера x-for все поля уже отмонтированы). synfSettingsInit может
+  // прийти и раньше, и позже - шаги, требующие полей, копятся в очередь.
+  var panelBound = false, afterPanel = [];
+  function whenPanelReady(fn) {
+    if (panelBound) fn();
+    else afterPanel.push(fn);
+  }
+  function fieldsMounted() {
+    if (panelBound) return;
+    panelBound = true;
+    bindCustom();
+    bindSettings();
+    var queue = afterPanel;
+    afterPanel = [];
+    queue.forEach(function(fn) { fn(); });
+  }
+
+  // Компонент и директивы регистрируются до старта Alpine: движок шлёт
+  // alpine:init перед инициализацией дерева, а settings.js исполняется
+  // последним из своих скриптов (порядок common -> motion -> app ->
+  // settings -> alpine проверяется чеком).
+  document.addEventListener("alpine:init", function() {
+    Alpine.data("settingsPanel", function() {
+      var groups = SETTINGS_SCHEMA.groups.filter(function(group) {
+        return group.in_panel !== false && (group.fields || []).length;
+      }).map(function(group) {
+        var copy = {};
+        Object.keys(group).forEach(function(k) { copy[k] = group[k]; });
+        copy.layout = layoutOf(group);   // клон: схема остаётся нетронутой
+        return copy;
+      });
+      return {
+        groups: groups,
+        // после этого nextTick рендера все x-mount-* отработали
+        init: function() { this.$nextTick(fieldsMounted); }
+      };
+    });
+    Alpine.directive("mount-block", function(el, directive, ctx) {
+      mountBlockInto(el, ctx.evaluate(directive.expression));
+    });
+    Alpine.directive("mount-card", function(el, directive, ctx) {
+      mountCardInto(el, ctx.evaluate(directive.expression));
+    });
+  });
+
+  function renderWindow() {
+    // структуру рисует Alpine (x-for в settings.html): раньше здесь был
+    // полный проход по схеме с innerHTML и чисткой реестров, теперь
+    // реестры наполняет mountBlockInto, а пересборки нет вовсе - схема
+    // константна, смена языка обходится translateStatic (applySettingsI18n)
+    hideTip();
+  }
+
 
   function switchSection(name) {
     hideTip();
@@ -1100,13 +1138,16 @@
     transAvailability = { ffmpeg: !!extra.ffmpeg, avail: extra.transcoders || [] };
     if (extra.fonts) FONTS = extra.fonts;
     renderWindow();
-    bindCustom();
-    bindSettings();
-    applySettingsI18n();
-    fillSettings();
-    syncTipForces();
-    applyVisibility();
-    refreshNotes();
+    // бинды полей делает fieldsMounted (Alpine монтирует панель сам);
+    // здесь - то, что требует одновременно данных и полей: при раннем
+    // вызове шаги встанут в очередь и отработают сразу после бинда
+    whenPanelReady(function() {
+      applySettingsI18n();
+      fillSettings();
+      syncTipForces();
+      applyVisibility();
+      refreshNotes();
+    });
   }
 
   function synfSettingsState(st) {
@@ -1118,13 +1159,13 @@
       buildTranscodeOptions();
     }
     if (curLang !== langPainted) {
-      // язык сменился: разметка с подписями и подсказками строится заново.
-      // На каждый poll() это не повторяем - пересборка списков дёргала бы
-      // открытый <select> и сбрасывала бы фокус в поле, где печатают.
+      // язык сменился: подписи и подсказки обновляет translateStatic
+      // (applySettingsI18n) по data-i18n - структуру пересобирать не нужно,
+      // узлы те же, а повторный bind задвоил бы слушатели. Проверка на
+      // каждый poll() не повторяется: пересборка списков дёргала бы
+      // открытый <select> и сбрасывала фокус в поле, где печатают.
       renderWindow();
-      bindCustom();
-      bindSettings();
-      applySettingsI18n();
+      whenPanelReady(function() { applySettingsI18n(); });
     }
     fillSettings();
     syncTipForces();
