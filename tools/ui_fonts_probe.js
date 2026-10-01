@@ -1890,6 +1890,29 @@ async function waitForPage() {
       console.log(`  стили сцены: бабл=как .tip=${demoStyle.sameBg}/${demoStyle.sameBorder} ` +
         `элемент=кнопка=${demoStyle.btnBg} надпись="${demoStyle.label}" ` +
         `магия=${demoStyle.magicBefore}/${demoStyle.magicAfter} пылинок=${demoStyle.dust}`);
+
+    // крутки ровно по центру панельки и не едут от кегля подписи: подпись
+    // выведена из вертикального потока, поэтому смена шрифта (переносы,
+    // кегль) раньше двигала крутку, а теперь - нет
+    async function knobDelta(labelPx) {
+      return evaluate(`(function (labelPx) {
+        var card = document.querySelector(".field-card:has(> .field-card-body > #tip-preview)");
+        if (!card) return null;
+        var labels = [].slice.call(card.querySelectorAll(".knob-cell label"));
+        labels.forEach(function (n) { n.style.fontSize = labelPx ? labelPx + "px" : ""; });
+        var panel = card.querySelector(".knob-panel").getBoundingClientRect();
+        var knob = card.querySelector(".knob").getBoundingClientRect();
+        labels.forEach(function (n) { n.style.fontSize = ""; });
+        return Math.round((knob.top + knob.bottom) / 2 - (panel.top + panel.bottom) / 2);
+      })(${labelPx})`);
+    }
+    const knobBase = await knobDelta(0);
+    const knobWide = await knobDelta(17);   // кегль подписи поднят - крутка стоит
+    if (!(Math.abs(knobBase) <= 2 && Math.abs(knobWide) <= 2)) {
+      fail("крутки не по центру панельки (или едут от кегля подписи): " +
+           JSON.stringify({base: knobBase, label17: knobWide}));
+    }
+    console.log(`  центровка круток: delta=${knobBase}px, при кегле17=${knobWide}px`);
     }
 
     // -- массовая вкладка ----------------------------------------------------

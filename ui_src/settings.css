@@ -327,11 +327,26 @@
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 10px 12px;
     align-items: start;
+    /* строка ручек по центру высоты панельки (панелька растянута до
+       сцены) - вертикаль не прижата к верху */
+    align-content: center;
     margin-top: 0;
     padding: 10px 12px;
     background: var(--surface);
     border: 1px solid var(--widget);
     border-radius: var(--radius-m);
+  }
+  /* крутка ровно по центру панельки: подпись выведена из вертикального
+     потока (абсолютно над круткой), поэтому смена шрифта/переносы
+     подписи не двигают крутку - раньше высота label участвовала в
+     раскладке и всё «съезжалось» при другом кегле */
+  .field-card:has(> .field-card-body > #tip-preview) .knob-cell {
+    position: relative;
+    justify-content: center;
+  }
+  .field-card:has(> .field-card-body > #tip-preview) .knob-cell label {
+    position: absolute; bottom: calc(100% + 5px); left: 0; right: 0;
+    margin: 0; text-align: center;
   }
   .field-card:has(> .field-card-body > #tip-preview) #tip-preview {
     grid-column: 2; grid-row: 1;
