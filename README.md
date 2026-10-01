@@ -56,6 +56,8 @@ English · [Русский](README.ru.md)
 - **Progress and cancel** - progress bar driven by yt-dlp logs, a Stop
   button that interrupts the work right away: the current link stops
   (a running ffmpeg is killed too) and the rest of the queue is dropped.
+  If something hangs anyway, the **Kill** button (with confirmation)
+  force-restarts the app; the bulk draft list survives the restart.
 - **Everything stays local** - settings in
   `%LOCALAPPDATA%\Synfronia\settings.json`, logs in
   `%LOCALAPPDATA%\Synfronia\logs`, WebView2 data in

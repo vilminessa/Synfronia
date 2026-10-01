@@ -117,6 +117,8 @@ class Api:
         self._cancel = False
         # массовая загрузка: None вне цикла, иначе счётчики для poll()
         self._bulk: dict | None = None
+        # «Убить» уже запускал перезапуск — повторный клик не нужен
+        self._kill_started = False
         self._progress = {"mode": "determinate", "value": 0.0}
         self._ffmpeg = {"downloading": False, "extracting": False, "pct": 0.0, "ok": False, "error": None}
         self._fonts_dl = {"downloading": False, "pct": 0.0, "error": None}
@@ -634,6 +636,19 @@ class Api:
                 self._cancel = True
                 self._status = tr(self._lang, "p.stop_req")
             self.dl.stop()
+
+    def kill_restart(self) -> None:
+        """Принудительный перезапуск (кнопка «Убить»).
+
+        Поднимает копию процесса и уходит в os._exit, не дожидаясь
+        зависших потоков и очистки: единственный выход, когда «Отмена»
+        и вся остановка уже не справляются.
+        """
+        if self._kill_started:
+            return
+        self._kill_started = True
+        subprocess.Popen([sys.executable, *sys.argv], cwd=os.getcwd())
+        os._exit(0)
 
     # -- коллбеки от core ----------------------------------------------------
     def _log(self, level: str, msg: str) -> None:

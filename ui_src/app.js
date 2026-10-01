@@ -470,6 +470,12 @@
       FONT_PICK.weight = initData.settings.font_weight || "";
       applyTheme(initData.settings.theme || "");
       setDownloadState("idle", 0, false);
+      // черновик массового списка: восстанавливаем до первого подсчёта
+      // (переживает перезапуск, в том числе кнопку «Убить»)
+      try {
+        var bulkDraft = localStorage.getItem("synf.bulk_draft");
+        if (bulkDraft) document.getElementById("url-batch").value = bulkDraft;
+      } catch (e) { /* приватный режим — без черновика */ }
       applyI18n();
       document.getElementById("group").checked = initData.settings.group_playlist !== false;
       document.getElementById("status").textContent = t("status.ready");
@@ -528,6 +534,12 @@
         this.disabled = true;
         pywebview.api.stop_download();
       });
+      document.getElementById("kill").addEventListener("click", function() {
+        // принудительный перезапуск на случай зависания: подтверждение
+        // обязательна, кнопка стоит рядом с «Отмена»
+        if (!window.confirm(t("kill.confirm"))) return;
+        pywebview.api.kill_restart();
+      });
       ffmpegRetry.addEventListener("click", function() {
         ffmpegRetry.style.display = "none";
         ffmpegStatus.classList.add("ffmpeg-hidden");
@@ -555,9 +567,14 @@
       document.getElementById("tab-video").addEventListener("click", function() { switchTab("video"); });
       document.getElementById("tab-playlist").addEventListener("click", function() { switchTab("playlist"); });
       document.getElementById("tab-batch").addEventListener("click", function() { switchTab("batch"); });
-      // массовая вкладка: счётчик на вводе, Ctrl+Enter - старт, очистка
+      // массовая вкладка: счётчик на вводе, черновик в localStorage
+      // (переживает перезапуск, в том числе кнопку «Убить»), Ctrl+Enter -
+      // старт, очистка
       var batchBox = document.getElementById("url-batch");
-      batchBox.addEventListener("input", updateBulkCount);
+      batchBox.addEventListener("input", function() {
+        try { localStorage.setItem("synf.bulk_draft", batchBox.value); } catch (e) { /* приватный режим */ }
+        updateBulkCount();
+      });
       batchBox.addEventListener("keydown", function(ev) {
         if (ev.key === "Enter" && ev.ctrlKey) {
           ev.preventDefault();
