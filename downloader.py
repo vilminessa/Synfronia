@@ -11,6 +11,7 @@ import zipfile
 from pathlib import Path
 
 from yt_dlp import YoutubeDL
+from yt_dlp.postprocessor import ffmpeg as ytdlp_ffmpeg
 from yt_dlp.postprocessor.embedthumbnail import EmbedThumbnailPP
 from yt_dlp.postprocessor.ffmpeg import (
     FFmpegEmbedSubtitlePP,
@@ -18,6 +19,7 @@ from yt_dlp.postprocessor.ffmpeg import (
     FFmpegPostProcessor,
     FFmpegPostProcessorError,
 )
+from yt_dlp.utils import Popen as YtPopen
 
 from ftp import upload_files
 from i18n import I18N, LANGUAGES, tr
@@ -453,6 +455,11 @@ class Downloader:
         self._on_progress = on_progress or (lambda *_: None)
         self._lang = lang if lang in LANGUAGES else "en"
         self._stop = threading.Event()
+        # Память «остановку запрашивали»: self._stop сбрасывается в finally
+        # каждой попытки (свойство stopped должно честно гаснуть), поэтому
+        # без отдельного флага проверки в download() не видят Stop, пришедший
+        # во время попытки, - а флаг переживает finally до конца серии.
+        self._stop_req = threading.Event()
         self._wd_done = threading.Event()
         self._errors = False
         self._summary = ("ok", 0, 0)
@@ -470,6 +477,11 @@ class Downloader:
 
     def stop(self) -> None:
         self._stop.set()
+        self._stop_req.set()
+
+    def _stopping(self) -> bool:
+        """Остановка запрошена прямо сейчас или запрашивалась в этой серии."""
+        return self._stop.is_set() or self._stop_req.is_set()
 
     @property
     def stopped(self) -> bool:
@@ -511,6 +523,51 @@ class Downloader:
             director.close()
         except Exception:  # noqa: BLE001
             pass
+
+    def _interruptible_popen(self):
+        """Подкласс yt_dlp.utils.Popen, чей run() прерывается по нашему _stop.
+
+        ffmpeg внутри yt-dlp запускается через Popen.run() — блокирующий
+        communicate без единой точки остановки: без перехвата Stop ждал бы
+        конца склейки или перекодировки. Подкласс гоняет оригинальный
+        communicate в фоне и, как только остановка запрошена, убивает
+        процесс — вывод при этом собирает уже фоновый поток, поэтому пайпы
+        не переполняются и yt-dlp получает честный отрицательный returncode.
+        """
+        stopping = self._stopping
+
+        class _InterruptiblePopen(YtPopen):
+            def communicate_or_kill(self, input=None, timeout=None):
+                box: dict = {}
+                parent = super(_InterruptiblePopen, self).communicate_or_kill
+
+                def _wait():
+                    try:
+                        box["r"] = parent(input=input, timeout=timeout)
+                    except BaseException as exc:  # noqa: BLE001
+                        box["e"] = exc
+
+                waiter = threading.Thread(target=_wait, daemon=True,
+                                          name="synfronia-ffmpeg-wait")
+                waiter.start()
+                while waiter.is_alive():
+                    if stopping():
+                        try:
+                            self.kill()
+                        except OSError:
+                            pass
+                        waiter.join(5)
+                        break
+                    waiter.join(0.1)
+                if "r" in box:
+                    return box["r"]
+                if "e" in box:
+                    raise box["e"]
+                # процесс убит, но вывод не успел собраться — отдаём None,
+                # оригинальный run() подставит свой дефолтный ''/b''
+                return (None, None, self.returncode)
+
+        return _InterruptiblePopen
 
     class _Logger:
         def __init__(self, owner: "Downloader"):
@@ -611,7 +668,13 @@ class Downloader:
             "fragment_retries": _retries,
             "socket_timeout": _timeout,
             "js_runtimes": {"node": {}},
-            "retry_sleep_functions": {"http": self._retry_hook, "fragment": self._retry_hook},
+            "retry_sleep_functions": {"http": self._retry_hook, "fragment": self._retry_hook,
+                                      # extractor-ретраи (веб-страницы) и файловые
+                                      # ошибки тоже обязаны проверять остановку:
+                                      # без 'extractor' Stop в фазе экстракции
+                                      # не срабатывал вовсе (инцидент mass-stop)
+                                      "extractor": self._retry_hook,
+                                      "file_access": self._retry_hook},
         }
         if subs_langs:
             opts["writesubtitles"] = True
@@ -662,6 +725,10 @@ class Downloader:
         ftp=None,
     ) -> None:
         os.makedirs(dest, exist_ok=True)
+        if self._stopping():
+            # остановка запрошена до старта — попытку даже не начинаем
+            self._log("warning", self._t("p.cancelled"))
+            return
         self._errors = False
         self._summary = ("ok", 0, 0)
         self._finished = []
@@ -678,6 +745,13 @@ class Downloader:
         candidates = self._format_candidates(quality)
         last_info = None
         for i, fmt in enumerate(candidates):
+            if self._stopping():
+                # Остановка до/между попытками: следующий формат не запускаем.
+                # Без этой проверки фейл первой попытки (ignoreerrors гасит
+                # исключения yt-dlp) уводил в полный повтор — Stop выглядел
+                # так, будто его не нажали.
+                self._log("warning", self._t("p.cancelled"))
+                return
             self._errors = False
             self._finished = []
             if i:
@@ -687,8 +761,11 @@ class Downloader:
             self._log("debug", self._t("p.attempt", n=i + 1, fmt=opts["format"]))
             info = None
             short = None
+            orig_ff_popen = ytdlp_ffmpeg.Popen
             try:
                 self._wd_done.clear()
+                # на время попытки ffmpeg прерывается по нашему _stop
+                ytdlp_ffmpeg.Popen = self._interruptible_popen()
                 with YoutubeDL(self._add_ffmpeg(opts)) as ydl:
                     threading.Thread(
                         target=self._watchdog, args=(ydl,), daemon=True, name="synfronia-watchdog"
@@ -715,6 +792,7 @@ class Downloader:
                 self._log("error", self._t("p.error", exc=exc))
                 break
             finally:
+                ytdlp_ffmpeg.Popen = orig_ff_popen
                 self._wd_done.set()
                 self._stop.clear()
                 self._on_progress({"status": "done"})
@@ -725,7 +803,7 @@ class Downloader:
             self._cleanup_orphans()
             if info and info.get("_type") == "playlist":
                 break
-        if info is not None and ftp is not None:
+        if info is not None and ftp is not None and not self._stopping():
             self._upload_ftp(ftp, info, dest, when)
         # Итог выбираем по тому, что реально скачалось, а не по флагу ошибок:
         # одна неудачная попытка yt-dlp не делает «часть файлов» из одного
@@ -760,9 +838,17 @@ class Downloader:
         deleted: list[str] = []
         if ftp.per_file:
             for number, item in enumerate(items, start=1):
+                if self._stopping():
+                    # остановка во время выгрузки: остаток не грузим,
+                    # локальные файлы остаются нетронутыми
+                    self._log("warning", self._t("p.cancelled"))
+                    break
                 deleted.extend(upload_files(ftp, [item], log=self._log,
                                            index_from=number).get("deleted", []))
         else:
+            if self._stopping():
+                self._log("warning", self._t("p.cancelled"))
+                return
             deleted.extend(upload_files(ftp, items, log=self._log).get("deleted", []))
         if deleted:
             self._log("info", self._t("ftp.local_gone", n=len(deleted)))
