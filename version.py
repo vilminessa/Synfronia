@@ -3,8 +3,8 @@
 Отсюда читают: страница (плейсхолдер __APP_VERSION__), settings_schema
 (дефолт ключа app_version), Synfronia.spec (VersionInfo exe) и CI
 (сверка имени тега при выпуске). Процесс выпуска: поднять версию здесь ->
-коммит -> тег vX.Y.Z (допускается X.Y.Z.N, например v1.2.7.1) -> workflow release
+коммит -> тег vX.Y.Z (допускается X.Y.Z.N, например v1.2.7.2) -> workflow release
 собирает и публикует.
 """
 
-__version__ = "1.2.7.1"
+__version__ = "1.2.7.2"
