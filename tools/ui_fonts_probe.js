@@ -1165,6 +1165,84 @@ async function waitForPage() {
     }
     console.log(`  черновик: ${draft.length}б`);
 
+    // -- массовая: разбивка вставки и построчная подсветка ------------
+    console.log("--- массовая: вставка и статусы ---");
+    // unit: куча ссылок через пробел/запятую/; -> по строкам, запятая
+    // и точка с запятой ВНУТРИ url не рвут ссылку
+    const pasteNorm = await evaluate(`JSON.stringify(normalizeBulkPaste(
+      "https://a.com/x https://b.com/y, https://c.com/z?a=1,2;https://d.com/w.").split("\\n"))`);
+    const pl = JSON.parse(pasteNorm);
+    if (!(pl.length === 4 && pl[1] === "https://b.com/y" &&
+          pl[2] === "https://c.com/z?a=1,2" && pl[3] === "https://d.com/w")) {
+      fail("normalizeBulkPaste разобрал неверно: " + pasteNorm);
+    }
+    // swap: старт массовой прячет textarea и строит список строк
+    await evaluate(`(function () {
+      switchTab("batch");
+      var box = document.getElementById("url-batch");
+      box.value = "https://youtu.be/v1\\nhttps://youtu.be/v2\\nhttps://youtu.be/v3";
+      box.dispatchEvent(new Event("input"));
+      return true;
+    })()`);
+    await evaluate('document.getElementById("download").click(); true');
+    await sleep(450);
+    const swap = await evaluate(`(function () {
+      var view = document.getElementById("bulk-view");
+      var box = document.getElementById("url-batch");
+      return {view: !view.hidden, rows: view.children.length, boxHidden: box.hidden};
+    })()`);
+    if (!(swap.view && swap.rows === 3 && swap.boxHidden)) {
+      fail("swap в режим просмотра не случился: " + JSON.stringify(swap));
+    }
+    // статусы из poll красят строки в цвета темы (--ok/--err/акцент)
+    await evaluate(`(function () {
+      window.__probe.bulk = {total: 3, index: 2, statuses: ["o", "l", "f"]};
+      return true;
+    })()`);
+    await sleep(450);
+    const classes = await evaluate(`(function () {
+      var rows = document.getElementById("bulk-view").children;
+      return [rows[0].className, rows[1].className, rows[2].className];
+    })()`);
+    if (!(classes[0].indexOf("is-ok") >= 0 && classes[1].indexOf("is-load") >= 0 &&
+          classes[2].indexOf("is-fail") >= 0)) {
+      fail("статусы не покрасили строки: " + JSON.stringify(classes));
+    }
+    // итог: busy -> false: textarea возвращается, кнопка «неудавшихся» видна
+    await evaluate(`(function () {
+      window.__probe.bulkFailed = ["https://youtu.fail/b", "https://youtu.fail/c"];
+      window.__probe.dlState = {busy: false, status: "done", result: "error",
+                                progress: {mode: "determinate", value: 100}};
+      return true;
+    })()`);
+    await sleep(450);
+    const afterBulk = await evaluate(`(function () {
+      var view = document.getElementById("bulk-view");
+      var box = document.getElementById("url-batch");
+      var fbtn = document.getElementById("bulk-failed");
+      return {viewHidden: view.hidden, boxShown: !box.hidden,
+              btnShown: !!fbtn && !fbtn.hidden};
+    })()`);
+    if (!(afterBulk.viewHidden && afterBulk.boxShown && afterBulk.btnShown)) {
+      fail("по итогу не вернулся textarea/кнопка: " + JSON.stringify(afterBulk));
+    }
+    // клик по кнопке подставляет только упавшие ссылки
+    await evaluate('document.getElementById("bulk-failed").click(); true');
+    const kept = await evaluate('document.getElementById("url-batch").value');
+    if (kept !== "https://youtu.fail/b\nhttps://youtu.fail/c") {
+      fail("«Оставить неудавшиеся» подставило неверно: " + JSON.stringify(kept));
+    }
+    // уборка стаба и поля
+    await evaluate(`(function () {
+      window.__probe.bulk = null;
+      window.__probe.bulkFailed = [];
+      var box = document.getElementById("url-batch");
+      box.value = ""; box.dispatchEvent(new Event("input"));
+      return true;
+    })()`);
+    console.log(`  вставка/статусы: paste=${pl.length} строк, swap=${swap.rows} строк, ` +
+      `итог: view-скрыт=${afterBulk.viewHidden} кнопка=${afterBulk.btnShown} kept=${kept.split("\n").length}`);
+
     console.log("--- раздел FTP ---");
     const ftp = await evaluate(FTP_VIS);
     const ftpChecks = [

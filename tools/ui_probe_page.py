@@ -49,6 +49,8 @@ STUB = """<script>
                // ответ poll() для кнопки «Скачать»: сценарий задаёт probe.dl
                dlState: {busy: false, status: "", result: null,
                          progress: {mode: "determinate", value: 0}},
+               // массовая: построчные статусы и упавшие ссылки (задаёт сценарий)
+               bulk: null, bulkFailed: [],
                settingsOpen: %(settings_open)s, saved: [], dest: "", logs: []};
   var settings = __SETTINGS__;
   function ok(r) { return Promise.resolve(r === undefined ? {} : r); }
@@ -62,6 +64,7 @@ STUB = """<script>
       settings_open: state.settingsOpen}); },
     poll: function () { return Promise.resolve(Object.assign({
       logs: state.logs, log_cursor: state.logs.length,
+      bulk: state.bulk, bulk_failed: state.bulkFailed,
       ffmpeg: {downloading: false, extracting: false, pct: 0, ok: true, error: null},
       fonts_dl: {downloading: false, pct: 0, error: null}}, uiState(), state.dlState)); },
     synf_settings_state: function (open) { state.settingsOpen = !!open; return ok(); },
@@ -92,6 +95,10 @@ STUB = """<script>
       state.saved.push(["bulk", lines]);
       state.dlState = {busy: true, status: "[1/" + lines.length + "] " + lines[0],
                        result: null, progress: {mode: "indeterminate", value: 0}};
+      // первая строка уже «качается», остальные ждут (как в воркере)
+      state.bulk = {total: lines.length, index: 1,
+                    statuses: ["l"].concat(new Array(lines.length - 1).fill("p"))};
+      state.bulkFailed = [];
       return ok({});
     },
     stop_download: function () { return ok(); },

@@ -283,6 +283,61 @@
       parseBulk((document.getElementById("url-batch") || {}).value).length));
   }
 
+  // Разбивка вставки: каждая http(s)-ссылка - на свою строку. Разрез идёт
+  // только перед следующим «http://» - запятые и пробелы ВНУТРИ url не
+  // трогаются (?a=1,2 цел), хвостовая пунктуация отрезается; если ссылок
+  // нет - текст вставляется как есть.
+  function normalizeBulkPaste(text) {
+    var links = [];
+    String(text || "").split(/\r?\n/).forEach(function(line) {
+      line.split(/(?=https?:\/\/)/).forEach(function(part) {
+        var s = part.trim().replace(/[.,;)\]]+$/, "");
+        if (/^https?:\/\//i.test(s)) links.push(s);
+      });
+    });
+    return links.length ? links.join("\n") : String(text || "");
+  }
+
+  // Режим просмотра: пока идёт массовая, вместо textarea - список строк
+  // с построчной подсветкой (классы ставит renderBulkStatuses из poll).
+  function showBulkView(list) {
+    var view = document.getElementById("bulk-view");
+    var box = document.getElementById("url-batch");
+    if (!view || !box) return;
+    view.textContent = "";
+    list.forEach(function(url) {
+      var row = document.createElement("div");
+      row.className = "bulk-item";
+      row.textContent = url;
+      view.appendChild(row);
+    });
+    view.hidden = false;
+    view.setAttribute("aria-hidden", "false");
+    box.hidden = true;
+  }
+  function hideBulkView() {
+    var view = document.getElementById("bulk-view");
+    var box = document.getElementById("url-batch");
+    if (!view || !box) return;
+    view.hidden = true;
+    view.setAttribute("aria-hidden", "true");
+    view.textContent = "";
+    box.hidden = false;
+  }
+  function renderBulkStatuses(statuses) {
+    var rows = document.getElementById("bulk-view").children;
+    for (var i = 0; i < rows.length && i < statuses.length; i++) {
+      var s = statuses[i];
+      rows[i].className = "bulk-item"
+        + (s === "l" ? " is-load" : s === "o" ? " is-ok" : s === "f" ? " is-fail" : "");
+    }
+  }
+  // итог массовой: кнопка «Оставить неудавшиеся» показывается один раз на
+  // переходе busy->false (bulkFailedOffered гасит повторные показы)
+  var bulkWasBusy = false;
+  var bulkFailedFresh = [];
+  var bulkFailedOffered = false;
+
   function switchTab(name) {
     activeTab = name;
     document.getElementById("tab-video").classList.toggle("active", name === "video");
@@ -398,6 +453,20 @@
         box.scrollTop = box.scrollHeight;
       }
       setBusy(st.busy);
+      // массовая: построчная подсветка статусов, по итогу - возврат к
+      // textarea и предложение оставить неудавшиеся ссылки
+      if (st.bulk && st.bulk.statuses &&
+          !document.getElementById("bulk-view").hidden) {
+        renderBulkStatuses(st.bulk.statuses);
+      }
+      if (bulkWasBusy && !st.busy) {
+        bulkFailedFresh = st.bulk_failed || [];
+        hideBulkView();
+        var fbtn = document.getElementById("bulk-failed");
+        if (fbtn) fbtn.hidden = !(bulkFailedFresh.length && !bulkFailedOffered);
+        bulkFailedOffered = bulkFailedOffered || !!bulkFailedFresh.length;
+      }
+      bulkWasBusy = st.busy;
       var p = st.progress || {};
       var bar = document.getElementById("pb");
       if (p.mode === "indeterminate") { bar.classList.add("indeterminate"); bar.style.width = "30%"; }
@@ -508,7 +577,16 @@
             urls: text,
             group: document.getElementById("group").checked,
           });
-          if (bulkRes && bulkRes.error) document.getElementById("status").textContent = bulkRes.error;
+          if (bulkRes && bulkRes.error) {
+            document.getElementById("status").textContent = bulkRes.error;
+          } else {
+            // режим просмотра: список строк со статусами до самого итога;
+            // предыдущее предложение «неудавшихся» закрыто этой загрузкой
+            bulkFailedOffered = false;
+            var fbtn0 = document.getElementById("bulk-failed");
+            if (fbtn0) fbtn0.hidden = true;
+            showBulkView(list);
+          }
           return;
         }
         var url = document.getElementById(activeTab === "video" ? "url-video" : "url-playlist").value.trim();
@@ -574,9 +652,45 @@
           document.getElementById("download").click();
         }
       });
+      // вставка: ссылки кучей разбиваются по строкам, серия Ctrl+V уходит
+      // в новые строки без ручного Enter
+      batchBox.addEventListener("paste", function(ev) {
+        if (!ev.clipboardData) return;
+        var raw = ev.clipboardData.getData("text");
+        if (!raw) return;
+        var next = normalizeBulkPaste(raw);
+        var start = batchBox.selectionStart;
+        var end = batchBox.selectionEnd;
+        var before = batchBox.value.slice(0, start);
+        var after = batchBox.value.slice(end);
+        var lineStart = before.lastIndexOf("\n") + 1;
+        var nlAt = after.indexOf("\n");
+        var restOfLine = nlAt === -1 ? after : after.slice(0, nlAt);
+        var insert = "";
+        if (before.slice(lineStart).trim()) insert += "\n";   // серия вставок
+        insert += next;
+        if (restOfLine.trim()) insert += "\n";                // не приклеиваемся к хвосту
+        ev.preventDefault();
+        batchBox.value = before + insert + after;
+        var caret = before.length + insert.length;
+        batchBox.setSelectionRange(caret, caret);
+        batchBox.dispatchEvent(new Event("input", {bubbles: true}));
+      });
       document.getElementById("batch-clear").addEventListener("click", function() {
         batchBox.value = "";
         updateBulkCount();
+        // список «неудавшихся» больше не предлагаем
+        bulkFailedOffered = true;
+        var fbtnC = document.getElementById("bulk-failed");
+        if (fbtnC) fbtnC.hidden = true;
+        try { localStorage.removeItem("synf.bulk_draft"); } catch (e) { /* приватный режим */ }
+        batchBox.focus();
+      });
+      document.getElementById("bulk-failed").addEventListener("click", function() {
+        batchBox.value = bulkFailedFresh.join("\n");
+        this.hidden = true;
+        bulkFailedOffered = true;
+        batchBox.dispatchEvent(new Event("input"));
         batchBox.focus();
       });
     }).catch(function(e) { console.error("init error:", e); });

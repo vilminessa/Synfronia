@@ -110,7 +110,10 @@ python gui.py
 The «Batch» tab takes a list of links - one per line. Rules: empty lines
 and `#` comments are skipped, anything without `http(s)://` is ignored
 (and counted in the log), duplicates are removed keeping your order; the
-counter «Links: N» updates as you type. Press **Download** at the bottom
+counter «Links: N» updates as you type. Pasting is forgiving: a run of
+links in one line gets split so that each http(s) link starts its own
+line (commas and spaces inside a url are kept), and a repeated Ctrl+V
+never glues links together. Press **Download** at the bottom
 (Ctrl+Enter in the field works too) and the links are fetched strictly
 one after another, each as its own yt-dlp run:
 
@@ -124,9 +127,16 @@ one after another, each as its own yt-dlp run:
 - the summary at the end: all good - «Готово», some failed - «Готово с
   ошибками - скачало X из Y», none - «Не удалось скачать».
 
-The draft list lives in the page memory only: switching a theme with
-`entry` (a page rebuild) clears the textarea. Destination, subtitles,
-quality and re-encode come from the settings card as usual.
+While the queue runs the textarea becomes a watch list: the current line
+pulses in the accent colour with a ⏬ mark, finished links get ✓ in the
+theme's `--ok` colour and failures get ✕ in `--err`. After the run the
+textarea comes back, and a «Keep failed» button (offered once) puts
+exactly the failed links back into the field for a retry.
+
+The draft list is kept in `localStorage` and survives a window close; a
+theme with `entry` (a page rebuild) restores it into the fresh textarea.
+Destination, subtitles, quality and re-encode come from the settings card
+as usual.
 
 ### Modular themes
 

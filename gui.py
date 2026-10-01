@@ -117,6 +117,9 @@ class Api:
         self._cancel = False
         # массовая загрузка: None вне цикла, иначе счётчики для poll()
         self._bulk: dict | None = None
+        # упавшие ссылки прошлой массовой загрузки — их подставляет кнопка
+        # «Оставить неудавшиеся» (сбрасывается при следующем старте)
+        self._bulk_failed: list[str] = []
         self._progress = {"mode": "determinate", "value": 0.0}
         self._ffmpeg = {"downloading": False, "extracting": False, "pct": 0.0, "ok": False, "error": None}
         self._fonts_dl = {"downloading": False, "pct": 0.0, "error": None}
@@ -205,6 +208,8 @@ class Api:
                 "fonts_rev": self._fonts_rev,
                 # массовая: None вне цикла, иначе {total,index,done,failed}
                 "bulk": dict(self._bulk) if self._bulk else None,
+                # упавшие ссылки прошлой массовой (для «Оставить неудавшиеся»)
+                "bulk_failed": list(self._bulk_failed),
                 # значения для карточки настроек: тот же словарь, что и на
                 # диске, поэтому поля не могут разойтись с настройками, по
                 # которым идёт загрузка
@@ -502,7 +507,11 @@ class Api:
             self._status = tr(self._lang, "p.start")
             self._progress = {"mode": "indeterminate"}
             self._bulk = {"total": len(urls), "index": 0,
-                          "done": 0, "failed": 0, "current": ""}
+                          "done": 0, "failed": 0, "current": "",
+                          # построчные состояния для подсветки в окне:
+                          # p=endings(ожидают), l= качается, o=ok, f=fail
+                          "statuses": ["p"] * len(urls)}
+            self._bulk_failed = []
         self.dl = Downloader(on_log=self._log, on_progress=self._on_progress, lang=self._lang)
         ftp = FtpConfig(self.settings, self._lang)
         threading.Thread(
@@ -572,6 +581,7 @@ class Api:
                         break
                     self._bulk["index"] = i
                     self._bulk["current"] = url
+                    self._bulk["statuses"][i - 1] = "l"
                     self._status = f"[{i}/{total}] {url}"
                     self._progress = {"mode": "indeterminate"}
                 self._log("info", f"bulk [{i}/{total}] {url}")
@@ -593,10 +603,17 @@ class Api:
                 with self._lock:
                     self._bulk["done"] = done
                     self._bulk["failed"] = failed
+                    self._bulk["statuses"][i - 1] = "o" if mode == "ok" else "f"
         finally:
             with self._lock:
                 cancelled = cancelled or self._cancel
                 self._busy = False
+                # упавшие ссылки переживают конец цикла (bulk уходит в None):
+                # их подставит кнопка «Оставить неудавшиеся»
+                if self._bulk:
+                    self._bulk_failed = [u for u, s in
+                                         zip(urls, self._bulk["statuses"])
+                                         if s == "f"]
                 self._bulk = None
                 self._progress = {"mode": "determinate", "value": 100.0}
                 if cancelled:
