@@ -112,6 +112,29 @@ STUB = """<script>
     open_themes_folder: function () { return ok(); }
   }};
   window.__probe = state;
+  // Этап5 (события + heartbeat): запись сценария в стаб - это «событие»
+  // настоящего Api._ping, поэтому будим страницу сразу, а не ждём heartbeat
+  // (иначе зонд после каждой установки ждал бы секунду вместо мгновения).
+  // Пингуют и ответы API (кроме poll/get_initial - иначе петля пробуждений:
+  // tick сам зовёт poll). Поля, которые тест читает напрямую (saved/dest),
+  // пинг не требуют.
+  ["dlState", "bulk", "bulkFailed", "bulkStatuses", "logs"].forEach(function (k) {
+    var v = state[k];
+    Object.defineProperty(state, k, {
+      get: function () { return v; },
+      set: function (nv) { v = nv; if (window.__synfPing) window.__synfPing(); },
+      enumerable: true, configurable: true
+    });
+  });
+  Object.keys(window.pywebview.api).forEach(function (name) {
+    if (name === "poll" || name === "get_initial") return;
+    var orig = window.pywebview.api[name];
+    window.pywebview.api[name] = function () {
+      var r = orig.apply(this, arguments);
+      if (window.__synfPing) window.__synfPing();
+      return r;
+    };
+  });
 })();
 </script>
 """

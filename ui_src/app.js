@@ -6,6 +6,13 @@
   var LOG_LINES = 2000; // сколько строк лога держим в textarea
   var LOG_CHARS = 120000; // порог (~2000 строк) для обрезки без split на каждом poll
   var pollTimer = 0;
+  // Гибрид событий и heartbeat (этап 5): опрос стал редким (раз в секунду
+  // полный снапшот - страховка от всего, что не успело прийти событием),
+  // а события Python будят страницу немедленно через __synfPing (push-
+  // канал: очередь evaluate_js + один диспетчер в gui.py).
+  var HEARTBEAT = 1000;
+  var tickInFlight = false;   // poll в полёте: новый тик не наслаиваем
+  var pingPending = false;    // пришёл пинг во время тика - опросим сразу после
   var busy = false;
   var activeTab = "video";
   var clicks = 0;
@@ -489,9 +496,19 @@
     pollTimer = document.hidden ? 0 : setTimeout(tick, delay);
   }
 
+  // Push-канал Python (gui.py шлёт из одного диспетчерского потока):
+  // событие будит опрос немедленно; если тик уже в полёте - запоминаем и
+  // опросим сразу после него. Пинг не несёт данных - данные всегда тянет
+  // сам tick из poll(), так один путь разбора состояния и один курсор лога.
+  window.__synfPing = function() {
+    if (tickInFlight) { pingPending = true; return; }
+    scheduleTick(0);
+  };
+
   async function tick() {
     pollTimer = 0;
-    if (typeof pywebview === "undefined") { scheduleTick(300); return; }
+    tickInFlight = true;
+    if (typeof pywebview === "undefined") { tickInFlight = false; scheduleTick(300); return; }
     try {
       var st = await pywebview.api.poll(since);
       if (typeof st.log_cursor === "number") since = st.log_cursor;
@@ -592,8 +609,8 @@
       applyRenderPrefs(st.settings);
       // этап 1 дорожной карты: одно присваивание в store Alpine (читают только
       // новые узлы, существующие императивные не трогаются). До старта Alpine
-      // store ещё нет - такие тики пропускаются, следующий (через 200 мс)
-      // уже заполнит состояние.
+      // store ещё нет - такие тики пропускаются, следующий тик (по пингу
+      // события или heartbeat) уже заполнит состояние.
       if (window.Alpine && window.Alpine.store) {
         var synfStore = Alpine.store("synf");
         if (synfStore) {
@@ -613,7 +630,10 @@
       }
       if (typeof synfSettingsState === "function") synfSettingsState(st);
     } catch (e) {}
-    scheduleTick(200);
+    tickInFlight = false;
+    // heartbeat: полный снапшот раз в секунду; событие Python будит раньше
+    if (pingPending) { pingPending = false; scheduleTick(0); }
+    else scheduleTick(HEARTBEAT);
   }
 
   function init() {
