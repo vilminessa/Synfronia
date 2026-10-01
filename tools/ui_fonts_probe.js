@@ -1189,10 +1189,16 @@ async function waitForPage() {
     const swap = await evaluate(`(function () {
       var view = document.getElementById("bulk-view");
       var box = document.getElementById("url-batch");
-      return {view: !view.hidden, rows: view.children.length, boxHidden: box.hidden};
+      return {view: !view.hidden, rows: view.children.length, boxHidden: box.hidden,
+              icons: !!view.querySelector("svg.bulk-ico path.ico-ok") &&
+                     !!view.querySelector("svg.bulk-ico path.ico-fail") &&
+                     !!view.querySelector("svg.bulk-ico g.ico-load")};
     })()`);
     if (!(swap.view && swap.rows === 3 && swap.boxHidden)) {
       fail("swap в режим просмотра не случился: " + JSON.stringify(swap));
+    }
+    if (!swap.icons) {
+      fail("SVG-значки состояний не встроены в строки списка");
     }
     // статусы из poll красят строки в цвета темы (--ok/--err/акцент)
     await evaluate(`(function () {

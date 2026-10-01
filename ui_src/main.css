@@ -100,27 +100,62 @@
     color: var(--text);
     opacity: .8;
   }
-  .bulk-item::after {
+  /* SVG-значок состояния в конце строки (вместо эмодзи): одна иконка на
+     строку, нужная группа показывается по классу состояния */
+  .bulk-ico {
     position: absolute;
     right: 4px;
-    top: 0;
+    top: 4px;
+    width: 14px;
+    height: 14px;
+    overflow: visible;
   }
-  /* качается: пульс акцента + значок в конце строки */
+  .bulk-ico path {
+    fill: none;
+    stroke-width: 2.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .bulk-item .ico-load,
+  .bulk-item .ico-ok,
+  .bulk-item .ico-fail { display: none; }
+  /* качается: пульс акцента + вращающийся спиннер-дуга */
   .bulk-item.is-load {
     color: var(--accent);
     opacity: 1;
     animation: bulk-pulse .9s ease-in-out infinite;
   }
-  .bulk-item.is-load::after { content: "⏬"; }
-  /* скачано / не удалось - цвета состояний темы (--ok / --err) */
+  .bulk-item.is-load .ico-load {
+    display: block;
+    transform-box: view-box;
+    transform-origin: 12px 12px;
+    animation: bulk-spin .9s linear infinite;
+  }
+  .bulk-item.is-load .spin-arc { stroke: var(--accent); stroke-width: 3; }
+  /* скачано / не удалось - цвета состояний темы (--ok / --err), значок
+     «рисуется» штрихом один раз при появлении состояния */
   .bulk-item.is-ok { color: var(--ok); opacity: 1; }
-  .bulk-item.is-ok::after { content: "✓"; }
+  .bulk-item.is-ok .ico-ok {
+    display: block;
+    stroke: var(--ok);
+    stroke-dasharray: 26;
+    stroke-dashoffset: 26;
+    animation: bulk-draw .35s ease-out forwards;
+  }
   .bulk-item.is-fail { color: var(--err); opacity: 1; }
-  .bulk-item.is-fail::after { content: "✕"; }
+  .bulk-item.is-fail .ico-fail {
+    display: block;
+    stroke: var(--err);
+    stroke-dasharray: 34;
+    stroke-dashoffset: 34;
+    animation: bulk-draw .3s ease-out forwards;
+  }
   @keyframes bulk-pulse {
     0%, 100% { opacity: .5; }
     50% { opacity: 1; }
   }
+  @keyframes bulk-spin { to { transform: rotate(360deg); } }
+  @keyframes bulk-draw { to { stroke-dashoffset: 0; } }
   .link-btn {
     background: none; border: none; padding: 2px 4px;
     color: var(--accent); font-size: 13px; cursor: pointer; opacity: .9;
