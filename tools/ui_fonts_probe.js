@@ -957,6 +957,113 @@ async function waitForPage() {
         magic1.n >= 6 && (magic1.lit >= 1 || magic2.lit >= 1)],
     ];
     tipChecks.forEach(([name, okFlag]) => { if (!okFlag) fail(name); });
+
+    // ===== подсказки и фокус: модальность ввода =====
+    // Жалобы: (1) при переключении на «Массовую» подсказка появлялась сама -
+    // switchTab программно фокусирует поле; (2) клик по объекту показывал
+    // подсказку, и она висела до клика в пустое место - режим focus игнорирует
+    // :hover-проверки. Корень один: focusin показывал при ЛЮБОМ фокусе.
+    // Теперь показ по фокусу - только для клавиатурной модальности
+    // (initTooltips в common.js); здесь проверяем оба симптома и то, что
+    // клавиатурная навигация подсказки не потеряла.
+    console.log("--- подсказки и фокус (модальность) ---");
+    // карточка настроек перекрывает главное окно - закрываем, как пользователь
+    await evaluate(`(function () {
+      var ev = new KeyboardEvent("keydown", {key: "Escape", bubbles: true});
+      document.getElementById("settings-overlay").dispatchEvent(ev);
+      return true;
+    })()`);
+    await sleep(300);
+    // баг 1: настоящий клик по вкладке -> pointerdown -> switchTab -> фокус
+    // поля; подсказки быть не должно (у самих вкладок data-tip нет)
+    const tabBox = await evaluate(`(function () {
+      var t = document.getElementById("tab-batch");
+      var r = t.getBoundingClientRect();
+      return {cx: Math.round(r.left + r.width / 2), cy: Math.round(r.top + r.height / 2)};
+    })()`);
+    await mouseMove(tabBox.cx, tabBox.cy);   // снимаем hover со старой кнопки
+    await sleep(120);
+    await send("Input.dispatchMouseEvent", {type: "mousePressed", x: tabBox.cx,
+      y: tabBox.cy, button: "left", buttons: 1, clickCount: 1});
+    await send("Input.dispatchMouseEvent", {type: "mouseReleased", x: tabBox.cx,
+      y: tabBox.cy, button: "left", buttons: 0, clickCount: 1});
+    await sleep(700);   // > TIP_DELAY(220): подсказка успела бы показаться
+    const afterTab = await evaluate(`(function () {
+      var t = document.getElementById("tip");
+      return {batch: !document.getElementById("panel-batch").hidden,
+              focused: (document.activeElement || {}).id, hidden: t.hidden};
+    })()`);
+    if (!(afterTab.batch && afterTab.focused === "url-batch" && afterTab.hidden)) {
+      fail("после клика по вкладке подсказка показалась без наведения (баг 1): " +
+           JSON.stringify(afterTab));
+    }
+    // баг 2: клик по полю мышью и отъезд в пустое место - подсказка не висит
+    const fieldBox = await evaluate(`(function () {
+      var f = document.getElementById("url-batch");
+      var r = f.getBoundingClientRect();
+      return {cx: Math.round(r.left + r.width / 2), cy: Math.round(r.top + r.height / 2)};
+    })()`);
+    await mouseMove(fieldBox.cx, fieldBox.cy);
+    await send("Input.dispatchMouseEvent", {type: "mousePressed", x: fieldBox.cx,
+      y: fieldBox.cy, button: "left", buttons: 1, clickCount: 1});
+    await send("Input.dispatchMouseEvent", {type: "mouseReleased", x: fieldBox.cx,
+      y: fieldBox.cy, button: "left", buttons: 0, clickCount: 1});
+    await mouseMove(6, 6);        // уводим в пустое место
+    await sleep(700);
+    const afterClick = await evaluate(`(function () {
+      var t = document.getElementById("tip");
+      return {hidden: t.hidden, on: t.classList.contains("tip-on")};
+    })()`);
+    if (!(afterClick.hidden && !afterClick.on)) {
+      fail("подсказка залипла после клика и отъезда мыши (баг 2): " +
+           JSON.stringify(afterClick));
+    }
+    // клавиатура: Tab-путь подсказок обязан остаться (доступность).
+    // Сначала blur - иначе focus() на уже фокусированном поле не даст focusin
+    await evaluate(`(function () {
+      var a = document.activeElement;
+      if (a && a.blur) a.blur();
+      return true;
+    })()`);
+    await sleep(60);
+    await send("Input.dispatchKeyEvent", {type: "keyDown", key: "Shift",
+      code: "ShiftLeft", windowsVirtualKeyCode: 16});
+    await send("Input.dispatchKeyEvent", {type: "keyUp", key: "Shift",
+      code: "ShiftLeft", windowsVirtualKeyCode: 16});
+    await sleep(80);
+    await evaluate('document.getElementById("url-batch").focus(); true');
+    await sleep(150);
+    const kbdTip = await evaluate(`(function () {
+      var t = document.getElementById("tip");
+      return {hidden: t.hidden, on: t.classList.contains("tip-on"),
+              mode: TIP.mode,
+              text: (t.querySelector(".tip-text") || {}).textContent || ""};
+    })()`);
+    if (!(kbdTip.hidden === false && kbdTip.on === true && kbdTip.mode === "focus" &&
+          kbdTip.text.length > 0)) {
+      fail("клавиатурный фокус без подсказки (доступность потеряна): " + JSON.stringify(kbdTip));
+    }
+    // Escape гасит подсказку, не трогая фокус-логику
+    await evaluate(`(function () {
+      document.dispatchEvent(new KeyboardEvent("keydown", {key: "Escape", bubbles: true}));
+      return true;
+    })()`);
+    await sleep(80);
+    const escTip = await evaluate(
+      '(function () { return document.getElementById("tip").hidden; })()');
+    if (escTip !== true) fail("Escape не погасил подсказку");
+    // возврат состояния: вкладка как была, модальность - «мышь», карточка открыта
+    await evaluate('switchTab("video"); true');
+    await mouseMove(6, 6);
+    await send("Input.dispatchMouseEvent", {type: "mousePressed", x: 6, y: 6,
+      button: "left", buttons: 1, clickCount: 1});
+    await send("Input.dispatchMouseEvent", {type: "mouseReleased", x: 6, y: 6,
+      button: "left", buttons: 0, clickCount: 1});
+    await evaluate(OVERLAY_OPEN);
+    await sleep(350);
+    console.log(`  модальность: клик по вкладке -> фокус=${afterTab.focused} ` +
+      `без подсказки=${afterTab.hidden}; клик+отъезд подсказка скрыта=` +
+      `${afterClick.hidden}; Tab-подсказка=${kbdTip.mode} Escape=${escTip}`);
     // wiggle реплики кликера: каждые 500-й клик показывает комментарий с
     // анимацией msg-wiggle, и она правда двигает текст (замер трансформа)
     await evaluate(`(function () {
