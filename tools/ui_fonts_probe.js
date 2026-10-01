@@ -1732,6 +1732,22 @@ async function waitForPage() {
       return true;
     })()`);
     await evaluate('document.getElementById("download").click(); true');
+    // строки создаются асинхронно (ответ start_bulk), а Alpine проявляет их
+    // директивой x-motion ~350 мс - ловим анимацию появления в первые
+    // мгновения; если Alpine не проинициализировал императивно добавленный
+    // узел, анимации не будет и проверка честно упадёт
+    let rowAnim = -1;
+    for (let i = 0; i < 12 && rowAnim <= 0; i++) {
+      rowAnim = await evaluate(`(function () {
+        var r = document.getElementById("bulk-view").children[0];
+        if (!r || !r.getAnimations) return -1;
+        return r.getAnimations().length;
+      })()`);
+      if (rowAnim <= 0) await sleep(50);
+    }
+    if (rowAnim <= 0) {
+      fail("строки массовой появились без анимации появления (x-motion не отработал)");
+    }
     await sleep(450);
     const swap = await evaluate(`(function () {
       var view = document.getElementById("bulk-view");
@@ -2084,15 +2100,74 @@ async function waitForPage() {
               failed: t("btn.failed"), cancelled: t("btn.cancelled")};
     })()`);
     const read = async () => await evaluate(DL_READ);
-    // 700 мс: два тика (tick() ходит в poll каждые 200 мс) плюс запас на
-    // анимацию итога (420 мс) - иначе геометрию меряем в перелёте
+    const iconAnims = () => evaluate(`(function () {
+      var ic = document.querySelector("#download .dl-icon");
+      if (!ic || !ic.getAnimations) return -1;
+      return ic.getAnimations().length;
+    })()`);
+    const RESULT_CLS = {ok: "dl-ok", error: "dl-err", warn: "dl-warn",
+                        failed: "dl-fail", cancelled: "dl-cancel"};
+    // Детерминированная ловля итоговой анимации (Motion, этап 2):
+    //  1) ждём, пока tick() применит статус: класс ставится тем же вызовом,
+    //     который синхронно запускает Motion - сразу после класса
+    //     getAnimations() обязан вернуть анимации (старт не «успевает» пройти);
+    //  2) ждём конца спринга (~1 с, лимит 2.4 с) - иначе финальные opacity и
+    //     transform меряются в перелёте (0.999 вместо 1);
+    //  3) финальный сон больше не «два тика»: тик уже отработал (класс мы
+    //     видели), оставляем 250 мс на оседание текстовых transition'ов и с
+    //     запасом укладываемся в DL_RESET_MS (2000) до автосброса в idle.
     const step = async (st, label) => {
+      // обнуляем отметку Motion: читается только вызов для ЭТОГО состояния
+      await evaluate('document.getElementById("download")._dlMotionAt = 0; true');
       await evaluate(DL_SET(st));
-      await sleep(700);
+      let animNow = -1;
+      let motionAt = 0;
+      if (st.result) {
+        const want = RESULT_CLS[st.result] || "";
+        // 1) ждём, пока tick() применит статус: класс ставится тем же вызовом,
+        //    что синхронно зовёт Motion - появился класс + отметка = вызвано
+        for (let i = 0; i < 40 && !motionAt; i++) {
+          const cls = await evaluate('document.getElementById("download").className');
+          if (cls.indexOf(want) >= 0) {
+            motionAt = await evaluate('(document.getElementById("download")._dlMotionAt || 0)');
+            if (!motionAt) await sleep(40);
+          } else {
+            await sleep(40);
+          }
+        }
+        // 2) живую анимацию ловим и ждём её конца: старт Motion v12 ~150 мс,
+        //    спринг живёт ~1 с - без ожидания финальные opacity/transform
+        //    меряются в перелёте (0.96 вместо 1)
+        for (let i = 0; i < 8 && animNow <= 0; i++) {
+          animNow = await iconAnims();
+          if (animNow <= 0) await sleep(60);
+        }
+        for (let i = 0; i < 30 && animNow > 0; i++) {
+          await sleep(60);
+          animNow = await iconAnims();
+        }
+        if (!motionAt) {
+          // почему не было даже вызова - диагностика для разбора
+          const why = await evaluate(`JSON.stringify({
+            reduced: typeof reducedMotion === "function" ? reducedMotion() : "нет функции",
+            motion: typeof window.Motion !== "undefined" && !!Motion.animate,
+            cls: document.documentElement.className,
+            btnCls: document.getElementById("download").className
+          })`);
+          console.log("        диагностика: Motion не вызван: " + why);
+        }
+      }
+      // у итогов фаза 2 уже дождалась анимации (класс свежий) - 150 мс; для
+      // остальных шагов нужен исходные 700 мс: два тика poll + оседание
+      // transition заливки (.28 с), иначе ширины меряются в перелёте
+      await sleep(st.result ? 150 : 700);
       const m = await read();
+      m.animNow = animNow;
+      m.motionAt = motionAt;
       console.log(`  ${label.padEnd(22)} класс="${m.cls}" ширина=${m.w}px ` +
         `заливка=${m.fillPct}/${m.fillW}px аним=[${m.fillAnim}|${m.sheenAnim}] ` +
-        `значок=${m.iconOpacity}(${m.iconAnim}) текст=${m.labelOpacity} процент="${m.pct}" ` +
+        `значок=${m.iconOpacity}(${m.iconAnim}) motion=${m.motionAt > 0 ? "да" : "НЕТ"} ` +
+        `живая_аним=${m.animNow} текст=${m.labelOpacity} процент="${m.pct}" ` +
         `svg=${m.svg}/${m.shapes} кнопка_выкл=${m.dlDisabled} отмена_выкл=${m.stopDisabled}`);
       return m;
     };
@@ -2175,19 +2250,23 @@ async function waitForPage() {
         Math.abs(post.fillW - det.fillW) <= 2],
       ["100% заливает кнопку", full.pct === "100%" && full.fillPct === "100%" &&
         Math.abs(full.fillW - full.w) <= 2],
-      ["ok: лайк, анимация, подпись", ok.svg === 1 && /dl-ok/.test(ok.cls) &&
-        ok.iconAnim === "dl-pop" && ok.iconOpacity === 1 && ok.labelOpacity === 0 &&
+      // контракт этапа 2: итог входит анимацией Motion (отметка _dlMotionAt,
+      // читается только для текущего состояния), а CSS-@keyframes удалены -
+      // вычисленная анимация иконки обязана быть "none"
+      ["ok: лайк, анимация Motion, подпись", ok.svg === 1 && /dl-ok/.test(ok.cls) &&
+        ok.motionAt > 0 && ok.iconAnim === "none" && ok.iconOpacity === 1 && ok.labelOpacity === 0 &&
         !ok.tip && ok.aria === dlTitles.done && ok.fillPct === "0%"],
       ["error: восклицательный знак, «не всё»", err.svg === 1 && /dl-err/.test(err.cls) &&
-        err.iconAnim === "dl-shake" && !err.tip && err.aria === dlTitles.partial],
+        err.motionAt > 0 && err.iconAnim === "none" && !err.tip && err.aria === dlTitles.partial],
       ["warn: тот же знак, своя подпись", warn.svg === 1 && /dl-warn/.test(warn.cls) &&
-        warn.iconAnim === "dl-shake" && !warn.tip && warn.aria === dlTitles.warn && warn.shapes === err.shapes],
+        warn.motionAt > 0 && warn.iconAnim === "none" && !warn.tip &&
+        warn.aria === dlTitles.warn && warn.shapes === err.shapes],
       ["failed: крест и выпячивание", fail2.svg === 1 && fail2.shapes === 2 &&
-        /dl-fail/.test(fail2.cls) && fail2.iconAnim === "dl-bulge" &&
+        /dl-fail/.test(fail2.cls) && fail2.motionAt > 0 && fail2.iconAnim === "none" &&
         !fail2.tip && fail2.aria === dlTitles.failed && fail2.iconOpacity === 1 && fail2.labelOpacity === 0],
       ["failed: другой цвет и знак, чем у «!»", fail2.color !== err.color && fail2.color !== idle.color],
       ["cancelled: знак стоп", cancel.svg === 1 && cancel.shapes >= 2 && /dl-cancel/.test(cancel.cls) &&
-        cancel.iconAnim === "dl-pop" && !cancel.tip && cancel.aria === dlTitles.cancelled],
+        cancel.motionAt > 0 && cancel.iconAnim === "none" && !cancel.tip && cancel.aria === dlTitles.cancelled],
       ["иконка помещается в кнопку", ok.iconIn.ok && err.iconIn.ok && warn.iconIn.ok &&
         fail2.iconIn.ok && cancel.iconIn.ok ||
         `ok=${JSON.stringify(ok.iconIn)} err=${JSON.stringify(err.iconIn)} ` +

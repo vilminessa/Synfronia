@@ -527,6 +527,23 @@
     }
   }
 
+  /* ---- Motion (vendor) для анимаций состояний ------------------------------
+     Обёртка над Motion.animate: если библиотеки нет (чужой entry-шаблон без
+     vendor) или пользователь просит меньше движения - просто не анимируем.
+     Это безопасно: базовые CSS-состояния элементов и так финальны (например,
+     .dl-icon в итоговом классе = opacity 1), переход дорисует его
+     transition'ом из .dl-icon. */
+  function motionAnimate(el, keyframes, opts) {
+    if (!el || typeof window.Motion === "undefined" || !Motion.animate) return null;
+    if (reducedMotion()) return null;
+    try {
+      return Motion.animate(el, keyframes, opts);
+    } catch (e) {
+      console.error("motion:", e);
+      return null;
+    }
+  }
+
   /* ---- store Alpine (этап 1 дорожной карты «Alpine + Motion») ----
      Единственный источник реактивного состояния для НОВЫХ узлов. Контракт
      сосуществования: в store пишет только tick() в app.js (одним
@@ -557,6 +574,17 @@
         if (I18N.ru && I18N.ru[key] !== undefined) return I18N.ru[key];
         return key;
       }
+    });
+    // x-motion='{"opacity":[0,1],"y":[6,0]}' - проявление элемента ключевыми
+    // кадрами Motion (JSON). Регистрируется здесь же: Alpine к этому моменту
+    // есть, а обработчики alpine:init уже перечислены нашими скриптами.
+    // Alpine инициализирует директиву при появлении узла в DOM - поэтому
+    // атрибут можно поставить и императивному коду (см. showBulkView).
+    Alpine.directive("motion", function (el, props) {
+      var kf = null;
+      try { kf = JSON.parse(props.expression || ""); } catch (e) { kf = null; }
+      if (!kf || typeof kf !== "object") return;
+      motionAnimate(el, kf, { duration: 0.35, ease: "easeOut" });
     });
   });
 

@@ -274,39 +274,22 @@
   .dl.dl-ok { color: var(--dl-ok); box-shadow: inset 0 0 0 1px var(--dl-ok); }
   .dl.dl-err, .dl.dl-warn { color: var(--dl-err); box-shadow: inset 0 0 0 1px var(--dl-err); }
   .dl.dl-cancel { color: var(--text); color: color-mix(in srgb, var(--dl-cancel) 75%, transparent); }
-  .dl.dl-ok .dl-icon { animation: dl-pop .42s var(--dl-spring); }
-  .dl.dl-err .dl-icon, .dl.dl-warn .dl-icon { animation: dl-shake .42s cubic-bezier(.36, .07, .19, .97); }
-  .dl.dl-cancel .dl-icon { animation: dl-pop .34s var(--dl-spring); }
+  /* Анимации иконок живут в JS (DL_RESULT_ANIMS в app.js, Motion-спринги) -
+     CSS-@keyframes dl-pop/dl-shake/dl-bulge удалены: style-recalc от их
+     кадров был лишней работой, а спринг идёт через движок анимаций браузера.
+     Если Motion недоступен или выключены анимации, дорисовывает transition
+     у .dl-icon (база класса и так финальна). */
   /* полный провал: крест неприлично выпячивается за кнопку и гаснет, поэтому
      именно этому состоянию нужен overflow: visible - иначе пик срежет рамкой */
   .dl.dl-fail {
     overflow: visible; color: var(--dl-fail);
     box-shadow: inset 0 0 0 1px var(--dl-fail);
   }
-  .dl.dl-fail .dl-icon { animation: dl-bulge .5s var(--dl-spring); }
+  /* иконка выходит спрингом Motion (DL_RESULT_ANIMS в app.js) - CSS-анимации
+     для неё удалены, см. комментарий ниже у .dl-ok */
   /* крест крупнее прочих знаков: в покое он уже впритык к краям, а на пике
      анимации выходит за кнопку - обводку чуть тонше, чтобы не разжиреть */
   .dl.dl-fail .dl-icon svg { width: 27px; height: 27px; stroke-width: 2; }
-  @keyframes dl-bulge {
-    0% { opacity: 0; transform: scale(.2) rotate(-28deg); }
-    32% { opacity: 1; transform: scale(1.55) rotate(7deg); filter: drop-shadow(0 0 10px var(--dl-fail)); }
-    50% { transform: scale(.84) rotate(-4deg); filter: drop-shadow(0 0 2px var(--dl-fail)); }
-    72% { transform: scale(1.16) rotate(0); filter: drop-shadow(0 0 5px var(--dl-fail)); }
-    100% { opacity: 1; transform: scale(1) rotate(0); filter: none; }
-  }
-  @keyframes dl-pop {
-    0% { opacity: 0; transform: scale(.3) rotate(-16deg); }
-    60% { opacity: 1; transform: scale(1.14) rotate(4deg); }
-    100% { opacity: 1; transform: scale(1) rotate(0); }
-  }
-  @keyframes dl-shake {
-    0% { opacity: 0; transform: scale(.6); }
-    25% { opacity: 1; transform: scale(1) translateX(-4px); }
-    45% { transform: translateX(4px); }
-    65% { transform: translateX(-3px); }
-    85% { transform: translateX(2px); }
-    100% { opacity: 1; transform: scale(1) translateX(0); }
-  }
   /* пока процент неизвестен, заливка не едет: по ней ходит блик. Сама заливка
      всегда равна рекорду процента (dlBest), поэтому на новом файле плейлиста
      не откатывается */
