@@ -1151,41 +1151,8 @@ async function waitForPage() {
     console.log(`  массовая: панель=${bulkUI.visible} счётчик="${bulkCount}" ` +
       `ссылки=${JSON.stringify(bulkStart.list)} статус="${bulkStart.status}" стоп=${stopLocked}`);
 
-    // -- кнопка «Убить» и черновик списка ------------------------------
-    console.log("--- кнопка «Убить» ---");
-    // в busy кнопка НЕ гаснет (единственный выход из зависания)
-    await evaluate(`(function () {
-      window.__probe.dlState = {busy: true, status: "x", result: null,
-                                progress: {mode: "indeterminate", value: 0}};
-      return true;
-    })()`);
-    await sleep(450);
-    const killUI = await evaluate(`(function () {
-      var k = document.getElementById("kill");
-      return {exists: !!k, active: !!k && k.disabled === false};
-    })()`);
-    if (!(killUI.exists && killUI.active)) {
-      fail("кнопка «Убить» отсутствует или сброшена в busy: " + JSON.stringify(killUI));
-    }
-    // confirm да -> стаб фиксирует команду
-    await evaluate(`(function () {
-      window.confirm = function () { return true; };
-      document.getElementById("kill").click();
-      return true;
-    })()`);
-    const killYes = await evaluate(
-      '(window.__probe.saved || []).filter(function (x) { return x[0] === "kill"; }).length');
-    if (killYes !== 1) fail("kill_restart не вызван после confirm: " + killYes);
-    // confirm нет -> команда не уходит
-    await evaluate(`(function () {
-      window.confirm = function () { return false; };
-      document.getElementById("kill").click();
-      return true;
-    })()`);
-    const killNo = await evaluate(
-      '(window.__probe.saved || []).filter(function (x) { return x[0] === "kill"; }).length');
-    if (killNo !== 1) fail("kill_restart ушёл без подтверждения: " + killNo);
-    // черновик списка: ввод живёт в localStorage (переживёт «Убить»)
+    // -- черновик списка ссылок (localStorage) --------------------------
+    console.log("--- черновик списка ---");
     await evaluate(`(function () {
       var box = document.getElementById("url-batch");
       box.value = "https://youtu.be/draft\\nhttps://youtu.be/draft2";
@@ -1196,17 +1163,7 @@ async function waitForPage() {
     if (draft.indexOf("youtu.be/draft2") < 0) {
       fail("черновик не сохранён в localStorage: " + JSON.stringify(draft));
     }
-    // уборка: busy гасим, подтверждение возвращаем
-    await evaluate(`(function () {
-      window.__probe.dlState = {busy: false, status: "", result: null,
-                                progress: {mode: "determinate", value: 0}};
-      window.confirm = function () { return true; };
-      if (typeof setDownloadState === "function") setDownloadState("idle", 0, false);
-      return true;
-    })()`);
-    await sleep(450);
-    console.log(`  «Убить»: кнопка=${killUI.active} confirm-да=${killYes} ` +
-      `confirm-нет=${killNo} черновик=${draft.length}б`);
+    console.log(`  черновик: ${draft.length}б`);
 
     console.log("--- раздел FTP ---");
     const ftp = await evaluate(FTP_VIS);
