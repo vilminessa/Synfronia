@@ -471,7 +471,7 @@
       applyTheme(initData.settings.theme || "");
       setDownloadState("idle", 0, false);
       // черновик массового списка: восстанавливаем до первого подсчёта
-      // (переживает перезапуск, в том числе кнопку «Убить»)
+      // (переживает закрытие окна и любые перезапуски)
       try {
         var bulkDraft = localStorage.getItem("synf.bulk_draft");
         if (bulkDraft) document.getElementById("url-batch").value = bulkDraft;
@@ -534,12 +534,6 @@
         this.disabled = true;
         pywebview.api.stop_download();
       });
-      document.getElementById("kill").addEventListener("click", function() {
-        // принудительный перезапуск на случай зависания: подтверждение
-        // обязательна, кнопка стоит рядом с «Отмена»
-        if (!window.confirm(t("kill.confirm"))) return;
-        pywebview.api.kill_restart();
-      });
       ffmpegRetry.addEventListener("click", function() {
         ffmpegRetry.style.display = "none";
         ffmpegStatus.classList.add("ffmpeg-hidden");
@@ -568,8 +562,7 @@
       document.getElementById("tab-playlist").addEventListener("click", function() { switchTab("playlist"); });
       document.getElementById("tab-batch").addEventListener("click", function() { switchTab("batch"); });
       // массовая вкладка: счётчик на вводе, черновик в localStorage
-      // (переживает перезапуск, в том числе кнопку «Убить»), Ctrl+Enter -
-      // старт, очистка
+      // (переживает закрытие окна), Ctrl+Enter - старт, очистка
       var batchBox = document.getElementById("url-batch");
       batchBox.addEventListener("input", function() {
         try { localStorage.setItem("synf.bulk_draft", batchBox.value); } catch (e) { /* приватный режим */ }
