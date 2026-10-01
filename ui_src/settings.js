@@ -731,7 +731,18 @@
     var note = document.getElementById("transcode-note");
     if (note) {
       if (!transAvailability.ffmpeg) {
-        note.textContent = t("trans.note.noffmpeg");
+        // текст + кнопка ведения: единственный путь докачки - общий оверлей
+        // главного окна (тот же, что показывается при старте без ffmpeg;
+        // z-index 999 перекрывает карточку, после успеха оверлей скрывается
+        // в tick, а эта ветка очистится по st.ffmpeg.ok)
+        note.textContent = t("trans.note.noffmpeg") + " ";
+        var dlBtn = document.createElement("button");
+        dlBtn.type = "button";
+        dlBtn.id = "transcode-ffmpeg-dl";
+        dlBtn.setAttribute("data-i18n", "ffmpeg.download");
+        dlBtn.textContent = t("ffmpeg.download");   // уже переведено, translateStatic подхватит смену языка
+        dlBtn.addEventListener("click", openFfmpegOverlay);
+        note.appendChild(dlBtn);
         note.hidden = false;
       } else if (missing.length) {
         note.textContent = t("trans.note.missing") + missing.join(", ") + ".";
@@ -742,6 +753,12 @@
         note.hidden = true;
       }
     }
+  }
+  // Кнопка из пояснения перекодировки: открыть общий оверлей докачки ffmpeg.
+  // Отдельной механики не заводим - прогресс, статус и retry уже живут там.
+  function openFfmpegOverlay() {
+    var ov = document.getElementById("ffmpeg-overlay");
+    if (ov) ov.classList.remove("ffmpeg-hidden");
   }
   function buildLangOptions() {
     fillSelect("lang", LANGS.map(function(k) { return [k, I18N[k]["thisLang"]]; }));
@@ -1155,7 +1172,11 @@
     if (st.settings) extra.settings = st.settings;
     if (st.lang && st.lang !== curLang) curLang = st.lang;
     if (st.ffmpeg && typeof st.ffmpeg.ok !== "undefined") {
-      transAvailability = {ffmpeg: !!st.ffmpeg.ok, avail: transAvailability.avail};
+      // avail берём из poll, когда Python его прислал: после докачки
+      // воркер пересчитал transcoders, и без этого поля кодировщики
+      // остались бы disabled до перезапуска (null/пусто - не затираем)
+      transAvailability = {ffmpeg: !!st.ffmpeg.ok,
+                           avail: st.transcoders || transAvailability.avail};
       buildTranscodeOptions();
     }
     if (curLang !== langPainted) {

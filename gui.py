@@ -262,6 +262,10 @@ class Api:
                 "logs": lines[start - oldest:],
                 "log_cursor": self._log_total,
                 "ffmpeg": dict(self._ffmpeg),
+                # свежий список кодировщиков (воркер докачки пересчитывает
+                # _transcoders): после «Загрузить FFmpeg» карточка раскроет
+                # их без перезапуска приложения
+                "transcoders": list(self._transcoders) if self._transcoders else None,
                 "fonts_dl": dict(self._fonts_dl),
                 "fonts_rev": self._fonts_rev,
                 # массовая: None вне цикла, иначе {total,index,done,failed}
@@ -281,11 +285,18 @@ class Api:
         return state
 
     def get_initial(self) -> dict:
+        # стартовая проверка ffmpeg обязана отразиться и в poll: иначе
+        # _ffmpeg["ok"] остаётся False до первой докачки и первый же тик
+        # затирает верное значение из init - карточка показывала бы
+        # «перекодировка недоступна» даже при установленном ffmpeg
+        found = bool(find_ffmpeg())
+        with self._lock:
+            self._ffmpeg["ok"] = found
         if self._transcoders is None:
             self._transcoders = available_transcoders()
         return {
             "settings": dict(self.settings),
-            "ffmpeg": bool(find_ffmpeg()),
+            "ffmpeg": found,
             "default_dir": self._dest or str(default_download_dir()),
             "transcoders": list(self._transcoders),
             "fonts": fonts_embed(),
