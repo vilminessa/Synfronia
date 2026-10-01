@@ -35,12 +35,17 @@ PARTS = (
     ("BASE_TEMPLATE", "index.html"),
     # карточка настроек (оверлей) - фрагмент главной страницы, не отдельный шаблон
     ("SETTINGS_HTML", "settings.html"),
+    # vendor: страница получается строкой (html=HTML в gui.py), внешних загрузок
+    # не бывает - библиотеки лежат файлами и вшиваются в неё как литералы.
+    # Порядок важен: Motion до app.js, Alpine последним (см. index.html).
+    ("MOTION_JS", "vendor/motion.js"),
+    ("ALPINE_JS", "vendor/alpine.min.js"),
 )
 
 HEADER = (
     "# ui.py — АВТО-ГЕНЕРИРУЕМЫЙ ФАЙЛ, не редактируй его вручную.\n"
     "# Исходники интерфейса: ui_src/{app,main,settings}.css, ui_src/{app,common,settings}.js,\n"
-    "#                       ui_src/{index,settings}.html\n"
+    "#                       ui_src/{index,settings}.html, ui_src/vendor/{motion,alpine}.*\n"
     "# Сборка: python tools/build_ui.py   Проверка: python tools/build_ui.py --check"
 )
 
