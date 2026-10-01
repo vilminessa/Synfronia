@@ -95,6 +95,11 @@ STUB = """<script>
       return ok({});
     },
     stop_download: function () { return ok(); },
+    // «Убить»: стаб процесс НЕ убивает — только фиксирует команду
+    kill_restart: function () {
+      state.saved.push(["kill"]);
+      return ok();
+    },
     browse_folder: function () { return ok("C:\\\\Downloads"); },
     test_ftp: function () { return ok({error: "test"}); },
     open_fonts_folder: function () { return ok(); },

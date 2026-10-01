@@ -3,6 +3,9 @@
 import os
 import re
 import shutil
+import socket
+import ssl
+import struct
 import subprocess
 import threading
 import time
@@ -11,6 +14,7 @@ import zipfile
 from pathlib import Path
 
 from yt_dlp import YoutubeDL
+from yt_dlp.networking import _urllib as ytdlp_urllib
 from yt_dlp.postprocessor import ffmpeg as ytdlp_ffmpeg
 from yt_dlp.postprocessor.embedthumbnail import EmbedThumbnailPP
 from yt_dlp.postprocessor.ffmpeg import (
@@ -461,6 +465,11 @@ class Downloader:
         # во время попытки, - а флаг переживает finally до конца серии.
         self._stop_req = threading.Event()
         self._wd_done = threading.Event()
+        # реестр сокетов текущей попытки — их закрывает watchdog по Stop
+        self._net_sockets: list = []
+        # fd, перехваченные у ssl до detach (для HTTPS watchdog закрывает
+        # их напрямую — обычный Python-объект после wrap уже бессилен)
+        self._net_fds: list[int] = []
         self._errors = False
         self._summary = ("ok", 0, 0)
         self._finished = []
@@ -512,17 +521,90 @@ class Downloader:
             raise _StopDownload()
         return 0.0
 
-    def _watchdog(self, ydl) -> None:
-        """Фоновый сторож: при запросе остановки закрывает все активные
-        HTTP-соединения yt-dlp, чтобы прервать блокирующий read и retry-цикл."""
+    def _watchdog(self) -> None:
+        """Фоновый сторож: при запросе остановки закрывает сокеты, которыми
+        держит yt-dlp (см. _guard_sockets).
+
+        Бывший механизм director.close() ничего не закрывает — базовый
+        RequestHandler.close() в yt-dlp это пустой pass, поэтому начатый
+        handshake/read жил до socket_timeout, а Stop «висел» 17–19 секунд.
+        """
         while not self._stop.wait(0.05):
             if self._wd_done.is_set():
                 return
-        try:
-            director = ydl._request_director
-            director.close()
-        except Exception:  # noqa: BLE001
-            pass
+        # Остановка объявлена: додавливаем сокеты, ПОКА попытка жива.
+        # Первого прохода мало — сам коннект yt-dlp может случиться уже
+        # ПОСЛЕ Stop (подготовка опенера занимает доли секунды), поэтому
+        # новые сокеты глушим каждые 50 мс до wd_done.
+        while not self._wd_done.is_set():
+            for sock in list(self._net_sockets):
+                # Закрываем fd НАПРЯМУЮ, минуя sock.close(): тот при живых
+                # makefile-ссылках (http.client держит fp) лишь помечает
+                # объект закрытым и НЕ трогает fd. На Windows обычный close
+                # из чужого потока не будит ожидающий select/recv, а
+                # SO_LINGER(1, 0) + closesocket шлёт RST — ждущие просыпаются
+                # мгновенно (проверено на зависшем HTTP-клиенте).
+                try:
+                    fd = sock.fileno()
+                    if fd < 0:
+                        continue
+                    try:
+                        sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER,
+                                        struct.pack("ii", 1, 0))
+                    except OSError:
+                        pass
+                    sock.detach()  # объект забывает fd — GC позже не закроет чужой
+                    socket.socket(fileno=fd).close()
+                except OSError:
+                    pass
+            # fd от ssl (см. _guard_ssl): закрываем ровно один раз — после
+            # этого номер может достаться чужому процессу, повтор не нужен
+            if self._net_fds:
+                fds, self._net_fds = self._net_fds, []
+                for fd in fds:
+                    try:
+                        socket.socket(fileno=fd).close()
+                    except OSError:
+                        pass
+            if self._wd_done.wait(0.05):
+                return
+
+    def _guard_sockets(self, orig):
+        """Обёртка _urllib.create_connection: регистрирует сокеты нашего
+        потока, чтобы watchdog мог их закрыть по остановке.
+
+        yt-dlp создаёт соединения через свою create_connection (её же
+        привязывает http.client как _create_connection на каждый запрос),
+        поэтому достаточно обернуть имя в модуле _urllib. Сокет ловится
+        ДО wrap_socket — закрытие рвёт и handshake, и чтение ответа.
+        """
+        registry = self._net_sockets
+        holder = threading.get_ident()
+
+        def guarded(address, *args, **kwargs):
+            sock = orig(address, *args, **kwargs)
+            if threading.get_ident() == holder:
+                registry.append(sock)
+            return sock
+
+        return guarded
+
+    def _guard_ssl(self, orig_wrap):
+        """Патч SSLContext.wrap_socket: запоминает fd ДО того, как ssl
+        отвяжет сокет (wrap_socket делает sock.detach()) — дальше этот fd
+        держит уже SSLSocket, и прервать handshake можно только закрыв
+        fd напрямую (проверено: ожидающий handshake просыпается сразу)."""
+        registry = self._net_fds
+        holder = threading.get_ident()
+
+        def wrap_guard(ctx, sock, *args, **kwargs):
+            if threading.get_ident() == holder:
+                fd = sock.fileno()
+                if fd >= 0:
+                    registry.append(fd)
+            return orig_wrap(ctx, sock, *args, **kwargs)
+
+        return wrap_guard
 
     def _interruptible_popen(self):
         """Подкласс yt_dlp.utils.Popen, чей run() прерывается по нашему _stop.
@@ -762,13 +844,20 @@ class Downloader:
             info = None
             short = None
             orig_ff_popen = ytdlp_ffmpeg.Popen
+            orig_create_conn = ytdlp_urllib.create_connection
+            orig_wrap_socket = ssl.SSLContext.wrap_socket
+            self._net_sockets = []
+            self._net_fds = []
             try:
                 self._wd_done.clear()
-                # на время попытки ffmpeg прерывается по нашему _stop
+                # на время попытки ffmpeg прерывается по нашему _stop,
+                # а сокеты зависших запросов закрывает watchdog
                 ytdlp_ffmpeg.Popen = self._interruptible_popen()
+                ytdlp_urllib.create_connection = self._guard_sockets(orig_create_conn)
+                ssl.SSLContext.wrap_socket = self._guard_ssl(orig_wrap_socket)
                 with YoutubeDL(self._add_ffmpeg(opts)) as ydl:
                     threading.Thread(
-                        target=self._watchdog, args=(ydl,), daemon=True, name="synfronia-watchdog"
+                        target=self._watchdog, daemon=True, name="synfronia-watchdog"
                     ).start()
                     self._register_pps(ydl, subs_on, transcode, quality)
                     info = ydl.extract_info(url, download=True)
@@ -793,6 +882,8 @@ class Downloader:
                 break
             finally:
                 ytdlp_ffmpeg.Popen = orig_ff_popen
+                ytdlp_urllib.create_connection = orig_create_conn
+                ssl.SSLContext.wrap_socket = orig_wrap_socket
                 self._wd_done.set()
                 self._stop.clear()
                 self._on_progress({"status": "done"})

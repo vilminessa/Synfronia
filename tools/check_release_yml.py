@@ -75,9 +75,10 @@ def main() -> int:
     ver_file = ROOT / "version.py"
     ok(ver_file.is_file(), "version.py существует (единственный источник версии)")
     if ver_file.is_file():
-        m = re.search(r'__version__\s*=\s*"(\d+)\.(\d+)\.(\d+)"',
+        # версия — X.Y.Z или четырёхкомпонентная X.Y.Z.N (v1.2.7.1)
+        m = re.search(r'__version__\s*=\s*"(\d+)\.(\d+)\.(\d+)(?:\.(\d+))?"',
                       ver_file.read_text(encoding="utf-8"))
-        ok(m is not None, "__version__ в формате X.Y.Z", str(m))
+        ok(m is not None, "__version__ в формате X.Y.Z[.N]", str(m))
     steps = jobs.get("verify", {}).get("steps") or []
     vsteps = [s for s in steps if "Версия совпадает с тегом" in str(s.get("name", ""))]
     ok(bool(vsteps), "в verify есть шаг сверки версии с тегом")

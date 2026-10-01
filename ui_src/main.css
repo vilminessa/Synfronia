@@ -85,6 +85,23 @@
     color: var(--accent); font-size: 13px; cursor: pointer; opacity: .9;
   }
   .link-btn:hover { text-decoration: underline; opacity: 1; }
+  /* «Убить»: принудительный перезапуск — всегда активна, но визуально тише
+     «Скачать»/«Отмена», чтобы не цепляться случайно */
+  .kill-btn {
+    padding: 7px 14px;
+    border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+    border-radius: var(--radius-s);
+    background: none;
+    color: var(--warn);
+    font-size: 13px;
+    cursor: pointer;
+    opacity: .75;
+    transition: opacity .15s, border-color .15s;
+  }
+  .kill-btn:hover {
+    opacity: 1;
+    border-color: var(--warn);
+  }
   .actions { margin-top: 16px; display: flex; gap: 8px; align-items: center; }
   .pb-wrap { margin-top: 14px; height: 10px; border-radius: var(--radius-s); background: var(--surface); overflow: hidden; }
   #pb { height: 100%; width: 0; background: var(--accent); transition: width .2s; }

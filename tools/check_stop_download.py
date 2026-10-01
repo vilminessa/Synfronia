@@ -20,6 +20,7 @@ r"""Проверка остановки загрузки: урок инциде�
 
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -43,6 +44,7 @@ import downloader  # noqa: E402
 import gui  # noqa: E402
 import i18n  # noqa: E402
 import yt_dlp.postprocessor.ffmpeg as ytdlp_ffmpeg  # noqa: E402
+from yt_dlp.networking import _urllib as ytdlp_urllib  # noqa: E402
 from yt_dlp.utils import Popen as YtPopen  # noqa: E402
 
 _checks = 0
@@ -157,8 +159,44 @@ def main() -> int:
     ok(rc is not None and rc != 0, "процесс завершён принудительно (код != 0)",
        repr(rc))
 
-    # 5. Api: статус виден сразу после клика
-    section("5. Api.stop_download - статус мгновенно")
+    # 5. зависшая сетевая операция: принимаем и молчим - клиент висит на
+    # чтении ответа до socket_timeout (~20с), пока watchdog не закроет сокет
+    section("5. Stop при зависшем соединении")
+    linger = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    linger.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    linger.bind(("127.0.0.1", 0))
+    linger.listen(8)
+    held: list[socket.socket] = []
+
+    def hold_conn() -> None:
+        while True:
+            try:
+                conn, _ = linger.accept()
+                held.append(conn)
+            except OSError:
+                return
+
+    threading.Thread(target=hold_conn, daemon=True).start()
+    lport = linger.getsockname()[1]
+    dl5 = downloader.Downloader(lang=lang)
+    threading.Timer(0.6, dl5.stop).start()
+    t0 = time.monotonic()
+    dl5.download(f"http://127.0.0.1:{lport}/hang", str(dest))
+    elapsed = time.monotonic() - t0
+    linger.close()
+    for conn in held:
+        try:
+            conn.close()
+        except OSError:
+            pass
+    ok(elapsed < 5, "Stop прервал зависшую операцию меньше чем за 5с (без фикса — ~20с)",
+       f"{elapsed:.1f}с")
+    ok(ytdlp_urllib.create_connection.__qualname__ != "guarded",
+       "патч create_connection откатился (глобальная не обёртка)",
+       repr(ytdlp_urllib.create_connection))
+
+    # 6. Api: статус виден сразу после клика
+    section("6. Api.stop_download - статус мгновенно")
     api = gui.Api()
     api.dl = downloader.Downloader(lang=lang)
     api._busy = True
