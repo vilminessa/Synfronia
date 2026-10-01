@@ -1167,6 +1167,29 @@ async function waitForPage() {
 
     // -- массовая: разбивка вставки и построчная подсветка ------------
     console.log("--- массовая: вставка и статусы ---");
+    // защита от порчи файла переводов: в 02eba49 семь русских ключей
+    // массовой вкладки записались знаками '?'. Ни один язык не должен
+    // содержать '??' в значениях, и ключи массовой обязаны быть у всех.
+    const i18nBad = await evaluate(`(function () {
+      var out = [];
+      var langs = window.I18N || {};
+      if (!Object.keys(langs).length) out.push("словарь пуст");
+      var keys = ["tab.batch", "url.batch.label", "bulk.hint", "bulk.count",
+                  "bulk.clear", "bulk.failed_btn", "status.enter.bulk",
+                  "p.bulk_skip"];
+      Object.keys(langs).forEach(function (lang) {
+        var d = langs[lang] || {};
+        keys.forEach(function (k) {
+          var v = d[k];
+          if (typeof v !== "string" || !v) out.push(lang + "." + k + "=нет");
+          else if (v.indexOf("??") !== -1) out.push(lang + "." + k + "=мусор");
+        });
+      });
+      return out;
+    })()`);
+    if (i18nBad.length) {
+      fail("i18n: " + i18nBad.join(", "));
+    }
     // unit: куча ссылок через пробел/запятую/; -> по строкам, запятая
     // и точка с запятой ВНУТРИ url не рвут ссылку
     const pasteNorm = await evaluate(`JSON.stringify(normalizeBulkPaste(
