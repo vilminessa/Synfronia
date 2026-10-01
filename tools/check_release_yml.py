@@ -75,7 +75,7 @@ def main() -> int:
     ver_file = ROOT / "version.py"
     ok(ver_file.is_file(), "version.py существует (единственный источник версии)")
     if ver_file.is_file():
-        # версия — X.Y.Z или четырёхкомпонентная X.Y.Z.N (v1.2.7.1)
+        # версия — X.Y.Z или четырёхкомпонентная X.Y.Z.N (v1.2.7.2)
         m = re.search(r'__version__\s*=\s*"(\d+)\.(\d+)\.(\d+)(?:\.(\d+))?"',
                       ver_file.read_text(encoding="utf-8"))
         ok(m is not None, "__version__ в формате X.Y.Z[.N]", str(m))
