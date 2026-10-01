@@ -282,6 +282,11 @@ def main() -> int:
     ok(not missing, "во всех языках есть все ключи", str(missing))
     empty = [lang for lang in i18n.LANGUAGES if not i18n.I18N.get(lang)]
     ok(not empty, "все языки загрузились", str(empty))
+    # надпись элемента в сцене подсказок: ключ вне схемы (рисует settings.js),
+    # поэтому _i18n_keys его не видит - проверяем отдельно
+    ok(all("sheet.ui.tip_demo_el" in i18n.I18N.get(lang, {})
+           for lang in i18n.LANGUAGES),
+       "надпись элемента сцены переведена во всех языках")
 
     # 7. опции против словарей модулей
     section("7. опции совпадают со словарями модулей")

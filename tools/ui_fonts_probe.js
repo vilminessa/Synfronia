@@ -758,6 +758,19 @@ async function waitForPage() {
     console.log(`  панелька шрифтов: риски=[${fontCols.groups.map(function(g) {
       return g ? g.ticks : "x"; }).join(",")}] ячеек=${fontCols.cells.length}` +
       ` предпросмотр l=${fontCols.prev ? fontCols.prev.l : "?"} строк=${fontCols.heads}`);
+    // колонки одной строки одной высоты и уровня (растянутый grid)
+    const fontColsH = await evaluate(`(function () {
+      var card = document.querySelector(".field-card:has(> .field-card-body > #font-preview)");
+      if (!card) return null;
+      var p = card.querySelector(".knob-panel").getBoundingClientRect();
+      var v = card.querySelector("#font-preview").getBoundingClientRect();
+      return {dt: Math.round(Math.abs(p.top - v.top)),
+              dh: Math.round(Math.abs(p.height - v.height))};
+    })()`);
+    if (!(fontColsH && fontColsH.dt <= 2 && fontColsH.dh <= 2)) {
+      fail("карточка шрифтов: колонки разной высоты или уровня: " +
+           JSON.stringify(fontColsH));
+    }
     // ручка шрифта: колесо меняет семейство - сохраняется, попадает в
     // предпросмотр строкой «Заголовок - {семейство}», подсказка ручки
     // набрана этим же семейством
@@ -1818,6 +1831,66 @@ async function waitForPage() {
     await evaluate('panelFields["ui.tip_pull"].set(50); true');   // дефолт обратно
     console.log(`  ручка сил: упор max=${stopMax} держит=${stopHold} min=${stopMin} ` +
       `цифра_в_драге=${JSON.stringify(valDuring)}`);
+
+    // колонки карточки подсказок одной высоты и уровня (как в шрифтах)
+    const tipColsH = await evaluate(`(function () {
+      var card = document.querySelector(".field-card:has(> .field-card-body > #tip-preview)");
+      if (!card) return null;
+      var p = card.querySelector(".knob-panel").getBoundingClientRect();
+      var v = card.querySelector("#tip-preview").getBoundingClientRect();
+      return {dt: Math.round(Math.abs(p.top - v.top)),
+              dh: Math.round(Math.abs(p.height - v.height))};
+    })()`);
+    if (!(tipColsH && tipColsH.dt <= 2 && tipColsH.dh <= 2)) {
+      fail("карточка подсказок: колонки разной высоты или уровня: " +
+           JSON.stringify(tipColsH));
+    }
+    // стилистика сцены: плашка = настоящая .tip, элемент = стандартная
+    // кнопка карточки, магия (обводка/свечение/пылинки) жива
+    const demoStyle = await evaluate(`(function () {
+      var b = document.querySelector("#tip-preview .tp-bubble");
+      var tgt = document.querySelector("#tip-preview .tp-target");
+      var real = document.getElementById("tip");
+      var btn = document.querySelector("#section-ui .theme-actions button");
+      if (!b || !tgt) return null;
+      function cs(el, pseudo) { return getComputedStyle(el, pseudo || null); }
+      var sb = cs(b), sr = real ? cs(real) : null;
+      var stt = cs(tgt), sbtn = btn ? cs(btn) : null;
+      var animB = cs(b, "::before").animationName || "";
+      var animA = cs(b, "::after").animationName || "";
+      var label = tgt.textContent.trim();
+      return {
+        sameBg: !!sr && sb.backgroundColor === sr.backgroundColor,
+        sameBorder: !!sr && sb.borderTopColor === sr.borderTopColor,
+        sameFont: !!sr && sb.fontSize === sr.fontSize && sb.lineHeight === sr.lineHeight,
+        btnBg: !!sbtn && stt.backgroundColor === sbtn.backgroundColor,
+        btnBorder: !!sbtn && stt.borderTopColor === sbtn.borderTopColor,
+        label: label,
+        labelIsKey: label === (tgt.getAttribute("data-i18n") || ""),
+        hasKey: !!tgt.getAttribute("data-i18n"),
+        magicBefore: animB.indexOf("tipSpin") >= 0,
+        magicAfter: animA.indexOf("tipGlow") >= 0,
+        dust: b.querySelectorAll("i.dust").length
+      };
+    })()`);
+    if (!demoStyle) {
+      fail("сцена: плашка или элемент не найдены для проверки стилей");
+    } else {
+      const styleChecks = [
+        ["плашка сцены стилизована как настоящая подсказка",
+          demoStyle.sameBg && demoStyle.sameBorder && demoStyle.sameFont],
+        ["элемент сцены стилизован как стандартная кнопка",
+          demoStyle.btnBg && demoStyle.btnBorder],
+        ["элемент сцены подписан и переведён",
+          demoStyle.label.length > 0 && !demoStyle.labelIsKey && demoStyle.hasKey],
+        ["магия подсказки в сцене (обводка, свечение, 6 пылинок)",
+          demoStyle.magicBefore && demoStyle.magicAfter && demoStyle.dust === 6],
+      ];
+      styleChecks.forEach(([name, okFlag]) => { if (!okFlag) fail(name); });
+      console.log(`  стили сцены: бабл=как .tip=${demoStyle.sameBg}/${demoStyle.sameBorder} ` +
+        `элемент=кнопка=${demoStyle.btnBg} надпись="${demoStyle.label}" ` +
+        `магия=${demoStyle.magicBefore}/${demoStyle.magicAfter} пылинок=${demoStyle.dust}`);
+    }
 
     // -- массовая вкладка ----------------------------------------------------
     console.log("--- массовая вкладка ---");

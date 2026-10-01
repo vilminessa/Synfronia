@@ -952,10 +952,18 @@
     // transition, и переезд начинался бы с нуля
     if (!tipDemo || !tipDemo.scene.isConnected || tipDemo.lang !== curLang) {
       box.innerHTML =
-        '<div class="tp-target"></div>' +
+        // элемент стилизован как кнопка и подписан (data-i18n переводит
+        // translateStatic при смене языка)
+        '<div class="tp-target" data-i18n="sheet.ui.tip_demo_el">' +
+          t("sheet.ui.tip_demo_el") + '</div>' +
         '<div class="tp-marker"></div>' +
         '<svg class="tp-thread"><line x1="0" y1="0" x2="0" y2="0"></line></svg>' +
-        '<div class="tp-bubble">' + t("sheet.ui.tips") + '</div>';
+        // плашка = настоящая подсказка, включая магию: шесть пылинок
+        // теми же классами, что у .tip (стили в app.css)
+        '<div class="tp-bubble">' + t("sheet.ui.tips") +
+          '<i class="dust"></i><i class="dust"></i><i class="dust"></i>' +
+          '<i class="dust"></i><i class="dust"></i><i class="dust"></i>' +
+        '</div>';
       tipDemo = {scene: box,
                  target: box.querySelector(".tp-target"),
                  bubble: box.querySelector(".tp-bubble"),
