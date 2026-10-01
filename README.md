@@ -129,9 +129,11 @@ one after another, each as its own yt-dlp run:
 
 While the queue runs the textarea becomes a watch list: the current line
 pulses in the accent colour with a ⏬ mark, finished links get ✓ in the
-theme's `--ok` colour and failures get ✕ in `--err`. After the run the
-textarea comes back, and a «Keep failed» button (offered once) puts
-exactly the failed links back into the field for a retry.
+theme's `--ok` colour and failures get ✕ in `--err`. The list stays on
+screen after the run with those marks, so you can see exactly what made
+it; a «Back to the links» button returns the field for editing, and a
+«Keep failed» button (offered once) puts exactly the failed links back
+into the field for a retry («Clear» closes the list too).
 
 The draft list is kept in `localStorage` and survives a window close; a
 theme with `entry` (a page rebuild) restores it into the fresh textarea.

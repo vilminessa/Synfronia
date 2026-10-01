@@ -304,6 +304,8 @@
     var view = document.getElementById("bulk-view");
     var box = document.getElementById("url-batch");
     if (!view || !box) return;
+    var back = document.getElementById("bulk-back");
+    if (back) back.hidden = true;   // новый запуск: итога ещё нет
     view.textContent = "";
     list.forEach(function(url) {
       var row = document.createElement("div");
@@ -332,6 +334,8 @@
     view.setAttribute("aria-hidden", "true");
     view.textContent = "";
     box.hidden = false;
+    var back = document.getElementById("bulk-back");
+    if (back) back.hidden = true;
   }
   function renderBulkStatuses(statuses) {
     var rows = document.getElementById("bulk-view").children;
@@ -470,7 +474,22 @@
       }
       if (bulkWasBusy && !st.busy) {
         bulkFailedFresh = st.bulk_failed || [];
-        hideBulkView();
+        var viewDone = document.getElementById("bulk-view");
+        var wasBulk = viewDone && !viewDone.hidden;
+        if (wasBulk) {
+          // итог массовой остаётся на экране: воркер уже снёс st.bulk,
+          // но поле bulk_statuses в том же тике несёт финальные o/f/p -
+          // строки остаются с отметками, пока пользователь не вернётся
+          // к списку (кнопка «К списку ссылок»)
+          if (st.bulk_statuses && st.bulk_statuses.length) {
+            renderBulkStatuses(st.bulk_statuses);
+          }
+          var backBtn = document.getElementById("bulk-back");
+          if (backBtn) backBtn.hidden = false;
+        } else {
+          // одиночная загрузка: списком не управляли, менять нечего
+          hideBulkView();
+        }
         var fbtn = document.getElementById("bulk-failed");
         if (fbtn) fbtn.hidden = !(bulkFailedFresh.length && !bulkFailedOffered);
         bulkFailedOffered = bulkFailedOffered || !!bulkFailedFresh.length;
@@ -688,10 +707,12 @@
       document.getElementById("batch-clear").addEventListener("click", function() {
         batchBox.value = "";
         updateBulkCount();
-        // список «неудавшихся» больше не предлагаем
+        // список «неудавшихся» больше не предлагаем; очистка нужна у полю,
+        // поэтому режим просмотра (если висит итог) закрывается
         bulkFailedOffered = true;
         var fbtnC = document.getElementById("bulk-failed");
         if (fbtnC) fbtnC.hidden = true;
+        hideBulkView();
         try { localStorage.removeItem("synf.bulk_draft"); } catch (e) { /* приватный режим */ }
         batchBox.focus();
       });
@@ -699,8 +720,15 @@
         batchBox.value = bulkFailedFresh.join("\n");
         this.hidden = true;
         bulkFailedOffered = true;
+        // ссылки уже в поле - список с итогом больше не нужен
+        hideBulkView();
         batchBox.dispatchEvent(new Event("input"));
         batchBox.focus();
+      });
+      // «К списку ссылок»: возврат к редактированию, итоговая раскраска
+      // строк (✓/✕) закрывается вместе со списком
+      document.getElementById("bulk-back").addEventListener("click", function() {
+        hideBulkView();
       });
     }).catch(function(e) { console.error("init error:", e); });
   }
