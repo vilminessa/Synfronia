@@ -8,12 +8,15 @@ requirements of each license.
 |---|---|---|---|
 | [yt-dlp](https://github.com/yt-dlp/yt-dlp) | 2026.8.19 (bundled) | Unlicense | https://github.com/yt-dlp/yt-dlp |
 | [pywebview](https://github.com/r0x0r/pywebview) | 6.2.1 (bundled) | BSD-3-Clause | https://github.com/r0x0r/pywebview |
+| [Alpine.js](https://github.com/alpinejs/alpine) | 3.17.4 (bundled, `ui_src/vendor`) | MIT | https://github.com/alpinejs/alpine |
+| [Motion](https://github.com/motiondivision/motion) | 12.23.24 (bundled, `ui_src/vendor`) | MIT | https://github.com/motiondivision/motion |
 | pythonnet | 3.1.0 (bundled) | MIT | https://github.com/pythonnet/pythonnet |
 | clr_loader | 0.3.1 (bundled) | MIT | https://github.com/pythonnet/clr-loader |
 | bottle | 0.13.4 (bundled) | MIT | https://github.com/bottlepy/bottle |
 | proxy_tools | 0.1.0 (bundled) | MIT | https://github.com/TkTech/proxy_tools |
 | [PyInstaller](https://github.com/pyinstaller/pyinstaller) | 6.22.2 (build-time only) | GPL-2.0-or-later with special exception | https://github.com/pyinstaller/pyinstaller |
 | [PyYAML](https://github.com/yaml/pyyaml) | 6.x (dev/CI tooling only, not bundled) | MIT | https://github.com/yaml/pyyaml |
+| [webaudio-controls](https://github.com/g200kg/webaudio-controls) | — (behavioral reference only, NOT bundled) | Apache-2.0 | https://github.com/g200kg/webaudio-controls |
 | certifi | 2026.7.22 (bundled) | MPL-2.0 | https://github.com/certifi/python-certifi |
 | urllib3 | 2.7.0 (bundled) | MIT | https://github.com/urllib3/urllib3 |
 | idna | 3.19 (bundled) | BSD-3-Clause | https://github.com/kjd/idna |
@@ -194,6 +197,54 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 Full text: https://github.com/r0x0r/pywebview/blob/master/LICENSE
 
+## Alpine.js — MIT License
+
+The MIT License (MIT)
+
+Copyright © 2019-2025 Caleb Porzio and contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+## Motion — MIT License
+
+The MIT License (MIT)
+
+Copyright (c) 2024 [Motion](https://motion.dev) B.V.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
 ## pythonnet, clr_loader, proxy_tools — MIT License
 
 Copyright (c) respective authors and contributors (pythonnet/clr_loader:
@@ -308,6 +359,12 @@ publicly available CSS design references, adapted (not copied verbatim):
 - Glass highlights, inset edges and high-opacity cores follow the common
   "glassmorphism / liquid glass" style (UI gradients), described at
   https://freefrontend.com/
+- Control widgets: g200kg "webaudio-controls"
+  (https://github.com/g200kg/webaudio-controls, Apache-2.0) is a behavioral
+  reference only — interaction idioms for our knobs/switches (vertical drag,
+  Shift fine tuning, double-click reset). The project ships its own inline-SVG
+  widgets colored by `currentColor`/theme variables; no code, canvas images or
+  assets from that library are bundled.
 
 All CSS in this project is original code (own animation frames, own color
 palette, own transform/backdrop layers) written after studying the above

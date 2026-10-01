@@ -1,5 +1,8 @@
   /* Стили только главного окна. Общие элементы управления лежат в app.css,
      вёрстка окна настроек — в settings.css. */
+  /* Alpine: без x-cloak элемент с директивой мелькнул бы необработанным
+     до старта движка (у нас это станет актуально на этапе 4 - карточка) */
+  [x-cloak] { display: none !important; }
   h1 { font-size: 22px; margin: 0 0 8px; }
   .sub { opacity: .65; font-size: 12px; }
   /* Подпись автора и версии слева снизу; значение подставляет build_page
@@ -19,8 +22,19 @@
     animation: logo-bloom 3.5s ease-in-out infinite;
   }
   @keyframes logo-bloom {
-    0%, 100% { text-shadow: 0 0 5px var(--accent), 0 0 12px var(--accent), 0 0 24px var(--accent); opacity: .92; }
-    50% { text-shadow: 0 0 8px var(--accent), 0 0 20px var(--accent), 0 0 44px var(--accent); opacity: 1; }
+    /* text-shadow в Blink инвалидирует layout каждый кадр анимации: логотип
+       крутил ~60 пересчётов компоновки в секунду в самом покое (замер чека
+       производительности: 481 layout за 8 с против 0 без анимаций). У
+       drop-shadow то же тройное гало вокруг глифов, но это свойство
+       paint/compositing - layout в покое остаётся пустым. */
+    0%, 100% {
+      filter: drop-shadow(0 0 5px var(--accent)) drop-shadow(0 0 12px var(--accent)) drop-shadow(0 0 24px var(--accent));
+      opacity: .92;
+    }
+    50% {
+      filter: drop-shadow(0 0 8px var(--accent)) drop-shadow(0 0 20px var(--accent)) drop-shadow(0 0 44px var(--accent));
+      opacity: 1;
+    }
   }
   /* Шрифт заголовков (font_heading): логотип, заголовки и вкладки; если не
      выбран - как общий (--font-sans) через цепочку fallback */

@@ -4,8 +4,8 @@ r"""Модульные темы и сборка страницы.
 theme.json (палитра/мета/extends/entry), custom.css, slots/*.html,
 ресурсы (url(...) и {{asset:rel}} -> data:URI). Из этого собирается
 итоговый HTML: build_page() наполняет __THEME_ROOT__/__THEME_CSS__/
-__APP_CSS__/__MAIN_CSS__/__SETTINGS_CSS__/__COMMONJS__/__APPJS__/
-__SETTINGS_JS__/__I18N__/__THEMES__/__SETTINGS_SCHEMA__ в ui.BASE_TEMPLATE.
+__APP_CSS__/__MAIN_CSS__/__SETTINGS_CSS__/__COMMONJS__/__MOTION__/__APPJS__/
+__SETTINGS_JS__/__ALPINE__/__I18N__/__THEMES__/__SETTINGS_SCHEMA__ в ui.BASE_TEMPLATE.
 Карточка настроек (ui.SETTINGS_HTML) — часть этой же страницы: отдельного
 окна настроек больше нет, а если тема собрала страницу из своего entry без
 оверлея, _ensure_settings() вставляет его обратно.
@@ -860,8 +860,10 @@ CSS наследуется по цепочке extends: файлы родите�
   __MAIN_CSS__      стили только главного окна
   __SETTINGS_CSS__  стили карточки настроек
   __COMMONJS__      общий JS (переводы, тема, шрифты)
+  __MOTION__        Motion (анимации; vendor, MIT)
   __APPJS__         логика главного окна (обязателен в полном HTML-шаблоне)
   __SETTINGS_JS__   логика карточки настроек (обязательна в полном шаблоне)
+  __ALPINE__        Alpine.js (реактивность; vendor, MIT)
   __SETTINGS_HTML__ разметка карточки настроек (оверлей)
   __I18N__          переводы (JSON)
   __THEMES__        список тем (JSON)
@@ -873,13 +875,16 @@ CSS наследуется по цепочке extends: файлы родите�
   <style id="theme-style">__THEME_CSS__</style>
   <link rel="stylesheet" href="__APP_CSS__">   <!-- или просто <style>__APP_CSS__</style> -->
   ...ваша разметка (элементы сохраняют id, которые использует __APPJS__)...
+  <script>__MOTION__</script>
   <script>__APPJS__</script>
   <script>__SETTINGS_JS__</script>
+  <script>__ALPINE__</script>
 
 Три плейсхолдера карточки (__SETTINGS_HTML__, __SETTINGS_CSS__, __SETTINGS_JS__)
 подставлять необязательно: если своего entry их нет, themes._ensure_settings
 допишет оверлей, его стиль и скрипт сам, иначе шестерёнка в шапке ничего не
-открыла бы. Остальные плейсхолдеры в entry обязательны.
+открыла бы. __MOTION__/__ALPINE__ тоже необязательны - build_page допишет их
+сам. Остальные плейсхолдеры в entry обязательны.
 
 СЕКЦИИ (slots)
 --------------
@@ -1220,12 +1225,27 @@ def _fill_placeholders(template: str, theme: dict, picked: dict) -> str:
     if "__FONTS_CSS__" not in template:
         # свой entry-шаблон без плейсхолдера: добавляем стиль шрифтов сами
         page = page.replace("</head>", f'<style id="fonts-style">{fonts_css}</style></head>', 1)
+    # vendor: у entry-шаблона темы плейсхолдеров может не быть - дописываем
+    # их ДО подстановки, чтобы сохранить критичный порядок: Motion до app.js,
+    # Alpine после settings.js (обработчики alpine:init должны быть к этому
+    # моменту зарегистрированы; вставки разрывают <script>, не сливая код).
+    if "__MOTION__" not in page and "__APPJS__" in page:
+        page = page.replace("__APPJS__",
+                            "</script><script>__MOTION__</script><script>__APPJS__", 1)
+    if "__ALPINE__" not in page and "__SETTINGS_JS__" in page:
+        page = page.replace("__SETTINGS_JS__",
+                            "__SETTINGS_JS__</script><script>__ALPINE__", 1)
+    elif "__ALPINE__" not in page and "__APPJS__" in page:
+        page = page.replace("__APPJS__",
+                            "__APPJS__</script><script>__ALPINE__", 1)
     page = page.replace("__APP_CSS__", _ui.APP_CSS)
     page = page.replace("__MAIN_CSS__", _ui.MAIN_CSS)
     page = page.replace("__COMMONJS__", _ui.COMMON_JS)
+    page = page.replace("__MOTION__", _ui.MOTION_JS)
     page = page.replace("__APPJS__", _ui.APP_JS)
     page = page.replace("__SETTINGS_CSS__", _ui.SETTINGS_CSS)
     page = page.replace("__SETTINGS_JS__", _ui.SETTINGS_JS)
+    page = page.replace("__ALPINE__", _ui.ALPINE_JS)
     page = page.replace("__SETTINGS_HTML__", _ui.SETTINGS_HTML)
     page = page.replace("__I18N__", _js_json(I18N))
     page = page.replace("__THEMES__", _js_json(themes_embed()))
@@ -1277,9 +1297,10 @@ def build_page(theme_key: str, lang: str | None = None, fonts: dict | None = Non
     • шрифты из папки fonts (font_sans / font_mono, переопределённые полями
       темы font / font_mono) встраиваются как @font-face с data:URI;
     • плейсхолдеры (__THEME_ROOT__, __THEME_CSS__, __FONTS_CSS__, __APP_CSS__,
-      __MAIN_CSS__, __SETTINGS_CSS__, __COMMONJS__, __APPJS__, __SETTINGS_JS__,
-      __SETTINGS_SCHEMA__, __I18N__, __THEMES__, __APP_VERSION__) подставляются
-      простой заменой.
+      __MAIN_CSS__, __SETTINGS_CSS__, __COMMONJS__, __MOTION__, __APPJS__,
+      __SETTINGS_JS__, __ALPINE__, __SETTINGS_SCHEMA__, __I18N__, __THEMES__,
+      __APP_VERSION__) подставляются простой заменой; __MOTION__/__ALPINE__
+      при их отсутствии в entry дописываются сами (см. комментарий выше).
     """
     theme = _page_theme(theme_key)
     folders = theme.get("_slot_folders") or []

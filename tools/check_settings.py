@@ -391,11 +391,18 @@ def main() -> int:
     ok('id="settings-overlay"' in card_html, "карточка лежит в оверлее")
     for ph in ("__SETTINGS_HTML__", "__SETTINGS_CSS__", "__SETTINGS_JS__"):
         ok(ph in main_html, f"главная страница вставляет {ph}")
-    for ph in ("__COMMONJS__", "__APPJS__"):
+    for ph in ("__COMMONJS__", "__APPJS__", "__MOTION__", "__ALPINE__"):
         ok(ph in main_html, f"главная страница подключает {ph}")
     ok("__SETTINGS_JS__" in main_html and "__APPJS__" in main_html
        and main_html.index("__APPJS__") < main_html.index("__SETTINGS_JS__"),
        "settings.js подключается после app.js (иначе он затрёт его applyI18n)")
+    # порядок vendor критичен: Motion до app.js (глобал Motion нужен коду),
+    # Alpine последним - все alpine:init-обработчики должны быть
+    # зарегистрированы до старта движка (собственный старт на DOMContentLoaded)
+    ok(main_html.index("__COMMONJS__") < main_html.index("__MOTION__")
+       and main_html.index("__MOTION__") < main_html.index("__APPJS__")
+       and main_html.index("__SETTINGS_JS__") < main_html.index("__ALPINE__"),
+       "порядок скриптов: common -> motion -> app -> settings -> alpine")
     for ident in ("renderWindow", "applyVisibility", "fillSettings", "bindSettings", "bindCustom",
                   "synfSettingsInit", "synfSettingsState", "set_dest", "save_setting",
                   "set_theme", "set_font", "reload_fonts", "download_fonts", "download_themes"):
