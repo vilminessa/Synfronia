@@ -176,9 +176,11 @@ async function waitForPage() {
     if (idle.RecalcStyleDuration > 1.0) fail(`покой: RecalcStyleDuration ${idle.RecalcStyleDuration}с > 1.0с`);
     if (idle.ScriptDuration > 2.5) fail(`покой: ScriptDuration ${idle.ScriptDuration}с > 2.5с`);
     if (pollRate < 0.5) fail(`покой: опрос почти встал (${pollRate}/с)`);
-    if (pollRate > 6.5) fail(`покой: опрос чаще штатных 200 мс (${pollRate}/с)`);
-    // NB: критерий «пробуждений <= 1/с» включается в Этапе 5 (heartbeat),
-    // сейчас при poll 200 мс он физически недостижим - значение печатается.
+    // Этап 5: опрос превратился в heartbeat (раз в секунду), события будят
+    // страницу push-каналом (_ping -> __synfPing), поэтому в покойе частота
+    // poll() обязана быть ~1/с; порог с запасом на drift таймера ловит
+    // возврат к частому опросу (200 мс -> ~5/с)
+    if (pollRate > 1.5) fail(`покой: пробуждения чаще heartbeat (${pollRate}/с > 1.5/с)`);
 
     // ---- фаза 2: анимация 3.6 с не должна трогать layout ----
     console.log("--- фаза 2: анимация transform (3.6 с) ---");

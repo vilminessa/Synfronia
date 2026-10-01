@@ -2,6 +2,7 @@
 
 import json
 import os
+import queue
 import subprocess
 import sys
 import threading
@@ -142,11 +143,25 @@ class Api:
         self._dest = ""
         # счётчик, по которому страница узнаёт о смене языка/темы/шрифтов
         self._ui_rev = 0
+        # единственная очередь доставки в JS: evaluate_js в pywebview не
+        # thread-safe (issue #906), поэтому пинги из любых потоков (лог,
+        # воркеры загрузок) копятся в очереди, а исполняет их ровно один
+        # диспетчерский поток - запускается в bind_main_window
+        self._js_queue: queue.Queue = queue.Queue()
+        self._js_thread: threading.Thread | None = None
 
     # -- окно -----------------------------------------------------------------
     def bind_main_window(self, win) -> None:
-        """Запоминает окно главной страницы (его пересобирает set_theme)."""
+        """Запоминает окно главной страницы (его пересобирает set_theme).
+
+        Здесь же стартует единственный диспетчер evaluate_js: раньше окна
+        пинги копятся в очереди, первый же вызов доставит их всплеском.
+        """
         self._win_main = win
+        if not self._js_thread:
+            self._js_thread = threading.Thread(
+                target=self._js_dispatch, daemon=True, name="js-dispatch")
+            self._js_thread.start()
 
     def synf_settings_state(self, is_open) -> None:
         """Фронтенд сообщает, открыта ли карточка настроек.
@@ -162,6 +177,43 @@ class Api:
         """Отметить, что язык/тема/шрифты изменились: страница это подхватит."""
         with self._lock:
             self._ui_rev += 1
+        self._ping()
+
+    # -- push-канал: события + heartbeat -------------------------------------
+    # Гибрид (этап 5 дорожной карты): события будят страницу немедленно
+    # (вместо ожидания следующего heartbeat), а раз в секунду страница сама
+    # тянет полный снапшот через опрос-heartbeat (app.js scheduleTick).
+    # Каждое изменение состояния, которое должен увидеть UI, завершается
+    # _ping() - уже ПОСЛЕ записи под self._lock, чтобы ответ poll() был
+    # свежим. Всплески (бурст лога/прогресса) схлопываются диспетчером в
+    # одно пробуждение.
+    def _ping(self) -> None:
+        """Состояние изменилось: разбудить страницу (см. _js_dispatch)."""
+        self._js_queue.put("@ping")
+
+    def _js_dispatch(self) -> None:
+        """Единственный поток evaluate_js на всю сессию.
+
+        pywebview не потокобезопасен (issue #906): одновременные вызовы из
+        воркеров могут потеряться или упасть. Здесь же гасятся исключения -
+        страница могла перезагружаться (set_theme -> load_html): потерянный
+        пинг наверстает heartbeat, которому полный снапшот не нужен - новая
+        страница сама стартует tick и тянет poll(0) с нуля.
+        """
+        while True:
+            self._js_queue.get()   # ждём первое событие
+            # всплеск событий -> одно пробуждение страницы
+            while True:
+                try:
+                    self._js_queue.get_nowait()
+                except queue.Empty:
+                    break
+            try:
+                win = self._win_main or (webview.windows[0] if webview.windows else None)
+                if win:
+                    win.evaluate_js("window.__synfPing && window.__synfPing();")
+            except Exception:  # noqa: BLE001 - окно закрыто или страница перезагружается
+                pass
 
     def _ui_state(self) -> dict:
         """Общая часть ответа poll(): что страница должна синхронизировать."""
@@ -260,6 +312,7 @@ class Api:
         def on_progress(pct: float) -> None:
             with self._lock:
                 self._ffmpeg["pct"] = pct
+            self._ping()   # процент докачки ffmpeg - в кольцо прогресса
 
         try:
             path = download_ffmpeg(on_progress=on_progress, on_log=self._log)
@@ -276,6 +329,7 @@ class Api:
             else:
                 self._ffmpeg["ok"] = False
                 self._ffmpeg["error"] = tr(self._lang, "ffmpeg.error", exc="")
+        self._ping()   # итог докачки (успех может пройти без строки лога)
 
     # -- настройки -----------------------------------------------------------
     def save_setting(self, key: str, value) -> str:
@@ -293,6 +347,7 @@ class Api:
         # язык, тема и шрифты видны обоим окнам - сообщаем им обновление
         if key in ("language", "theme", "font_sans", "font_mono"):
             self._bump_ui()
+        self._ping()   # настройка изменилась: render-предпочтения не ждут heartbeat
         return "ok"
 
     def set_dest(self, path: str) -> None:
@@ -409,6 +464,7 @@ class Api:
             if self._fonts_dl["downloading"]:
                 return "busy"
             self._fonts_dl.update({"downloading": True, "pct": 0.0, "error": None})
+        self._ping()   # окно докачки шрифтов открывается сразу
         threading.Thread(target=self._fonts_worker, daemon=True, name="fonts-dl").start()
         return "started"
 
@@ -416,6 +472,7 @@ class Api:
         def on_progress(done: int, total: int) -> None:
             with self._lock:
                 self._fonts_dl["pct"] = done / max(total, 1) * 100.0
+            self._ping()   # процент докачки шрифтов
 
         try:
             result = download_test_fonts(on_log=self._log, on_progress=on_progress)
@@ -426,6 +483,7 @@ class Api:
             return
         with self._lock:
             self._fonts_dl.update({"downloading": False, "pct": 100.0})
+        self._ping()   # итог без строки лога (ничего не добавилось - тоже ответ)
         if result["added"]:
             self._log("info", tr(self._lang, "font.dl.done", names=", ".join(result["added"])))
             # счётчик растёт — JS сам перерисует списки шрифтов
@@ -482,6 +540,7 @@ class Api:
             self._cancel = False
             self._status = tr(self._lang, "p.start")
             self._progress = {"mode": "indeterminate"}
+        self._ping()   # busy-переход виден сразу, не через heartbeat
         self.dl = Downloader(on_log=self._log, on_progress=self._on_progress, lang=self._lang)
         ftp = FtpConfig(self.settings, self._lang)
         threading.Thread(
@@ -523,6 +582,7 @@ class Api:
                           "statuses": ["p"] * len(urls)}
             self._bulk_failed = []
             self._bulk_statuses = []
+        self._ping()   # busy-переход виден сразу, не через heartbeat
         self.dl = Downloader(on_log=self._log, on_progress=self._on_progress, lang=self._lang)
         ftp = FtpConfig(self.settings, self._lang)
         threading.Thread(
@@ -573,6 +633,9 @@ class Api:
                     key = _STATUS_KEY.get(mode, "p.ready")
                     self._status = tr(self._lang, key, ok=got, total=all_got)
                 self._progress = {"mode": "determinate", "value": 100.0}
+        # итог загрузки (busy -> result/status) - будим сразу: кнопка и
+        # статус не должны ждать heartbeat
+        self._ping()
 
     def _run_bulk(self, urls, dest, group, subtitles, quality, transcode, ftp=None) -> None:
         """Воркер массовой загрузки: последовательно, по ссылке на запуск.
@@ -615,6 +678,7 @@ class Api:
                     self._bulk["done"] = done
                     self._bulk["failed"] = failed
                     self._bulk["statuses"][i - 1] = "o" if mode == "ok" else "f"
+                self._ping()   # построчные отметки массовой
         finally:
             with self._lock:
                 cancelled = cancelled or self._cancel
@@ -644,6 +708,8 @@ class Api:
                     self._result = _RESULT_MODE.get("partial", "warn")
                     self._status = tr(self._lang, "p.done_partial",
                                       ok=done, total=total)
+        # итог массовой: busy, result, финальные статусы строк
+        self._ping()
 
     def test_ftp(self) -> dict:
         """Проверка настроек FTP: подключается и сразу отключается."""
@@ -664,6 +730,7 @@ class Api:
             with self._lock:
                 self._cancel = True
                 self._status = tr(self._lang, "p.stop_req")
+            self._ping()   # клик «Отмена» виден мгновенно (лог уже добавил свой)
             self.dl.stop()
 
     # -- коллбеки от core ----------------------------------------------------
@@ -672,6 +739,7 @@ class Api:
         with self._lock:
             self._logs.append(f"[{level}] {msg}")
             self._log_total += 1
+        self._ping()
 
     def _on_progress(self, d: dict) -> None:
         status = d.get("status")
@@ -703,6 +771,9 @@ class Api:
                 self._progress = {"mode": "indeterminate"}
             elif status == "done":
                 self._progress = {"mode": "determinate", "value": 100.0}
+        # статус/прогресс записаны - будим страницу (после _cancel-выхода
+        # состояние не менялось, пинг там не нужен)
+        self._ping()
 
 
 # -- надзор WebView2 ------------------------------------------------------------
