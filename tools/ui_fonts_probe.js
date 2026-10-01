@@ -474,21 +474,29 @@ async function waitForPage() {
     await sleep(150);
     const render0 = await evaluate(`(function () {
       var ids = ["render-gpu", "render-anim", "render-blur"];
-      var note = document.getElementById("render-note");
-      var card = note && note.closest(".field-card");
+      var gpu = document.getElementById("render-gpu");
+      var cap = gpu && gpu.parentElement.querySelector("[data-i18n-tip]");
+      var card = gpu && gpu.closest(".field-card");
       var title = card && card.querySelector(".field-card-title");
       return {
         boxes: ids.map(function(id) {
           var el = document.getElementById(id);
           return el ? (el.type === "checkbox" ? String(el.checked) : "нет") : null;
         }),
-        note: note ? note.textContent.trim() : "",
+        note: !!document.getElementById("render-note"),
+        tip: cap ? (cap.getAttribute("data-tip") || "") : "",
         title: title ? title.textContent.trim() : "",
         root: document.documentElement.className
       };
     })()`);
-    if (!(render0.boxes.join() === "true,true,true" && render0.note && render0.title)) {
+    if (!(render0.boxes.join() === "true,true,true" && render0.title)) {
       fail("панель рендеринга не построена: " + JSON.stringify(render0));
+    }
+    // описание под выключателем убрали - всё объяснение в подсказке самой
+    // галочки, и подсказка обязана быть внятной (без жаргона WebView2/CPU)
+    if (render0.note) fail("описание под выключателем вернулось в схему (render-note)");
+    if (render0.tip.length < 40) {
+      fail("у галочки GPU нет содержательной подсказки: " + JSON.stringify(render0.tip));
     }
     if (render0.root.indexOf("reduce-motion") >= 0 || render0.root.indexOf("no-blur") >= 0) {
       fail("классы рендеринга стоят без команды: " + render0.root);
@@ -535,24 +543,43 @@ async function waitForPage() {
     }
     await setBox("render-gpu", true);
     await sleep(450);
-    // пояснение переводится вместе со всем интерфейсом. Смена и чтение - в
+    // подсказка галочки GPU - единственное объяснение (описание убрали):
+    // содержательная, без жаргона и с разными переводами во всех языках
+    const hintBad = await evaluate(`JSON.stringify((function () {
+      var out = [];
+      var k = "sheet.ui.render.gpu.hint";
+      var langs = window.I18N || {};
+      if (!Object.keys(langs).length) out.push("словарь пуст");
+      Object.keys(langs).forEach(function (lang) {
+        var d = langs[lang] || {};
+        var v = d[k];
+        if (typeof v !== "string" || v.length < 40) out.push(lang + "=пусто/коротко");
+        else if (v.indexOf("WebView2") >= 0 || v.indexOf("CPU") >= 0) out.push(lang + "=жаргон");
+        if (d["sheet.ui.render.note"] !== undefined) out.push(lang + "=лишний ключ note");
+      });
+      var ru = (langs.ru || {})[k] || "";
+      if (ru && ru === (langs.en || {})[k]) out.push("ru=en");
+      return out;
+    })())`);
+    if (JSON.parse(hintBad).length) fail("подсказка GPU: " + JSON.parse(hintBad).join(", "));
+    // подсказка переводится вместе со всем интерфейсом. Смена и чтение - в
     // одном тике: poll() держит язык из стаба и через ≤200 мс вернул бы
-    // curLang обратно (settings.js: st.lang), после чего applyI18n нарисовал
-    // бы русский текст уже во время чтения
-    const noteEn = await evaluate(`(function () {
+    // curLang обратно (settings.js: st.lang)
+    const tipEn = await evaluate(`(function () {
       curLang = "en"; applyI18n();
-      var n = document.getElementById("render-note");
-      var text = n ? n.textContent.trim() : "";
+      var gpu = document.getElementById("render-gpu");
+      var cap = gpu && gpu.parentElement.querySelector("[data-i18n-tip]");
+      var text = cap ? (cap.getAttribute("data-tip") || "") : "";
       curLang = "ru"; applyI18n();
       return text;
     })()`);
-    if (!(noteEn && noteEn !== render0.note)) {
-      fail("пояснение рендеринга не переводится: " + JSON.stringify({ru: render0.note, en: noteEn}));
+    if (!(tipEn.length >= 40 && tipEn !== render0.tip)) {
+      fail("подсказка GPU не переводится: " + JSON.stringify({ru: render0.tip, en: tipEn}));
     }
     console.log(`  панель: "${render0.title}" чекбоксы=${render0.boxes.join("/")} ` +
       `классы: аним off=${animOff.indexOf("reduce-motion") >= 0} blur off=` +
       `${blurOff.indexOf("no-blur") >= 0} GPU сохранён=${!!(gpuSaved && gpuSaved[1] === false)} ` +
-      `en="${String(noteEn).slice(0, 40)}"`);
+      `подсказка=${render0.tip.length}симв en=${tipEn.length}`);
     // уборка: всё обратно в позиции, карточка закрыта
     await evaluate(`(function () {
       ["render-gpu", "render-anim", "render-blur"].forEach(function (id) {
@@ -564,6 +591,74 @@ async function waitForPage() {
       return true;
     })()`);
     await sleep(300);
+
+    // ================= полосы прокрутки =================
+    // Цвета берутся из палитры темы (иначе системные светлые полосы), а
+    // стандартный scrollbar-color в Chromium выключает кастом ::-webkit.
+    // Две детали, которые ловим: selectorText у *-правил отдаёт селектор
+    // БЕЗ «*», а фон через var() в cssText не раскрывается (пустые
+    // background-*) - поэтому цвета проверяем вычисленным стилем.
+    console.log("--- полосы прокрутки ---");
+    const sbScan = JSON.parse(await evaluate(`JSON.stringify((function () {
+      var rules = [], sheets = [];
+      for (var s = 0; s < document.styleSheets.length; s++) {
+        var sh = document.styleSheets[s];
+        var id = (sh.ownerNode && sh.ownerNode.id) || "";
+        sheets.push(id);
+        var list = null;
+        try { list = sh.cssRules; } catch (e) { continue; }
+        for (var r = 0; list && r < list.length; r++) {
+          var sel = list[r].selectorText || "";
+          if (sel.indexOf("scrollbar") < 0 && sel !== "#log") continue;
+          rules.push(sel + " | " + (list[r].style ? list[r].style.cssText : "") + " @" + id);
+        }
+      }
+      // эталон цвета переменной и реальный палец на своём блоке
+      var ref = document.createElement("div");
+      document.body.appendChild(ref);
+      function want(v) {
+        ref.style.backgroundColor = "var(" + v + ")";
+        var c = getComputedStyle(ref).backgroundColor;
+        ref.style.backgroundColor = "";
+        return c;
+      }
+      var box = document.createElement("div");
+      box.style.cssText = "overflow:auto; width:24px; height:12px;";
+      box.innerHTML = '<div style="height:80px"></div>';
+      document.body.appendChild(box);
+      var thumbBase = "";
+      try {
+        thumbBase = getComputedStyle(box, "::-webkit-scrollbar-thumb").backgroundColor;
+      } catch (e) { thumbBase = "err"; }
+      var out = {rules: rules, sheets: sheets, wantWidget: want("--widget"),
+                 thumbBase: thumbBase};
+      ref.remove(); box.remove();
+      return out;
+    })())`));
+    const sbRules = sbScan.rules;
+    const sbHas = (fn) => sbRules.some(fn);
+    const sbChecks = [
+      ["полоса задана (12px)", sbHas(s => s.indexOf("::-webkit-scrollbar |") === 0 &&
+        s.indexOf("width") >= 0)],
+      ["палец со скруглением темы", sbHas(s => s.indexOf("::-webkit-scrollbar-thumb |") === 0 &&
+        s.indexOf("border-radius") >= 0)],
+      ["наведение --accent", sbHas(s => s.indexOf("thumb:hover") >= 0 &&
+        s.indexOf("var(--accent)") >= 0)],
+      ["у #log отдельный оттенок --surface (иначе на своём фоне слился бы)",
+        sbHas(s => s.indexOf("#log |") === 0 &&
+          s.indexOf("--sb-thumb: var(--surface)") >= 0)],
+      ["палец реально цвета --widget (вычисленный стиль)",
+        !!sbScan.wantWidget && sbScan.thumbBase === sbScan.wantWidget],
+      ["угол прозрачен", sbHas(s => s.indexOf("::-webkit-scrollbar-corner") >= 0)],
+      ["нет scrollbar-color (в Chromium он бы выключил кастом)",
+        !sbHas(s => s.indexOf("scrollbar-color") >= 0)],
+      ["правила приложения не перебивают собственные полосы темы (#log)",
+        !sbRules.some(s => s.indexOf("#log::-webkit-scrollbar-thumb") >= 0 &&
+          s.indexOf("@theme-style") < 0)],
+    ];
+    sbChecks.forEach(([name, okFlag]) => { if (!okFlag) fail(name); });
+    console.log(`  полосы: правил=${sbRules.length} палец=${sbScan.thumbBase} ` +
+      `(эталон ${sbScan.wantWidget}) листы=[${sbScan.sheets.join(",")}]`);
 
     console.log("--- разделы и поля ---");
     await evaluate(OVERLAY_OPEN);

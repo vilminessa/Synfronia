@@ -122,14 +122,13 @@ CORE_GROUPS = [
              "title": "sheet.ui.tip_repel.hint"},
             # Рендеринг: что WebView2 считает на GPU и как дорого выглядит
             # страница. Всё трое переключается вживую, кроме GPU - он читается
-            # до старта WebView2 (gui._apply_render_env), поэтому требует
-            # перезапуска; пояснение об этом - в render-note
+            # до старта WebView2 (gui.apply_render_env), поэтому требует
+            # перезапуска; всё объяснение - в подсказке самого поля (описание
+            # под выключателем убрали: подсказка и так на виду у мыши)
             {"key": "render_gpu", "type": "bool", "check": True,
              "label": "sheet.ui.render.gpu", "default": True,
              "box": "render", "dom": "render-gpu",
              "title": "sheet.ui.render.gpu.hint"},
-            {"type": "note", "transient": True, "box": "render",
-             "dom": "render-note", "note_source": "renderNote"},
             {"key": "render_anim", "type": "bool", "check": True,
              "label": "sheet.ui.render.anim", "default": True,
              "box": "render", "dom": "render-anim", "live": True,
