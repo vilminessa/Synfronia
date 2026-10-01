@@ -120,6 +120,11 @@ class Api:
         # упавшие ссылки прошлой массовой загрузки — их подставляет кнопка
         # «Оставить неудавшиеся» (сбрасывается при следующем старте)
         self._bulk_failed: list[str] = []
+        # финальные построчные статусы последней массовой — воркер гасит
+        # _bulk (уходит в None) вместе с busy, без них окно не покажет итог:
+        # строки в ожидании (отмена) не попадают в _bulk_failed и пришлось
+        # бы красить их неудачей. Сбрасывается при следующем старте.
+        self._bulk_statuses: list[str] = []
         self._progress = {"mode": "determinate", "value": 0.0}
         self._ffmpeg = {"downloading": False, "extracting": False, "pct": 0.0, "ok": False, "error": None}
         self._fonts_dl = {"downloading": False, "pct": 0.0, "error": None}
@@ -210,6 +215,10 @@ class Api:
                 "bulk": dict(self._bulk) if self._bulk else None,
                 # упавшие ссылки прошлой массовой (для «Оставить неудавшиеся»)
                 "bulk_failed": list(self._bulk_failed),
+                # финальные построчные статусы последней массовой: воркер уже
+                # снёс _bulk (busy=false в том же тике), но окно держит список
+                # с отметками ✓/✕ до «К списку ссылок»
+                "bulk_statuses": list(self._bulk_statuses),
                 # значения для карточки настроек: тот же словарь, что и на
                 # диске, поэтому поля не могут разойтись с настройками, по
                 # которым идёт загрузка
@@ -512,6 +521,7 @@ class Api:
                           # p=endings(ожидают), l= качается, o=ok, f=fail
                           "statuses": ["p"] * len(urls)}
             self._bulk_failed = []
+            self._bulk_statuses = []
         self.dl = Downloader(on_log=self._log, on_progress=self._on_progress, lang=self._lang)
         ftp = FtpConfig(self.settings, self._lang)
         threading.Thread(
@@ -614,6 +624,9 @@ class Api:
                     self._bulk_failed = [u for u, s in
                                          zip(urls, self._bulk["statuses"])
                                          if s == "f"]
+                    # итоговый роспись строк тоже переживает гашение bulk:
+                    # окно держит список с отметками до «К списку ссылок»
+                    self._bulk_statuses = list(self._bulk["statuses"])
                 self._bulk = None
                 self._progress = {"mode": "determinate", "value": 100.0}
                 if cancelled:

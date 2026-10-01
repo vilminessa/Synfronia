@@ -51,6 +51,8 @@ STUB = """<script>
                          progress: {mode: "determinate", value: 0}},
                // массовая: построчные статусы и упавшие ссылки (задаёт сценарий)
                bulk: null, bulkFailed: [],
+               // финальные статусы последней массовой (поле bulk_statuses)
+               bulkStatuses: [],
                settingsOpen: %(settings_open)s, saved: [], dest: "", logs: []};
   var settings = __SETTINGS__;
   function ok(r) { return Promise.resolve(r === undefined ? {} : r); }
@@ -65,6 +67,7 @@ STUB = """<script>
     poll: function () { return Promise.resolve(Object.assign({
       logs: state.logs, log_cursor: state.logs.length,
       bulk: state.bulk, bulk_failed: state.bulkFailed,
+      bulk_statuses: state.bulkStatuses,
       ffmpeg: {downloading: false, extracting: false, pct: 0, ok: true, error: null},
       fonts_dl: {downloading: false, pct: 0, error: null}}, uiState(), state.dlState)); },
     synf_settings_state: function (open) { state.settingsOpen = !!open; return ok(); },
@@ -99,6 +102,7 @@ STUB = """<script>
       state.bulk = {total: lines.length, index: 1,
                     statuses: ["l"].concat(new Array(lines.length - 1).fill("p"))};
       state.bulkFailed = [];
+      state.bulkStatuses = [];
       return ok({});
     },
     stop_download: function () { return ok(); },

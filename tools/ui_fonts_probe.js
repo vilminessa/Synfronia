@@ -1175,8 +1175,8 @@ async function waitForPage() {
       var langs = window.I18N || {};
       if (!Object.keys(langs).length) out.push("словарь пуст");
       var keys = ["tab.batch", "url.batch.label", "bulk.hint", "bulk.count",
-                  "bulk.clear", "bulk.failed_btn", "status.enter.bulk",
-                  "p.bulk_skip"];
+                  "bulk.clear", "bulk.failed_btn", "bulk.back_btn",
+                  "status.enter.bulk", "p.bulk_skip"];
       Object.keys(langs).forEach(function (lang) {
         var d = langs[lang] || {};
         keys.forEach(function (k) {
@@ -1237,9 +1237,14 @@ async function waitForPage() {
           classes[2].indexOf("is-fail") >= 0)) {
       fail("статусы не покрасили строки: " + JSON.stringify(classes));
     }
-    // итог: busy -> false: textarea возвращается, кнопка «неудавшихся» видна
+    // итог: busy -> false: список остаётся с финальными отметками, кнопка
+    // «неудавшихся» видна, возврат к полю - кнопкой «К списку ссылок»
     await evaluate(`(function () {
       window.__probe.bulkFailed = ["https://youtu.fail/b", "https://youtu.fail/c"];
+      window.__probe.bulkStatuses = ["o", "f", "f"];
+      // как в приложении: воркер в finally гасит bulk вместе с busy, в том же
+      // тике poll отдаёт bulk=null - итог рисуется только по bulk_statuses
+      window.__probe.bulk = null;
       window.__probe.dlState = {busy: false, status: "done", result: "error",
                                 progress: {mode: "determinate", value: 100}};
       return true;
@@ -1249,28 +1254,76 @@ async function waitForPage() {
       var view = document.getElementById("bulk-view");
       var box = document.getElementById("url-batch");
       var fbtn = document.getElementById("bulk-failed");
-      return {viewHidden: view.hidden, boxShown: !box.hidden,
-              btnShown: !!fbtn && !fbtn.hidden};
+      var back = document.getElementById("bulk-back");
+      var rows = view.children;
+      return {viewShown: !view.hidden, boxHidden: box.hidden,
+              btnShown: !!fbtn && !fbtn.hidden, backShown: !!back && !back.hidden,
+              colors: rows.length >= 3
+                ? [rows[0].className, rows[1].className, rows[2].className]
+                : ["нет строк: " + rows.length]};
     })()`);
-    if (!(afterBulk.viewHidden && afterBulk.boxShown && afterBulk.btnShown)) {
-      fail("по итогу не вернулся textarea/кнопка: " + JSON.stringify(afterBulk));
+    if (!(afterBulk.viewShown && afterBulk.boxHidden && afterBulk.backShown)) {
+      fail("итог не остался на экране с кнопкой возврата: " + JSON.stringify(afterBulk));
     }
-    // клик по кнопке подставляет только упавшие ссылки
+    if (!(afterBulk.colors[0].indexOf("is-ok") >= 0 &&
+          afterBulk.colors[1].indexOf("is-fail") >= 0 &&
+          afterBulk.colors[2].indexOf("is-fail") >= 0)) {
+      fail("финальные статусы не покрасили строки: " + JSON.stringify(afterBulk.colors));
+    }
+    // клик по кнопке подставляет только упавшие ссылки и закрывает список
     await evaluate('document.getElementById("bulk-failed").click(); true');
-    const kept = await evaluate('document.getElementById("url-batch").value');
-    if (kept !== "https://youtu.fail/b\nhttps://youtu.fail/c") {
-      fail("«Оставить неудавшиеся» подставило неверно: " + JSON.stringify(kept));
+    const kept = await evaluate(`(function () {
+      var view = document.getElementById("bulk-view");
+      return {value: document.getElementById("url-batch").value,
+              viewHidden: view.hidden, boxShown: !document.getElementById("url-batch").hidden};
+    })()`);
+    if (kept.value !== "https://youtu.fail/b\nhttps://youtu.fail/c") {
+      fail("«Оставить неудавшиеся» подставило неверно: " + JSON.stringify(kept.value));
+    }
+    if (!(kept.viewHidden && kept.boxShown)) {
+      fail("клик «неудавшихся» не закрыл список: " + JSON.stringify(kept));
+    }
+    // повторный запуск и «К списку ссылок»: итог снова висит, возврат гасит его
+    await evaluate('document.getElementById("download").click(); true');
+    await sleep(450);
+    await evaluate(`(function () {
+      window.__probe.bulk = null;
+      window.__probe.bulkStatuses = ["o", "o", "o"];
+      window.__probe.dlState = {busy: false, status: "done", result: "ok",
+                                progress: {mode: "determinate", value: 100}};
+      return true;
+    })()`);
+    await sleep(450);
+    const again = await evaluate(`(function () {
+      var view = document.getElementById("bulk-view");
+      var back = document.getElementById("bulk-back");
+      return {viewShown: !view.hidden, backShown: !!back && !back.hidden};
+    })()`);
+    if (!(again.viewShown && again.backShown)) {
+      fail("повторный итог не остался на экране: " + JSON.stringify(again));
+    }
+    await evaluate('document.getElementById("bulk-back").click(); true');
+    const backToBox = await evaluate(`(function () {
+      var view = document.getElementById("bulk-view");
+      var box = document.getElementById("url-batch");
+      var back = document.getElementById("bulk-back");
+      return {viewHidden: view.hidden, boxShown: !box.hidden, backHidden: back.hidden};
+    })()`);
+    if (!(backToBox.viewHidden && backToBox.boxShown && backToBox.backHidden)) {
+      fail("«К списку ссылок» не вернул поле: " + JSON.stringify(backToBox));
     }
     // уборка стаба и поля
     await evaluate(`(function () {
       window.__probe.bulk = null;
       window.__probe.bulkFailed = [];
+      window.__probe.bulkStatuses = [];
       var box = document.getElementById("url-batch");
       box.value = ""; box.dispatchEvent(new Event("input"));
       return true;
     })()`);
     console.log(`  вставка/статусы: paste=${pl.length} строк, swap=${swap.rows} строк, ` +
-      `итог: view-скрыт=${afterBulk.viewHidden} кнопка=${afterBulk.btnShown} kept=${kept.split("\n").length}`);
+      `итог: список=${afterBulk.viewShown} цвета=${afterBulk.colors.map(c => c.indexOf("is-fail") >= 0 ? "f" : c.indexOf("is-ok") >= 0 ? "o" : "-").join("")} ` +
+      `кнопка-неудач=${afterBulk.btnShown} возврат: ${backToBox.viewHidden}`);
 
     console.log("--- раздел FTP ---");
     const ftp = await evaluate(FTP_VIS);
