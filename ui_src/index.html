@@ -7,6 +7,7 @@
   :root {
     --bg: #0c1622; --surface: #1f2b29; --widget: #23444b;
     --text: #dcdedd; --accent: #628d7c; --warn: #ffb454;
+    --ok: #3fbf6b; --err: #e0554f;
     --radius-s: 6px; --radius-m: 8px; --radius-l: 12px; --opacity: 1;
   }
   :root { __THEME_ROOT__ }
@@ -70,9 +71,13 @@ __SETTINGS_CSS__
 <div id="panel-batch" class="panel" hidden>
     <label for="url-batch" data-i18n="url.batch.label">Ссылки (по одной на строку):</label>
     <textarea id="url-batch" rows="7" placeholder="https://www.youtube.com/watch?v=…&#10;https://www.youtube.com/watch?v=…" data-i18n-tip="bulk.hint"></textarea>
+    <div id="bulk-view" class="bulk-view" hidden aria-hidden="true"></div>
     <div class="bulk-row">
       <span id="batch-count" class="bulk-count">0</span>
-      <button type="button" id="batch-clear" class="link-btn" data-i18n="bulk.clear">Очистить</button>
+      <span class="bulk-tools">
+        <button type="button" id="bulk-failed" class="link-btn" data-i18n="bulk.failed_btn" hidden>Оставить неудавшиеся</button>
+        <button type="button" id="batch-clear" class="link-btn" data-i18n="bulk.clear">Очистить</button>
+      </span>
     </div>
   </div>
 <!-- /SLOT:panel-batch -->

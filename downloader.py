@@ -31,6 +31,14 @@ from paths import ffmpeg_local_dir
 from settings import load_settings
 from settings_schema import value as _value
 
+# urllib3 (путь хендлера _requests, который yt-dlp выбирает, когда в
+# среде стоят requests/urllib3) — коннект идёт через его собственную
+# create_connection, свой guard покрывает и его
+try:
+    from urllib3.util import connection as _u3_connection
+except ImportError:  # requests/urllib3 не установлены — путь не используется
+    _u3_connection = None
+
 
 _PLAYLIST_RE = re.compile(r"[?&]list=")
 
@@ -846,6 +854,7 @@ class Downloader:
             orig_ff_popen = ytdlp_ffmpeg.Popen
             orig_create_conn = ytdlp_urllib.create_connection
             orig_wrap_socket = ssl.SSLContext.wrap_socket
+            orig_u3_conn = _u3_connection.create_connection if _u3_connection else None
             self._net_sockets = []
             self._net_fds = []
             try:
@@ -855,6 +864,10 @@ class Downloader:
                 ytdlp_ffmpeg.Popen = self._interruptible_popen()
                 ytdlp_urllib.create_connection = self._guard_sockets(orig_create_conn)
                 ssl.SSLContext.wrap_socket = self._guard_ssl(orig_wrap_socket)
+                if _u3_connection and orig_u3_conn:
+                    # путь хендлера _requests (requests/urllib3 в среде):
+                    # тот же реестр сокетов, тот же watchdog
+                    _u3_connection.create_connection = self._guard_sockets(orig_u3_conn)
                 with YoutubeDL(self._add_ffmpeg(opts)) as ydl:
                     threading.Thread(
                         target=self._watchdog, daemon=True, name="synfronia-watchdog"
@@ -884,6 +897,8 @@ class Downloader:
                 ytdlp_ffmpeg.Popen = orig_ff_popen
                 ytdlp_urllib.create_connection = orig_create_conn
                 ssl.SSLContext.wrap_socket = orig_wrap_socket
+                if _u3_connection and orig_u3_conn:
+                    _u3_connection.create_connection = orig_u3_conn
                 self._wd_done.set()
                 self._stop.clear()
                 self._on_progress({"status": "done"})

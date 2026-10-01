@@ -28,12 +28,15 @@ from paths import _file_log, base_dir
 
 # -- темы --------------------------------------------------------------------
 # Поля темы: label (название), цвета палитры bg/surface/widget/text/accent/warn,
-# opacity (общая прозрачность интерфейса 0..1), радиусы скругления
+# ok (успех) и err (ошибка) — их используют состояния строк массовой
+# загрузки, opacity (общая прозрачность интерфейса 0..1), радиусы скругления
 # radius_s / radius_m / radius_l (px), hidden (скрыть из списка).
 # Значения — дефолты; пользователь правит копии в
 # %LOCALAPPDATA%\Synfronia\themes\{имя_темы}\theme.json.
 _THEME_DEFAULTS = {
     "warn": "#ffb454",
+    "ok": "#3fbf6b",
+    "err": "#e0554f",
     "opacity": 1.0,
     "radius_s": 6,
     "radius_m": 8,
@@ -47,6 +50,8 @@ THEMES = {
         "widget": "#003638",
         "text": "#dcdedd",
         "accent": "#00989b",
+        "ok": "#3fd994",
+        "err": "#ff6b61",
         **_THEME_DEFAULTS,
     },
     "technology_pinks": {
@@ -56,6 +61,8 @@ THEMES = {
         "widget": "#ffffff",
         "text": "#5d2547",
         "accent": "#c15f9b",
+        "ok": "#2fae5e",
+        "err": "#d64545",
         **_THEME_DEFAULTS,
     },
     "scarred_mind": {
@@ -65,6 +72,8 @@ THEMES = {
         "widget": "#1e2542",
         "text": "#b9c2d6",
         "accent": "#f1b970",
+        "ok": "#5ecf8f",
+        "err": "#ff7066",
         **_THEME_DEFAULTS,
     },
     "audrey_main": {
@@ -74,6 +83,8 @@ THEMES = {
         "widget": "#ededed",
         "text": "#5d5d5d",
         "accent": "#96af9b",
+        "ok": "#4a9d6a",
+        "err": "#cc4d4d",
         **_THEME_DEFAULTS,
     },
     "night_sky": {
@@ -83,6 +94,8 @@ THEMES = {
         "widget": "#323756",
         "text": "#fffedd",
         "accent": "#fff2c9",
+        "ok": "#7fd99a",
+        "err": "#ff7a6e",
         **_THEME_DEFAULTS,
     },
     "liquid_glass": {
@@ -92,6 +105,8 @@ THEMES = {
         "widget": "#16223d",
         "text": "#e9f1ff",
         "accent": "#69c1ff",
+        "ok": "#4fd08a",
+        "err": "#ff6b7a",
         "opacity": 1.0,
         "radius_s": 12,
         "radius_m": 18,
@@ -505,7 +520,7 @@ _ASSET_RE = re.compile(r"\{\{asset:([^}]*)\}\}")
 # Секции базового шаблона: <!-- SLOT:name --> ... <!-- /SLOT:name -->
 _SLOT_RE = re.compile(r"<!-- SLOT:([a-z0-9_-]+) -->(.*?)<!-- /SLOT:\1 -->", re.S)
 _PALETTE_FIELDS = (
-    "bg", "surface", "widget", "text", "accent", "warn",
+    "bg", "surface", "widget", "text", "accent", "warn", "ok", "err",
     "opacity", "radius_s", "radius_m", "radius_l",
 )
 _THEME_META_FIELDS = (
@@ -815,6 +830,8 @@ theme.json внутри подпапок.
 theme.json
 ----------
 Палитра (наследуется родителями): bg, surface, widget, text, accent, warn,
+ok (успех: зелёная отметка скачанных строк массовой загрузки) и
+err (ошибка: неудавшиеся строки),
 opacity, radius_s, radius_m, radius_l.
 
   {
