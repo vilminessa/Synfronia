@@ -660,6 +660,44 @@ async function waitForPage() {
     console.log(`  полосы: правил=${sbRules.length} палец=${sbScan.thumbBase} ` +
       `(эталон ${sbScan.wantWidget}) листы=[${sbScan.sheets.join(",")}]`);
 
+    // ===== store Alpine (этап 1 дорожной карты) =====
+    // store - единственный источник для НОВЫХ узлов. Чек ловит: регистрацию
+    // в alpine:init, заполнение из poll (признаки отличают запись от
+    // дефолтов: theme/ui_rev/progress) и реактивность t() на смену языка
+    // без участия DOM (глобальный t() на curLang тут не поможет).
+    console.log("--- store Alpine ---");
+    const storeState = JSON.parse(await evaluate(`JSON.stringify((function () {
+      if (!window.Alpine || !Alpine.store) return {noAlpine: true};
+      var s = Alpine.store("synf");
+      if (!s) return {noStore: true};
+      var res = {
+        // три признака «была запись из tick()»: в дефолтах store theme пуст,
+        // ui_rev -1, progress null
+        filled: s.busy === false && typeof s.status === "string" &&
+                 Array.isArray(s.bulk_statuses) && Array.isArray(s.bulk_failed) &&
+                 typeof s.lang === "string" && s.theme !== "" && s.ui_rev !== -1 &&
+                 s.progress !== null
+      };
+      var ru = s.t("bulk.clear");
+      s.lang = "en";
+      var en = s.t("bulk.clear");
+      s.lang = "ru";
+      res.ru = ru;
+      res.en = en;
+      res.ruOk = ru === I18N.ru["bulk.clear"];
+      res.enOk = en === I18N.en["bulk.clear"];
+      res.differ = ru !== en && ru !== "bulk.clear";
+      return res;
+    })())`));
+    const storeChecks = [
+      ["store зарегистрирован (alpine:init отработал)", !storeState.noAlpine && !storeState.noStore],
+      ["store заполнен из tick() из poll", storeState.filled === true],
+      ["t() отдаёт русский перевод", storeState.ruOk === true],
+      ["t() реактивен на смену языка (en)", storeState.enOk === true && storeState.differ === true],
+    ];
+    storeChecks.forEach(([name, okFlag]) => { if (!okFlag) fail(name + ": " + JSON.stringify(storeState)); });
+    console.log(`  store: заполнен=${storeState.filled} ru="${storeState.ru}" en="${storeState.en}"`);
+
     console.log("--- разделы и поля ---");
     await evaluate(OVERLAY_OPEN);
     await sleep(300);

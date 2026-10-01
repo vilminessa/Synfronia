@@ -527,6 +527,39 @@
     }
   }
 
+  /* ---- store Alpine (этап 1 дорожной карты «Alpine + Motion») ----
+     Единственный источник реактивного состояния для НОВЫХ узлов. Контракт
+     сосуществования: в store пишет только tick() в app.js (одним
+     Object.assign), читают его только новые узлы (x-text/x-show/$watch);
+     существующие императивные узлы (журнал, bulk-список, подсказки,
+     карточка настроек) остаются на своих обработчиках - один узел никогда
+     не трогают оба способа. Регистрация в alpine:init: обработчик
+     вешается здесь (скрипт common.js выполняется до загрузки Alpine), а
+     событие Alpine диспатчит на старте движка.
+     t() здесь читает this.lang (а не глобальный curLang) - иначе выражение
+     в шаблоне Alpine не пересчиталось бы при смене языка. */
+  document.addEventListener("alpine:init", function () {
+    if (!window.Alpine) return;
+    Alpine.store("synf", {
+      busy: false,
+      progress: null,      // {mode, value} из poll
+      result: null,        // ok | error | cancelled | failed | ...
+      status: "",
+      bulk: null,          // {total, index, done, failed, statuses} пока идёт
+      bulk_statuses: [],   // финальные построчные статусы последней массовой
+      bulk_failed: [],
+      ui_rev: -1,
+      lang: "ru",
+      theme: "",
+      t: function (key) {
+        var d = I18N[this.lang] || I18N.ru;
+        if (d && d[key] !== undefined) return d[key];
+        if (I18N.ru && I18N.ru[key] !== undefined) return I18N.ru[key];
+        return key;
+      }
+    });
+  });
+
   function quoted(family) {
     return family ? '"' + String(family).replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"' : "";
   }

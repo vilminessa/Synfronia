@@ -551,6 +551,27 @@
       }
       // настройки рендеринга (анимации, размытие) применяются без перезагрузки
       applyRenderPrefs(st.settings);
+      // этап 1 дорожной карты: одно присваивание в store Alpine (читают только
+      // новые узлы, существующие императивные не трогаются). До старта Alpine
+      // store ещё нет - такие тики пропускаются, следующий (через 200 мс)
+      // уже заполнит состояние.
+      if (window.Alpine && window.Alpine.store) {
+        var synfStore = Alpine.store("synf");
+        if (synfStore) {
+          Object.assign(synfStore, {
+            busy: !!st.busy,
+            progress: st.progress || null,
+            result: st.result || null,
+            status: st.status || "",
+            bulk: st.bulk || null,
+            bulk_statuses: st.bulk_statuses || [],
+            bulk_failed: st.bulk_failed || [],
+            ui_rev: typeof st.ui_rev === "number" ? st.ui_rev : -1,
+            lang: st.lang || "ru",
+            theme: st.theme || ""
+          });
+        }
+      }
       if (typeof synfSettingsState === "function") synfSettingsState(st);
     } catch (e) {}
     scheduleTick(200);
