@@ -305,6 +305,84 @@
     .field-card-body > *:not(.knob-panel):not(#font-preview) {
     grid-column: 1 / -1;
   }
+  /* ---- подсказки: карточка повторяет панель шрифтов - слева ручки сил
+     (knob-panel), справа статичная сцена-предпросмотр. Сцена без курсора
+     и циклов: рамка-элемент, пунктирный маркер направления и плашка на
+     линии «элемент -> маркер»; плашка переезжает transition'ом при
+     изменении ручек (layoutTipDemo в settings.js, те же формулы сил,
+     что у настоящей подсказки - tipForceGeom в common.js). */
+  .field-card:has(> .field-card-body > #tip-preview) .field-card-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+    gap: 4px 18px;
+    align-items: start;
+  }
+  .field-card:has(> .field-card-body > #tip-preview) .knob-panel {
+    grid-column: 1;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 10px 12px;
+    align-items: start;
+    margin-top: 0;
+    padding: 10px 12px;
+    background: var(--surface);
+    border: 1px solid var(--widget);
+    border-radius: var(--radius-m);
+  }
+  .field-card:has(> .field-card-body > #tip-preview) #tip-preview {
+    grid-column: 2; grid-row: 1;
+    align-self: start; margin-top: 0;
+  }
+  .field-card:has(> .field-card-body > #tip-preview)
+    .field-card-body > *:not(.knob-panel):not(#tip-preview) {
+    grid-column: 1 / -1;
+  }
+  #tip-preview {
+    position: relative;
+    min-height: 154px;
+    background: var(--surface);
+    border: 1px solid var(--widget);
+    border-radius: var(--radius-m);
+    overflow: hidden;
+  }
+  /* рамка-элемент: за него «лёжа» ложится плашка при repel = 0 */
+  .tp-target {
+    position: absolute; left: 16px; top: 50%; transform: translateY(-50%);
+    width: 74px; height: 46px;
+    background: var(--widget);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-s, 6px);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08);
+  }
+  /* маркер направления: фиксированная «точка притяжения» вместо курсора */
+  .tp-marker {
+    position: absolute; right: 16px; top: 50%;
+    width: 14px; height: 14px; margin: -7px -7px 0 0;
+    border: 1px dashed var(--accent);
+    border-radius: 50%;
+    opacity: .75;
+  }
+  /* плашка как настоящая подсказка, но без цикла: только transition */
+  .tp-bubble {
+    position: absolute; top: 50%;
+    transform: translateY(-50%);
+    padding: 5px 9px;
+    background: var(--widget);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-s, 6px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, .35);
+    font-size: 11px; white-space: nowrap;
+    transition: left .15s ease;
+    z-index: 2;
+  }
+  .tp-thread {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 1;
+  }
+  .tp-thread line {
+    stroke: var(--accent); stroke-width: 1;
+    stroke-dasharray: 3 3; opacity: .7;
+  }
   /* ячейка панельки: подпись сверху, ручка под ней по центру */
   .knob-cell {
     display: flex; flex-direction: column; align-items: center;
@@ -379,7 +457,7 @@
   }
   @media (prefers-reduced-motion: reduce) {
     .settings-overlay, .settings-card { animation: none; }
-    .knob-val { transition: none; }
+    .knob-val, .tp-bubble { transition: none; }
     .act-btn:hover .ico, .act-btn:active .ico, .act-btn.busy .ico { animation: none; transition: none; }
     /* блик и пыль на кнопках гасим; без анимации пыль невидима (opacity: 0),
        а блик стоит вне кнопки (background-position 220%) */

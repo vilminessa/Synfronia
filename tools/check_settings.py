@@ -49,7 +49,9 @@ LEGACY_DOM = {
     "font-heading", "font-sans", "font-mono", "font-weight", "font-preview",
     "font-note", "font-dl-note",
     "reload-fonts", "download-fonts", "open-fonts",
-    "tip-pull", "tip-pull-range", "tip-repel", "tip-repel-range",
+    # силы подсказок: ручки + сцена-предпросмотр, зеркальных ползунков
+    # (tip-pull-range/tip-repel-range) больше нет
+    "tip-pull", "tip-repel", "tip-preview",
     "render-gpu", "render-anim", "render-blur",
     "app-version",
     # раздел «Загрузчик»
