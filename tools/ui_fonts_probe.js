@@ -1766,6 +1766,59 @@ async function waitForPage() {
     console.log(`  сцена: repel 0->100 x=${demoClose.x}->${demoFar.x} ` +
       `pull 0->100 x=${demoAway.x}->${demoNear.x}`);
 
+    // ручки сил: стандартная дуга270° с упорами (не «бесконечная», как
+    // толщина шрифта) и без цифр на ручке - числа живут в подсказке
+    await evaluate('document.getElementById("tip-pull").scrollIntoView({block: "center"}); true');
+    await sleep(80);
+    const pullBox = await evaluate(`(function () {
+      panelFields["ui.tip_pull"].set(0);
+      var r = document.getElementById("tip-pull").getBoundingClientRect();
+      return {x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2)};
+    })()`);
+    async function pullWheels(times, dy) {
+      // курсор должен физически стоять на ручке: wheel CDP летит в точку
+      // последнего move (как в чеке толщины)
+      await send("Input.dispatchMouseEvent", {type: "mouseMoved", x: pullBox.x, y: pullBox.y});
+      for (let wi = 0; wi < times; wi++) {
+        await send("Input.dispatchMouseEvent", {type: "mouseWheel", x: pullBox.x,
+          y: pullBox.y, deltaX: 0, deltaY: dy});
+      }
+      await sleep(120);
+      return evaluate('document.getElementById("tip-pull").value');
+    }
+    // колесо: deltaY -120 двигает к максимуму (как в чеке толщины)
+    const stopMax = await pullWheels(25, -120);         // до верхнего упора
+    if (+stopMax !== 100) {
+      fail("ручка сил не упирается в максимум дуги: " + stopMax);
+    }
+    const stopHold = await pullWheels(25, -120);        // упор держит
+    if (+stopHold !== 100) {
+      fail("ручка сил не держит упор: " + stopHold);
+    }
+    const stopMin = await pullWheels(60, 120);          // и вниз - до min
+    if (+stopMin !== 0) {
+      fail("ручка сил не упирается в минимум (крутится через ноль?): " + stopMin);
+    }
+    // цифра на ручке при вводе НЕ появляется (в отличие от font-weight)
+    await send("Input.dispatchMouseEvent", {type: "mousePressed", x: pullBox.x,
+      y: pullBox.y, button: "left", buttons: 1, clickCount: 1});
+    await send("Input.dispatchMouseEvent", {type: "mouseMoved", x: pullBox.x + 30,
+      y: pullBox.y, button: "left", buttons: 1});
+    await sleep(160);
+    const valDuring = await evaluate(`(function () {
+      var v = document.querySelector("#tip-pull .knob-val");
+      return v ? v.textContent : null;
+    })()`);
+    await send("Input.dispatchMouseEvent", {type: "mouseReleased", x: pullBox.x + 30,
+      y: pullBox.y, button: "left", buttons: 0, clickCount: 1});
+    await sleep(100);
+    if (valDuring !== "") {
+      fail("у ручки сил показалась цифра на ручке: " + JSON.stringify(valDuring));
+    }
+    await evaluate('panelFields["ui.tip_pull"].set(50); true');   // дефолт обратно
+    console.log(`  ручка сил: упор max=${stopMax} держит=${stopHold} min=${stopMin} ` +
+      `цифра_в_драге=${JSON.stringify(valDuring)}`);
+
     // -- массовая вкладка ----------------------------------------------------
     console.log("--- массовая вкладка ---");
     await evaluate('switchTab("batch"); true');

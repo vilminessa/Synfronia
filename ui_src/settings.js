@@ -195,15 +195,19 @@
               get: readMode, set: function(v) { setModeValue(wrap, v); }};
     }
     if (spec.type === "knob") {
-      // Круговая ручка. Два режима. Позиционный (шрифты): конечная дуга
+      // Круговая ручка. Три режима. Позиционный (шрифты): конечная дуга
       // 270° со стартом слева-внизу - «нулевая точка» снизу, упоры на
       // концах, зацикливания нет; магнит - индикатор всегда сидит на
-      // позиции щелчка. Числовая (толщина): бесконечная - обороты
-      // накапливаются, значение крутится через ноль. Оба режима вращаются
-      // плавно: целевой угол догоняется по rAF с МАКСИМУМОМ скорости
-      // (1080 град/с) и экспоненциальным замедлением - даже бурст колеса
-      // не раскручивает ручку быстрее этого.
+      // позиции щелчка. Числовая «бесконечная» (spec.wrap - толщина
+      // шрифта): обороты накапливаются, значение крутится через ноль,
+      // при вводе на ручке видна цифра. Числовая стандартная (tip_pull/
+      // tip_repel, без wrap): та же дуга270° с упорами, как у позиционных,
+      // без зацикливания и без цифр - числа показывает подсказка. Все
+      // режимы вращаются плавно: целевой угол догоняется по rAF с
+      // МАКСИМУМОМ скорости (1080 град/с) и экспоненциальным замедлением -
+      // даже бурст колеса не раскручивает ручку быстрее этого.
       var numeric = spec.min !== undefined && spec.max !== undefined;
+      var bounded = numeric && !spec.wrap;   // стандартная дуга270° с упорами
       var step = spec.step || 10, lo = spec.min, hi = spec.max;
       var positions = [];              // позиционная: [{value, label}]
       var A0 = 225, SWEEP = 270;       // дуга:225° - слева-внизу (ноль)
@@ -216,7 +220,12 @@
       function nSteps() {
         return numeric ? Math.round((hi - lo) / step) + 1 : positions.length;
       }
-      function sa() { return 360 / Math.max(nSteps(), 1); }
+      function sa() {
+        // бесконечная - ступень в долях полного круга; стандартная (и
+        // позиционная) - в долях дуги270°
+        if (bounded) return SWEEP / Math.max(Math.round((hi - lo) / step), 1);
+        return 360 / Math.max(nSteps(), 1);
+      }
       function sweepStep() { return SWEEP / Math.max(positions.length - 1, 1); }
       function clampRaw(a) { return Math.max(A0, Math.min(A0 + SWEEP, a)); }
       function angForIdx(i) { return A0 + i * sweepStep(); }
@@ -227,9 +236,14 @@
           Math.round((clampRaw(a) - A0) / SWEEP * (n - 1))));
       }
       function valueAt(a) {
+        // стандартная: упоры дуги + квантование шагом, без зацикливания
+        if (bounded) return lo + Math.round((clampRaw(a) - A0) / sa()) * step;
         return lo + (Math.round(norm(a) / sa()) % nSteps()) * step;
       }
-      function angleFor(v) { return (v - lo) / step * sa(); }
+      function angleFor(v) {
+        return bounded ? A0 + (v - lo) / step * sa()
+                       : (v - lo) / step * sa();
+      }
       // ближайший к текущему raw путь к желаемому углу (Home/End числа)
       function retarget(desiredNorm) {
         var d = desiredNorm - norm(raw);
@@ -237,10 +251,16 @@
         while (d < -180) d += 360;
         raw += d;
       }
+      // «магнит» к ступени: бесконечная - по сетке от нуля оборота,
+      // стандартная - по сетке от начала дуги (иначе упоры поехали бы)
+      function snap(a) {
+        if (bounded) return A0 + Math.round((a - A0) / sa()) * sa();
+        return Math.round(a / sa()) * sa();
+      }
       // целевой угол: позиционная - позиция щелчка (магнит), числовая -
       // ближайшая ступень накопленного угла (обороты не сбрасываются)
       function targetAng() {
-        return numeric ? Math.round(raw / sa()) * sa() : angForIdx(idx);
+        return numeric ? snap(raw) : angForIdx(idx);
       }
       function pct() { return Math.round((cur - lo) / (hi - lo) * 100); }
       var kwrap = el("div", "knob", {
@@ -282,9 +302,9 @@
       }
       function paint() {
         ind.style.transform = "rotate(" + disp.toFixed(2) + "deg)";
-        // значение на ручке: только числовым шкалам (у позиционных подпись
-        // длинная - семейство шрифта - и остаётся в подсказке)
-        valNode.textContent = numeric ? String(cur) : "";
+        // значение на ручке: только «бесконечным» шкалам (у позиционных и
+        // стандартных подпись длинная или не нужна - остаётся в подсказке)
+        valNode.textContent = (numeric && spec.wrap) ? String(cur) : "";
         var text = tipText();
         setTip(kwrap, text);
         // setTip пишет aria-label узлу без текста - возвращаем подпись поля
@@ -338,6 +358,10 @@
         clearTimeout(editT);
         editT = setTimeout(function() { kwrap.classList.remove("editing"); }, 800);
         if (numeric) {
+          // стандартная: сырой угол держим внутри дуги - упоры ловятся
+          // здесь же, поэтому обратный драг сразу едет от края, без
+          // «мёртвого хода» за упором
+          if (bounded) raw = clampRaw(raw);
           commit(valueAt(raw));
         } else {
           raw = clampRaw(raw);           // упоры: за дугу270° не выходим
@@ -373,7 +397,7 @@
           kwrap.removeEventListener("pointermove", move);
           kwrap.removeEventListener("pointerup", up);
           kwrap.removeEventListener("pointercancel", up);
-          if (numeric) raw = Math.round(raw / sa()) * sa();
+          if (numeric) raw = snap(raw);
           applyInput();                    // магнит дожимает к позиции
         };
         kwrap.addEventListener("pointermove", move);
@@ -396,7 +420,10 @@
       kwrap.addEventListener("dblclick", function(ev) {
         ev.preventDefault();
         if (numeric) {
-          retarget(angleFor(spec.default));
+          // стандартная - прыжок с клампом (retarget ломал бы дугу:
+          // он ходит через нормаль угла), бесконечная - ближайший путь
+          if (bounded) raw = clampRaw(angleFor(spec.default));
+          else retarget(angleFor(spec.default));
         } else {
           var di = 0;
           for (var i = 0; i < positions.length; i++) {
@@ -411,14 +438,18 @@
       kwrap.addEventListener("keydown", function(ev) {
         if (ev.key === "Home") {
           ev.preventDefault();
-          if (numeric) { retarget(0); }
+          // стандартная - прямой прыжок на начало дуги; бесконечная -
+          // retarget ближайшим путём к углу минимума
+          if (bounded) { raw = A0; }
+          else if (numeric) { retarget(0); }
           else { raw = A0; }
           applyInput();
           return;
         }
         if (ev.key === "End") {
           ev.preventDefault();
-          if (numeric) { retarget(angleFor(hi)); }
+          if (bounded) { raw = angleFor(hi); }
+          else if (numeric) { retarget(angleFor(hi)); }
           else { raw = A0 + SWEEP; }
           applyInput();
           return;
@@ -460,7 +491,11 @@
                   var n = Number(v);
                   if (!isFinite(n)) n = spec.default;
                   n = Math.max(lo, Math.min(hi, Math.round(n / step) * step));
-                  retarget(angleFor(n));
+                  // стандартная - прыжок в точку дуги (retarget ходит
+                  // через нормаль угла и сломал бы кламп), бесконечная -
+                  // ближайшим путём, обороты не сбрасываются
+                  if (bounded) raw = clampRaw(angleFor(n));
+                  else retarget(angleFor(n));
                   commit(n);
                 } else {
                   cur = v === undefined || v === null ? (spec.default || "") : String(v);
