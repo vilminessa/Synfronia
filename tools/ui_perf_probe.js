@@ -12,6 +12,8 @@
 //   * АНИМАЦИЯ (3.6 с WAAPI-transform на кнопке): пока она идёт, счётчики
 //     LayoutCount/LayoutDuration не должны расти - это и есть прокси «анимация
 //     живёт на композиторе» (чистый GPU-трек чек не видит - он в DevTools);
+//   * ИТОГОВАЯ АНИМАЦИЯ КНОПКИ (Motion-спринг, этап 2 дорожной карты): тот же
+//     критерий - layout не растёт, когда входит иконка результата;
 //   * память/CPU печатаются в каждый снапшот (JSHeapUsedSize, TaskDuration)
 //     как baseline.
 //
@@ -198,6 +200,24 @@ async function waitForPage() {
     // transform-анимация идёт через композитор: layout работать не должен
     if (anim.LayoutCount > 2) fail(`анимация: LayoutCount ${anim.LayoutCount} > 2 - анимация не на композиторе`);
     if (anim.LayoutDuration > 0.05) fail(`анимация: LayoutDuration ${anim.LayoutDuration}с > 0.05с`);
+
+    // ---- фаза 3: итоговая анимация кнопки (Motion-спринг, этап 2) ----
+    // Спринги dl-pop/shake/bulge ушли из CSS на Motion - проверяем, что и
+    // они не трогают компоновку (иначе style-recalc вернулся бы)
+    console.log("--- фаза 3: анимация итога кнопки ---");
+    const e1 = await metricsOf();
+    await evaluate(`(function () {
+      setDownloadResult("ok");
+      return true;
+    })()`);
+    await sleep(1400);   // спринг ~1 с + запас до автосброса 2 с не касается метрик
+    const e2 = await metricsOf();
+    const result = delta(e1, e2);
+    console.log(`  layout=${result.LayoutDuration}с/${result.LayoutCount}шт ` +
+      `recalc=${result.RecalcStyleDuration}с/${result.RecalcStyleCount}шт ` +
+      `script=${result.ScriptDuration}с`);
+    if (result.LayoutCount > 2) fail(`итог кнопки: LayoutCount ${result.LayoutCount} > 2 - спринг не на композиторе`);
+    if (result.LayoutDuration > 0.05) fail(`итог кнопки: LayoutDuration ${result.LayoutDuration}с > 0.05с`);
 
     console.log(bad ? `итог: провалено ${bad}` : "итог: OK (baseline зафиксирован)");
   } finally {

@@ -198,6 +198,29 @@
                   err: "btn.partial", warn: "btn.warn", fail: "btn.failed",
                   cancel: "btn.cancelled"};
   var DL_RESULT = {ok: "ok", error: "err", warn: "warn", failed: "fail", cancelled: "cancel"};
+  // Итоговые анимации иконок (этап 2 дорожной карты): Motion вместо CSS
+  // @keyframes - спринг/кейфреймы идут через браузерный движок анимаций, а
+  // style-recalc от CSS-кадров остаётся прошлым (см. чек производительности).
+  // КЛАССЫ состояний не трогаем - на них завязаны стили и проверки зонда;
+  // база .dl-icon остаётся фолбэком, когда Motion недоступен или выключены
+  // анимации (тогда transition доводит иконку до состояния класса).
+  var DL_RESULT_ANIMS = {
+    // как прежние dl-pop: выпрыгивание с поворотом, пружина даёт тот же
+    // перелёт (~14% за масштом), что и keyframes 60% у старого CSS
+    ok:     {frames: {opacity: [0, 1], transform: ["scale(.3) rotate(-16deg)", "scale(1) rotate(0)"]},
+             opts: {type: "spring", stiffness: 420, damping: 16}},
+    cancel: {frames: {opacity: [0, 1], transform: ["scale(.3) rotate(-16deg)", "scale(1) rotate(0)"]},
+             opts: {type: "spring", stiffness: 420, damping: 16}},
+    // как прежний dl-shake: рывки по горизонтали с проявлением
+    err:    {frames: {opacity: [0, 1], x: [-4, 4, -3, 2, 0]},
+             opts: {duration: 0.42, ease: "easeOut"}},
+    warn:   {frames: {opacity: [0, 1], x: [-4, 4, -3, 2, 0]},
+             opts: {duration: 0.42, ease: "easeOut"}},
+    // как прежний dl-bulge: выпячивание за края кнопки (overflow: visible у
+    // .dl-fail это помнит), пружина с явным перелётом
+    fail:   {frames: {opacity: [0, 1], transform: ["scale(.2) rotate(-28deg)", "scale(1) rotate(0)"]},
+             opts: {type: "spring", stiffness: 340, damping: 11}}
+  };
   var DL_RESET_MS = 2000;
   var dlState = "idle";
   var dlBest = 0;         // рекорд процента за загрузку
@@ -219,7 +242,19 @@
       dlTimer = 0;
       DL_STATES.forEach(function(s) { btn.classList.remove("dl-" + s); });
       btn.classList.add("dl-" + state);
-      btn.querySelector(".dl-icon").innerHTML = DL_ICON[state] || "";
+      var iconEl = btn.querySelector(".dl-icon");
+      iconEl.innerHTML = DL_ICON[state] || "";
+      // итоговое состояние входит со спрингом Motion (см. DL_RESULT_ANIMS);
+      // вызывается ровно здесь - один раз на смену состояния, внутри
+      // if (state !== dlState)
+      var anim = DL_RESULT_ANIMS[state];
+      if (anim) {
+        motionAnimate(iconEl, anim.frames, anim.opts);
+        // отметка для чека зонда: анимация итога управляется Motion, а не
+        // CSS (CSS-@keyframes удалены). Дата - момент вызова, чек сверяет,
+        // что она попала в окно между DL_SET и чтением
+        btn._dlMotionAt = Date.now();
+      }
       dlState = state;
       if (state === "ok" || state === "err" || state === "warn" ||
           state === "fail" || state === "cancel") {
@@ -308,8 +343,12 @@
     if (back) back.hidden = true;   // новый запуск: итога ещё нет
     view.textContent = "";
     list.forEach(function(url) {
+      // x-motion: Alpine проявляет строку при появлении узла в DOM (JSON -
+      // кейфреймы Motion). Атрибут ставит императивный код - директива
+      // инициализируется Alpine-observer'ом при добавлении (проверяется зондом)
       var row = document.createElement("div");
       row.className = "bulk-item";
+      row.setAttribute("x-motion", '{"opacity":[0,1],"x":[-8,0]}');
       // SVG-значок состояния вместо эмодзи: спиннер дуги ( качается),
       // галочка и крест рисуются штрихом; нужную группу включает класс
       // строки (is-load / is-ok / is-fail), цвета - из палитры темы
