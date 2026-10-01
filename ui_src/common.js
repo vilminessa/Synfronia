@@ -170,6 +170,26 @@
   // объезжает элемент по кольцу, а не летит сквозь него; в центре (курсор
   // ближе 6px) угол держится прежним, чтобы не дрожать. focus: сверху, если
   // есть место, иначе снизу, затем по бокам с большим простором.
+
+  // Геометрия сил (общий источник): зазор от рамки элемента (repel),
+  // посадка «на элемент» (onto) и смещение вдоль направления от pull (away).
+  // Прогрессии, а не прямые: концы прежние (repel 0 - лёжа на элементе,
+  // 100 -18px снаружи; pull 50 - дефолт), поэтому обычные настройки не
+  // едутся, но между ними изменение чувствится сильнее у краёв. pull 0 -
+  // подсказка отдаляется от курсора (50px), 100 - подтягивается вплотную.
+  // bw/bh - размер бокса подсказки. Статичная сцена в настройках
+  // (settings.js layoutTipDemo) считает тем же хелпером: одинаковые силы
+  // обязаны давать одинаковую геометрию у настоящей подсказки и у демо.
+  function tipForceGeom(bw, bh) {
+    var repel = TIP_FORCE.repel, pull = TIP_FORCE.pull;
+    var gap = 2 * Math.pow(9, repel / 100);
+    var onto = Math.pow(1 - repel / 100, 1.8) * Math.min(bw, bh) / 2;
+    var pn = (pull - 50) / 50;
+    var away = pn < 0 ? 50 * Math.pow(-pn, 1.8)
+                      : -10 * Math.pow(pn, 1.8);
+    return {gap: gap, onto: onto, away: away};
+  }
+
   function tipTarget() {
     var el = TIP.target;
     var w = TIP.node.offsetWidth;
@@ -180,11 +200,10 @@
     // 100 -18px снаружи; pull 50 - дефолт), поэтому обычные настройки не
     // едутся, но между ними изменение чувствуется сильнее у краёв. pull 0 -
     // подсказка отдаляется от курсора (50px), 100 - подтягивается вплотную.
-    var gap = 2 * Math.pow(9, TIP_FORCE.repel / 100);
-    var onto = Math.pow(1 - TIP_FORCE.repel / 100, 1.8) * Math.min(w, h) / 2;
-    var pn = (TIP_FORCE.pull - 50) / 50;
-    var away = pn < 0 ? 50 * Math.pow(-pn, 1.8)
-                      : -10 * Math.pow(pn, 1.8);
+    // зазор/посадка/смещение - общий хелпер сил tipForceGeom (тем же
+    // считает статичная сцена в настройках: одинаковые силы - геометрия)
+    var geom = tipForceGeom(w, h);
+    var gap = geom.gap, onto = geom.onto, away = geom.away;
     var dx, dy;
     if (TIP.mode === "focus") {
       var sp = {top: r.top - TIP_MARGIN,

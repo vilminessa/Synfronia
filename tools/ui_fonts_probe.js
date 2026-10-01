@@ -718,10 +718,13 @@ async function waitForPage() {
       var groups = ["font-heading", "font-sans", "font-mono", "font-weight"].map(function(id) {
         return rect(document.getElementById(id));
       });
-      var cells = [].slice.call(document.querySelectorAll(".knob-cell")).map(rect);
       var txt = document.getElementById("font-preview");
       var s = txt ? txt.textContent.replace(/\\s+/g, " ") : "";
-      return {prev: prev, groups: groups, cells: cells,
+      // ячейки только карточки шрифтов: в карточке подсказок теперь тоже
+      // есть ручки (knob-panel), их ячейки этому чеку не конкуренты
+      var myCells = [].slice.call(
+        document.querySelectorAll(".field-card:has(> .field-card-body > #font-preview) .knob-cell")).map(rect);
+      return {prev: prev, groups: groups, cells: myCells,
               text: s.trim().length,
               heads: ["Заголовок - ", "Основной текст - ", "Консоль - "].filter(function(h) {
                 return s.indexOf(h) >= 0; }).length,
@@ -1575,17 +1578,20 @@ async function waitForPage() {
       var pull = document.getElementById("tip-pull"), repel = document.getElementById("tip-repel");
       var pr = document.getElementById("tip-pull-range"), rr = document.getElementById("tip-repel-range");
       function tipAttr(n) { return n ? (n.getAttribute("data-i18n-tip") || "") : ""; }
-      var row = pull ? pull.closest(".range-row") : null;
+      var row = pull ? pull.closest(".knob-panel") : null;
+      var scene = document.getElementById("tip-preview");
       return {pull: !!pull, repel: !!repel, range: !!pr && !!rr,
-              pullType: pull ? pull.type : "",
+              pullRole: pull ? pull.getAttribute("role") : "",
               pullTip: tipAttr(pull), repelTip: tipAttr(repel),
               label: row ? !!row.querySelector("label") : false,
+              scene: !!scene && !!scene.querySelector(".tp-bubble"),
               force: {pull: TIP_FORCE.pull, repel: TIP_FORCE.repel}};
     })()`);
     const forceChecks = [
-      ["поля сил подсказок есть (число + ползунок)",
-        forceFields.pull && forceFields.repel && forceFields.range &&
-        forceFields.pullType === "number" && forceFields.label],
+      ["поля сил подсказок есть (ручки + сцена-предпросмотр)",
+        forceFields.pull && forceFields.repel && !forceFields.range &&
+        forceFields.pullRole === "slider" && forceFields.label &&
+        forceFields.scene],
       ["поля сил подсказок переведены", forceFields.pullTip.length > 0 && forceFields.repelTip.length > 0],
       ["силы по умолчанию 50/100",
         forceFields.force.pull === 50 && forceFields.force.repel === 100],
@@ -1593,8 +1599,7 @@ async function waitForPage() {
     forceChecks.forEach(([name, okFlag]) => { if (!okFlag) fail(name); });
     const forceSaved = await evaluate(`(function () {
       window.__probe.saved = [];
-      var n = document.getElementById("tip-pull");
-      n.value = "85"; n.dispatchEvent(new Event("change"));
+      panelFields["ui.tip_pull"].set(85);   // ручка: set -> change -> сохранение
       return {saved: window.__probe.saved.slice(-1)[0], pull: TIP_FORCE.pull};
     })()`);
     if (!forceSaved.saved || forceSaved.saved[0] !== "tip_pull" || +forceSaved.saved[1] !== 85) {
@@ -1623,9 +1628,9 @@ async function waitForPage() {
         pywebview.api.save_setting("tip_pull", ${pull});
         pywebview.api.save_setting("tip_repel", ${repel});
         setTipForces(${pull}, ${repel});
-        var a = document.getElementById("tip-pull"), b = document.getElementById("tip-repel");
-        if (a) a.value = ${pull};
-        if (b) b.value = ${repel};
+        var a = panelFields["ui.tip_pull"], b = panelFields["ui.tip_repel"];
+        if (a) a.set(${pull});
+        if (b) b.set(${repel});
         return TIP_FORCE.pull + "/" + TIP_FORCE.repel;
       })()`);
     }
@@ -1709,6 +1714,57 @@ async function waitForPage() {
       `repel: 0->на_элементе=${repelOff.overlap} 100->вне=${!repelOn.overlap} ` +
       `pull хвост: 0=${lagLow.lag.toFixed(1)}px 100=${lagHigh.lag.toFixed(1)}px ` +
       `дистанция: 0=${Math.round(distCur(far))}px 100=${Math.round(distCur(near))}px`);
+
+    // сцена-предпросмотр (таблица сил в правой колонке карточки): статичная
+    // картина пересчитывается тем же хелпером сил, что настоящая подсказка
+    const demoScene = await evaluate(`(function () {
+      var s = document.getElementById("tip-preview");
+      var b = s ? s.querySelector(".tp-bubble") : null;
+      return {scene: !!s, target: !!(s && s.querySelector(".tp-target")),
+              marker: !!(s && s.querySelector(".tp-marker")),
+              thread: !!(s && s.querySelector(".tp-thread line")),
+              x: b ? Math.round(b.getBoundingClientRect().left) : -1};
+    })()`);
+    if (!(demoScene.scene && demoScene.target && demoScene.marker &&
+          demoScene.thread && demoScene.x > 0)) {
+      fail("сцена предпросмотра подсказок не построена: " + JSON.stringify(demoScene));
+    }
+    async function demoLeft(pull, repel) {
+      await setForces(pull, repel);
+      // ждём конца transition: позиция должна стать стабильной (под
+      // нагрузкой батареи фиксированный sleep .15с+ запаса не хватало)
+      var prev = -1, stable = 0, rec = null;
+      for (var i = 0; i < 30 && stable < 2; i++) {
+        await sleep(60);
+        var s = await evaluate(`(function () {
+          var b = document.querySelector("#tip-preview .tp-bubble");
+          var t = document.querySelector("#tip-preview .tp-target");
+          if (!b || !t) return null;
+          return {x: Math.round(b.getBoundingClientRect().left),
+                  edge: Math.round(t.getBoundingClientRect().right)};
+        })()`);
+        if (!s) return null;
+        if (s.x === prev) stable++; else stable = 0;
+        prev = s.x;
+        rec = s;
+      }
+      return rec;
+    }
+    // repel: 0 - плашка ложится на рамку (ближе), 100 - снаружи (дальше)
+    const demoClose = await demoLeft(50, 0);
+    const demoFar = await demoLeft(50, 100);
+    if (!(demoClose && demoFar && demoClose.x < demoFar.x - 15)) {
+      fail("сцена не реагирует на repel: " + JSON.stringify({close: demoClose, far: demoFar}));
+    }
+    // pull: вдоль линии к маркеру - 0 дальше от элемента, 100 вплотную
+    const demoAway = await demoLeft(0, 100);
+    const demoNear = await demoLeft(100, 100);
+    if (!(demoAway && demoNear && demoAway.x > demoNear.x + 15)) {
+      fail("сцена не реагирует на pull: " + JSON.stringify({away: demoAway, near: demoNear}));
+    }
+    await setForces(50, 100);   // обратно к дефолтам (в т.ч. и сцену)
+    console.log(`  сцена: repel 0->100 x=${demoClose.x}->${demoFar.x} ` +
+      `pull 0->100 x=${demoAway.x}->${demoNear.x}`);
 
     // -- массовая вкладка ----------------------------------------------------
     console.log("--- массовая вкладка ---");

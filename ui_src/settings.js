@@ -248,6 +248,14 @@
         "aria-label": t(spec.label),
         "aria-valuemin": numeric ? String(lo) : "0",
         "aria-valuemax": numeric ? String(hi) : "0"});
+      // подсказка поля (title из схемы) живёт на самой ручке: translateStatic
+      // переведёт её при смене языка; setTip затирает aria-label, а имя
+      // поля для доступности важнее - возвращаем после
+      if (spec.title) {
+        kwrap.setAttribute("data-i18n-tip", spec.title);
+        setTip(kwrap, t(spec.title));
+        kwrap.setAttribute("aria-label", t(spec.label));
+      }
       var ind = el("i", "knob-ind");
       kwrap.appendChild(ind);
       // временное значение на ручке (webaudio-controls идиома): цифра видна
@@ -879,7 +887,8 @@
       }
     }
   };
-  var NOTE_FILLERS = {ftpDirNote: updateFtpDirNote, fontPreview: updateFontPreview};
+  var NOTE_FILLERS = {ftpDirNote: updateFtpDirNote, fontPreview: updateFontPreview,
+                      tipPreview: updateTipPreview};
   function refreshNotes() {
     Object.keys(noteFillers).forEach(function(src) { NOTE_FILLERS[src](); });
   }
@@ -889,6 +898,59 @@
     if (!note || !f) return;
     var dir = f.get();
     note.textContent = dir ? t("sheet.ftp.dir.ok") : t("sheet.ftp.dir.empty");
+  }
+
+  // -- сцена-предпросмотр сил подсказок -------------------------------------
+  // Статичная картина без курсора и rAF-циклов («как в графе»): рамка-
+  // элемент, пунктирный маркер направления и плашка на линии «элемент ->
+  // маркер». Плашка считается тем же хелпером, что настоящая подсказка
+  // (tipForceGeom в common.js): repel меняет зазор от рамки (0 - лёжа на
+  // ней, 100 - снаружи), pull двигает вдоль линии к маркеру (0 - на 50px
+  // дальше, 100 - вплотную). Обновляется из syncTipForces - при вращении
+  // ручек изменения видны сразу, переходом left .15s.
+  var tipDemo = null;   // {scene, target, bubble, line, lang}
+  function updateTipPreview() {
+    var box = document.getElementById("tip-preview");
+    if (!box) { tipDemo = null; return; }
+    // строим один раз (и при смене языка - текст плашки): при каждой
+    // правке сил сцена остаётся той же, иначе innerHTML сбрасывал бы
+    // transition, и переезд начинался бы с нуля
+    if (!tipDemo || !tipDemo.scene.isConnected || tipDemo.lang !== curLang) {
+      box.innerHTML =
+        '<div class="tp-target"></div>' +
+        '<div class="tp-marker"></div>' +
+        '<svg class="tp-thread"><line x1="0" y1="0" x2="0" y2="0"></line></svg>' +
+        '<div class="tp-bubble">' + t("sheet.ui.tips") + '</div>';
+      tipDemo = {scene: box,
+                 target: box.querySelector(".tp-target"),
+                 bubble: box.querySelector(".tp-bubble"),
+                 line: box.querySelector(".tp-thread line"),
+                 lang: curLang};
+      if (!updateTipPreview._resize) {
+        // ширина сцены плавает за размер окна - пересчёт держит clamp
+        updateTipPreview._resize = 1;
+        window.addEventListener("resize", function() { layoutTipDemo(); });
+      }
+    }
+    layoutTipDemo();
+  }
+  function layoutTipDemo() {
+    var d = tipDemo;
+    if (!d || !d.scene.isConnected) { tipDemo = null; return; }
+    var W = d.scene.clientWidth, H = d.scene.clientHeight;
+    var bw = d.bubble.offsetWidth, bh = d.bubble.offsetHeight;
+    var geom = tipForceGeom(bw, bh);
+    // направление статично: элемент слева, маркер справа - то же кольцо,
+    // что в tipTarget, только курсор заменён нарисованным маркером
+    var edge = d.target.offsetLeft + d.target.offsetWidth;   // правый край рамки
+    var x = edge + geom.gap - geom.onto + geom.away;
+    x = Math.max(6, Math.min(x, W - bw - 6));
+    d.bubble.style.left = Math.round(x) + "px";
+    // нить край-край (как paintThread, но направление известно)
+    d.line.setAttribute("x1", String(Math.round(edge)));
+    d.line.setAttribute("y1", String(Math.round(H / 2)));
+    d.line.setAttribute("x2", String(Math.round(x)));
+    d.line.setAttribute("y2", String(Math.round(H / 2)));
   }
 
   // -- значения и сохранение -------------------------------------------------
@@ -903,6 +965,7 @@
     var pull = panelFields["ui.tip_pull"], repel = panelFields["ui.tip_repel"];
     setTipForces(pull && pull.get ? pull.get() : undefined,
                  repel && repel.get ? repel.get() : undefined);
+    layoutTipDemo();   // сцена-предпросмотр следует за силами тем же расчётом
   }
   function saveValue(key, value) {
     var spec = panelFields[key].spec;

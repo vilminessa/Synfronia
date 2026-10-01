@@ -109,17 +109,22 @@ CORE_GROUPS = [
             {"type": "note", "transient": True, "dom": "font-dl-note",
              "box": "fonts", "hidden": True},
             # «магнитные» подсказки: две силы 0..100 (см. TIP_FORCE в common.js),
-            # дефолты повторяют прежнее поведение - pull 50, repel 100
-            {"key": "tip_pull", "type": "int", "label": "sheet.ui.tip_pull",
+            # дефолты повторяют прежнее поведение - pull 50, repel 100.
+            # Панель как у шрифтов: ручки в строке knob-panel слева, справа
+            # статичная сцена-предпросмотр tip-preview (без курсора и циклов -
+            # плашка переезжает transition'ом при изменении сил)
+            {"key": "tip_pull", "type": "knob", "label": "sheet.ui.tip_pull",
              "default": 50, "min": 0, "max": 100, "step": 5, "row": 1,
-             "box": "tips", "mirror": "range", "live": True,
-             "dom": "tip-pull", "dom_range": "tip-pull-range",
+             "box": "tips", "row_class": "knob-panel", "live": True,
+             "dom": "tip-pull",
              "title": "sheet.ui.tip_pull.hint"},
-            {"key": "tip_repel", "type": "int", "label": "sheet.ui.tip_repel",
-             "default": 100, "min": 0, "max": 100, "step": 5, "row": 2,
-             "box": "tips", "mirror": "range", "live": True,
-             "dom": "tip-repel", "dom_range": "tip-repel-range",
+            {"key": "tip_repel", "type": "knob", "label": "sheet.ui.tip_repel",
+             "default": 100, "min": 0, "max": 100, "step": 5, "row": 1,
+             "box": "tips", "row_class": "knob-panel", "live": True,
+             "dom": "tip-repel",
              "title": "sheet.ui.tip_repel.hint"},
+            {"type": "note", "transient": True, "dom": "tip-preview",
+             "box": "tips", "note_source": "tipPreview"},
             # Рендеринг: что WebView2 считает на GPU и как дорого выглядит
             # страница. Всё трое переключается вживую, кроме GPU - он читается
             # до старта WebView2 (gui.apply_render_env), поэтому требует
