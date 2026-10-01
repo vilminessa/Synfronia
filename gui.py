@@ -38,7 +38,7 @@ from core import (
 from core import _file_log as file_log
 from core import _fonts_root as fonts_root
 from core import _themes_root as themes_root
-from paths import logs_dir, webview_child_running
+from paths import crash_evidence, logs_dir, webview_child_running
 
 seed_bundled_fonts()   # вшитые шрифты в папку шрифтов: первый запуск работает без сети
 load_languages()
@@ -704,7 +704,80 @@ class Api:
                 self._progress = {"mode": "determinate", "value": 100.0}
 
 
+# -- надзор WebView2 ------------------------------------------------------------
+# Окно pywebview создаётся ДО WebView2 и переживает его краш: при мёртвом
+# потомке страница не отрисуется, пользователь увидит тёмное окно («зависло»).
+# Логика ниже вынесена из main() целиком, чтобы проверка гоняла её без окна
+# и без реальных пауз (tools/check_webview_guard.py).
+
+def apply_render_env(settings: dict) -> None:
+    r"""--disable-gpu для WebView2: ручка «Аппаратное ускорение» или CPU после краша.
+
+    Правило живёт в одном месте: ребёнок, запущенный надзором после падения,
+    лишь ставит SYNFRONIA_WEBVIEW_CPU=1 - и «не навсегда» получается само:
+    следующий обычный запуск флага не наследует и снова пробует GPU.
+    SYNFRONIA_WEBVIEW_GPU=1 - форс-возврат на GPU для одного запуска (отладка
+    сомнений «а точно ли GPU виноват»).
+    """
+    if os.environ.get("SYNFRONIA_WEBVIEW_GPU") == "1":
+        return
+    cpu = os.environ.get("SYNFRONIA_WEBVIEW_CPU") == "1"
+    if cpu or not settings_schema.value(settings, "render_gpu"):
+        current = os.environ.get("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "")
+        if "--disable-gpu" not in current:
+            os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = \
+                (current + " --disable-gpu").strip()
+
+
+def dead_action(busy: bool, cpu_session: bool) -> str:
+    """Решение при пойманном мёртвом WebView2: "restart" либо причина отказа."""
+    if cpu_session:
+        # уже были в CPU-режиме: второй перезапуск дал бы петлю «краш-батут»
+        return "cpu-again"
+    if busy:
+        # страница мертва, но фоновая загрузка идёт - не убиваем работу
+        return "busy"
+    return "restart"
+
+
+def guard_webview(alive, closing, on_dead, *, sleep=time.sleep, tick=0.5,
+                  spawn_timeout=20.0, misses_needed=3) -> str:
+    r"""Надзор живости WebView2 на всю сессию. Возвращает "dead" или "closed".
+
+    alive()   - есть ли дочерний msedgewebview2 (paths.webview_child_running);
+    closing() - окно закрывают: обычный выход, надзор молчит;
+    on_dead() - поймали «тёмное окно» (штатно - с причиной: "crashed" или
+                "never-spawned").
+
+    Пока потомка ни разу не видели, ждём spawn_timeout - создание процесса
+    WebView2 не мгновенно. Как только видели: три промаха подряд = краш. Это
+    тот самый дыра старого сторожа, который проверял одного раз и выходил:
+    в инциденте 01.10.2026 браузерный процесс упал через 5 с после показа
+    окна, и за пределами первой проверки надзора уже не было.
+    """
+    spawn_left = max(1, int(spawn_timeout / tick))
+    seen = False
+    misses = 0
+    while not closing():
+        if alive():
+            seen = True
+            misses = 0
+        elif seen:
+            misses += 1
+            if misses >= misses_needed:
+                on_dead("crashed")
+                return "dead"
+        else:
+            spawn_left -= 1
+            if spawn_left <= 0:
+                on_dead("never-spawned")
+                return "dead"
+        sleep(tick)
+    return "closed"
+
+
 def main() -> None:
+    apply_render_env(_settings)
     api = Api()
     api.bind_main_window(webview.create_window(
         "Synfronia",
@@ -740,6 +813,53 @@ def main() -> None:
         except Exception:  # noqa: BLE001
             pass
 
+    def _webview_dead(reason: str) -> None:
+        # след для разбора: дамп Crashpad и GPU-события за час
+        evidence = crash_evidence()
+        line = (f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] сторож: WebView2 мёртв "
+                f"({reason}), окно показано; {evidence}")
+        print(line, file=sys.stderr, flush=True)
+        try:
+            with open(base_dir() / "gui_diag.log", "a", encoding="utf-8") as fh:
+                fh.write(line + "\n")
+        except OSError:
+            pass
+        action = dead_action(busy=bool(api._busy),
+                             cpu_session=os.environ.get("SYNFRONIA_WEBVIEW_CPU") == "1")
+        if action == "restart":
+            _restart_in_cpu()
+        elif action == "cpu-again":
+            _report_start_problem("WebView2 упал даже в CPU-режиме")
+        else:
+            _report_start_problem(
+                "WebView2 упал во время загрузки - дождитесь её окончания "
+                "(журнал пишется в logs) и перезапустите приложение")
+
+    def _restart_in_cpu() -> None:
+        """Перезапуск в CPU-режиме: ребёнок наследует SYNFRONIA_WEBVIEW_CPU=1.
+
+        Окно уже мёртвое (страница не отрисуется), поэтому важнее свежее окно;
+        сам процесс уходит сразу - иначе тёмное окно останется поверх нового.
+        Флаг действует только на этот запуск: обычный старт его не видит и
+        снова пробует GPU (см. apply_render_env).
+        """
+        env = dict(os.environ)
+        env["SYNFRONIA_WEBVIEW_CPU"] = "1"
+        cmd = [sys.executable]
+        if not getattr(sys, "frozen", False):
+            cmd.append(str(base_dir() / "gui.py"))
+        try:
+            subprocess.Popen(
+                cmd, cwd=str(base_dir()), env=env,
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except OSError as exc:
+            _report_start_problem(f"перезапустить без GPU не вышло ({exc})")
+            return
+        time.sleep(1.0)   # дать дочернему процессу взять профиль WebView2
+        os._exit(0)
+
     def _guard() -> None:
         win = webview.windows[-1] if webview.windows else None
         if win is None:
@@ -748,16 +868,15 @@ def main() -> None:
         if not win.events.shown.wait(20):
             _report_start_problem("окно не появилось за 20 с - WebView2 завис при старте")
             return
-        # Окно есть - но WebView2 мог упасть сразу после показа (краш в первые
-        # секунды): окно остаётся тёмным, страница не отрисуется. Ловим в
-        # течение 20 с после показа окна.
-        for _ in range(40):
-            if webview_child_running(os.getpid()):
-                return
-            time.sleep(0.5)
-        _report_start_problem(
-            "окно показано, но WebView2 не запустился или упал - "
-            "страница не отрисуется (тёмное окно)")
+        # Окно показано - и надзор больше не выходит: WebView2 мог упасть в
+        # любой момент (в инциденте - через 5 с), а окно переживает краш.
+        # Выход пользователя из приложения надзор не трогает (closing()).
+        guard_webview(
+            alive=lambda: webview_child_running(os.getpid()),
+            closing=lambda: (win.events.closing.is_set()
+                             or win.events.closed.is_set()),
+            on_dead=_webview_dead,
+        )
 
     threading.Thread(target=_guard, daemon=True, name="start-guard").start()
     # storage_path: pywebview по умолчанию (private_mode=True) кладёт WebView2

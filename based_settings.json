@@ -27,5 +27,8 @@
   "ftp_template": "{title}{ext}",
   "ftp_delete_local": false,
   "ftp_timeout": 60,
-  "ftp_retries": 3
+  "ftp_retries": 3,
+  "render_gpu": true,
+  "render_anim": true,
+  "render_blur": true
 }

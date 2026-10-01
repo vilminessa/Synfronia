@@ -462,6 +462,109 @@ async function waitForPage() {
       ` | клик_по_карточке=${afterCardClick.hidden} клик_по_фону=${afterBackdrop.hidden}` +
       ` Escape=${ovAfter.hidden} | журналов=${ovDuring.logs}`);
 
+    // ================= панель «Рендеринг» =================
+    // Три ручки в карточке «Интерфейс»: две живые (анимации, размытие)
+    // переключают классы на <html> через тот же poll(), что и тему; GPU
+    // читается до старта WebView2 (gui.apply_render_env), поэтому только
+    // сохраняется и класса не ставит.
+    console.log("--- панель рендеринга ---");
+    await evaluate(OVERLAY_OPEN);
+    await sleep(300);
+    await evaluate('switchSection("ui"); true');
+    await sleep(150);
+    const render0 = await evaluate(`(function () {
+      var ids = ["render-gpu", "render-anim", "render-blur"];
+      var note = document.getElementById("render-note");
+      var card = note && note.closest(".field-card");
+      var title = card && card.querySelector(".field-card-title");
+      return {
+        boxes: ids.map(function(id) {
+          var el = document.getElementById(id);
+          return el ? (el.type === "checkbox" ? String(el.checked) : "нет") : null;
+        }),
+        note: note ? note.textContent.trim() : "",
+        title: title ? title.textContent.trim() : "",
+        root: document.documentElement.className
+      };
+    })()`);
+    if (!(render0.boxes.join() === "true,true,true" && render0.note && render0.title)) {
+      fail("панель рендеринга не построена: " + JSON.stringify(render0));
+    }
+    if (render0.root.indexOf("reduce-motion") >= 0 || render0.root.indexOf("no-blur") >= 0) {
+      fail("классы рендеринга стоят без команды: " + render0.root);
+    }
+    const setBox = (id, on) => evaluate(`(function () {
+      var b = document.getElementById("${id}");
+      if (b.checked !== ${on ? "true" : "false"}) b.click();
+      return b.checked;
+    })()`);
+    const htmlCls = () => evaluate('document.documentElement.className');
+    const savedOf = (key) => evaluate(`JSON.stringify((window.__probe.saved || [])
+      .filter(function (x) { return x[0] === ${JSON.stringify(key)}; }).slice(-1)[0] || null)`);
+
+    // анимации: выключили -> класс есть, включили -> класса нет
+    await setBox("render-anim", false);
+    await sleep(450);
+    const animOff = await htmlCls();
+    const animSaved = JSON.parse(await savedOf("render_anim"));
+    if (animOff.indexOf("reduce-motion") < 0 || !animSaved || animSaved[1] !== false) {
+      fail("выключенные анимации не дали класс/сохранение: " +
+           JSON.stringify({cls: animOff, saved: animSaved}));
+    }
+    await setBox("render-anim", true);
+    await sleep(450);
+    const animOn = await htmlCls();
+    if (animOn.indexOf("reduce-motion") >= 0) {
+      fail("класс reduce-motion не снялся: " + animOn);
+    }
+    // размытие: тот же живой путь, второй класс
+    await setBox("render-blur", false);
+    await sleep(450);
+    const blurOff = await htmlCls();
+    if (blurOff.indexOf("no-blur") < 0) fail("выключенное размытие не дало no-blur: " + blurOff);
+    await setBox("render-blur", true);
+    await sleep(450);
+    // GPU: сохраняется, но класса не ставит (правило живёт в gui.py до старта)
+    await setBox("render-gpu", false);
+    await sleep(450);
+    const gpuSaved = JSON.parse(await savedOf("render_gpu"));
+    const gpuCls = await htmlCls();
+    if (!(gpuSaved && gpuSaved[1] === false &&
+          gpuCls.indexOf("reduce-motion") < 0 && gpuCls.indexOf("no-blur") < 0)) {
+      fail("GPU-ручка повела себя не так: " + JSON.stringify({saved: gpuSaved, cls: gpuCls}));
+    }
+    await setBox("render-gpu", true);
+    await sleep(450);
+    // пояснение переводится вместе со всем интерфейсом. Смена и чтение - в
+    // одном тике: poll() держит язык из стаба и через ≤200 мс вернул бы
+    // curLang обратно (settings.js: st.lang), после чего applyI18n нарисовал
+    // бы русский текст уже во время чтения
+    const noteEn = await evaluate(`(function () {
+      curLang = "en"; applyI18n();
+      var n = document.getElementById("render-note");
+      var text = n ? n.textContent.trim() : "";
+      curLang = "ru"; applyI18n();
+      return text;
+    })()`);
+    if (!(noteEn && noteEn !== render0.note)) {
+      fail("пояснение рендеринга не переводится: " + JSON.stringify({ru: render0.note, en: noteEn}));
+    }
+    console.log(`  панель: "${render0.title}" чекбоксы=${render0.boxes.join("/")} ` +
+      `классы: аним off=${animOff.indexOf("reduce-motion") >= 0} blur off=` +
+      `${blurOff.indexOf("no-blur") >= 0} GPU сохранён=${!!(gpuSaved && gpuSaved[1] === false)} ` +
+      `en="${String(noteEn).slice(0, 40)}"`);
+    // уборка: всё обратно в позиции, карточка закрыта
+    await evaluate(`(function () {
+      ["render-gpu", "render-anim", "render-blur"].forEach(function (id) {
+        var b = document.getElementById(id);
+        if (b && !b.checked) b.click();
+      });
+      var ev = new KeyboardEvent("keydown", {key: "Escape", bubbles: true});
+      document.getElementById("settings-overlay").dispatchEvent(ev);
+      return true;
+    })()`);
+    await sleep(300);
+
     console.log("--- разделы и поля ---");
     await evaluate(OVERLAY_OPEN);
     await sleep(300);

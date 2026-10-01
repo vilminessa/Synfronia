@@ -69,7 +69,7 @@ CORE_GROUPS = [
         "label": "sheet.tab.ui",
         "order": 10,
         "boxes": {"look": "sheet.ui.look", "fonts": "sheet.font.title",
-                  "tips": "sheet.ui.tips"},
+                  "tips": "sheet.ui.tips", "render": "sheet.ui.render"},
         "fields": [
             {"key": "language", "type": "choice", "label": "sheet.lang.label",
              "default": "en", "options_source": "langs", "dom": "lang", "live": True},
@@ -120,6 +120,24 @@ CORE_GROUPS = [
              "box": "tips", "mirror": "range", "live": True,
              "dom": "tip-repel", "dom_range": "tip-repel-range",
              "title": "sheet.ui.tip_repel.hint"},
+            # Рендеринг: что WebView2 считает на GPU и как дорого выглядит
+            # страница. Всё трое переключается вживую, кроме GPU - он читается
+            # до старта WebView2 (gui._apply_render_env), поэтому требует
+            # перезапуска; пояснение об этом - в render-note
+            {"key": "render_gpu", "type": "bool", "check": True,
+             "label": "sheet.ui.render.gpu", "default": True,
+             "box": "render", "dom": "render-gpu",
+             "title": "sheet.ui.render.gpu.hint"},
+            {"type": "note", "transient": True, "box": "render",
+             "dom": "render-note", "note_source": "renderNote"},
+            {"key": "render_anim", "type": "bool", "check": True,
+             "label": "sheet.ui.render.anim", "default": True,
+             "box": "render", "dom": "render-anim", "live": True,
+             "title": "sheet.ui.render.anim.hint"},
+            {"key": "render_blur", "type": "bool", "check": True,
+             "label": "sheet.ui.render.blur", "default": True,
+             "box": "render", "dom": "render-blur", "live": True,
+             "title": "sheet.ui.render.blur.hint"},
             # Версия, записавшая settings.json: в панели не рисуется,
             # обновляется молча при старте (см. settings.load_settings)
             {"key": "app_version", "type": "text", "label": "sheet.ui.app_version",

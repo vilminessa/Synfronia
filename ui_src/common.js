@@ -105,6 +105,9 @@
   }
 
   function reducedMotion() {
+    // класс reduce-motion - ручка «Анимации интерфейса» в настройках
+    // (см. applyRenderPrefs): та же семантика, что и системному reduce
+    if (document.documentElement.classList.contains("reduce-motion")) return true;
     return window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   }
 
@@ -487,6 +490,28 @@
       document.head.appendChild(cssEl);
     }
     cssEl.textContent = c.css || "";
+  }
+
+  // Ручки «Рендеринг» из настроек (карточка «Интерфейс»): значения приходят
+  // из того же poll(), что и тема, поэтому применяются классами на <html> -
+  // CSS читает их напрямую (см. «Анимации» и «Размытие» в main.css/settings.css).
+  // GPU в эту функцию не входит: он выставляется до старта WebView2 (gui.py).
+  var renderPrefs = {anim: true, blur: true};
+  function applyRenderPrefs(settings) {
+    if (!settings) return;
+    var root = document.documentElement;
+    var anim = settings.render_anim !== false;
+    var blur = settings.render_blur !== false;
+    // классы трогаем только при смене значения: tick() зовёт функцию каждые
+    // 200 мс, а classList.toggle на каждом тике - лишняя работа для рендера
+    if (anim !== renderPrefs.anim) {
+      root.classList.toggle("reduce-motion", !anim);
+      renderPrefs.anim = anim;
+    }
+    if (blur !== renderPrefs.blur) {
+      root.classList.toggle("no-blur", !blur);
+      renderPrefs.blur = blur;
+    }
   }
 
   function quoted(family) {
