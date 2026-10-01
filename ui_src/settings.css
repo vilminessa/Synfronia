@@ -133,6 +133,9 @@
   }
   .field-card-body { padding: 12px; }
   .field-card-body > *:first-child { margin-top: 0; }
+  /* первый ребёнок body - шаблон Alpine (x-for), он не рисуется: первый
+     реальный узел обязан получить то же обнуление отступа */
+  .field-card-body > template:first-child + * { margin-top: 0; }
   .field-card-body > *:last-child { margin-bottom: 0; }
   .field-card .label { margin-top: 12px; }
   .field-card .check { margin-top: 12px; }

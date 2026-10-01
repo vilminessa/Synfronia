@@ -410,10 +410,20 @@ def main() -> int:
     for gone in ("poll_settings", "close_settings", "pywebviewready"):
         ok(gone not in settings_js,
            f"у карточки нет своего запроса состояния ({gone})")
-    ok('id: "nav-" + group.id' in settings_js,
+    # разделы и пункты списка строит Alpine (x-for по схеме): проверяем
+    # шаблон settings.html - там :id из групп схемы, а не разметка в JS
+    ok(':id="\'nav-\' + group.id"' in card_html,
        "пункты списка строятся из групп схемы")
-    ok('id: "section-" + group.id' in settings_js,
+    ok(':id="\'section-\' + group.id"' in card_html,
        "разделы строятся из групп схемы")
+    ok('x-data="settingsPanel()"' in card_html and 'x-mount-block' in card_html
+       and 'x-mount-card' in card_html,
+       "панель собрана x-for с монтированием полей (settingsPanel)")
+    ok("layoutOf" in settings_js and "mountBlockInto" in settings_js
+       and "fieldsMounted" in settings_js and "whenPanelReady" in settings_js,
+       "settings.js: схема -> layout, монтирование полей, очередь готовности")
+    ok("Alpine.data(\"settingsPanel\"" in settings_js and "$nextTick(fieldsMounted)" in settings_js,
+       "компонент Alpine регистрируется в alpine:init и биндит после рендера")
     ok("collect(" not in app_js and "SETTINGS_SCHEMA" not in app_js,
        "главное окно не рисует и не собирает настройки")
     for ident in ("openSettings", "setSettingsOpen", "synfSettingsState", "poll"):
