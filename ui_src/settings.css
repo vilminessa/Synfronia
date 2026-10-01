@@ -56,13 +56,58 @@
     border-right: 1px solid var(--widget);
   }
   .nav-item {
+    position: relative;   /* якорь для пылинок ::before/::after */
     text-align: left; width: 100%; padding: 9px 12px;
     background: transparent; border: 1px solid transparent; color: var(--text);
     border-radius: var(--radius-m); font-size: 14px;
     transition: background .15s, color .15s, border-color .15s, transform .12s;
   }
-  .nav-item:hover { background: var(--widget); transform: translateX(2px); }
+  /* Контраст при наведении. Фон - --bg, а не --widget: только пара
+     text/bg гарантирована любой темой (у своих тем --widget может
+     сойтись с текстом - отсюда жалобы «текст слипся с кнопкой»); край и
+     цвет текста задаём явно. Правило стоит ДО .active: выбранный раздел
+     по-прежнему перебивается своими акцентными цветами. */
+  .nav-item:hover {
+    background-color: var(--bg);
+    border-color: var(--widget);
+    color: var(--text);
+    transform: translateX(2px);
+  }
   .nav-item.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+  /* Мерцание (бегущий блик) и пыль - ПОСЛЕ .active: shorthand background:
+     в .active иначе стёр бы background-image, и блик не появился бы даже на
+     выбранном разделе. Блик уходит на цвет --text - работает и в светлых,
+     и в тёмных темах; пыль - две частицы со своими векторами и задержкой. */
+  .nav-item:hover {
+    background-image: linear-gradient(105deg, transparent 34%,
+      color-mix(in srgb, var(--text) 20%, transparent) 50%, transparent 66%);
+    background-size: 260% 100%;
+    background-position: 220% 0;
+    animation: navShimmer .9s linear infinite;
+  }
+  @keyframes navShimmer { from { background-position: 220% 0; } to { background-position: -120% 0; } }
+  .nav-item::before, .nav-item::after,
+  .mode-switch button::before, .mode-switch button::after {
+    content: ""; position: absolute; right: 6px; top: 50%;
+    width: 3px; height: 3px; border-radius: 50%;
+    background: var(--accent); opacity: 0; pointer-events: none;
+  }
+  /* векторы пыли держим в пределах padding-box контейнеров (.nav скроллится
+     и обрезает по 8/12px, у .section 14px) - иначе частицы не видно */
+  .nav-item:hover::before, .mode-switch button:hover::before {
+    --dx: 6px; --dy: -9px;
+    animation: navDust .8s ease-out infinite;
+  }
+  .nav-item:hover::after, .mode-switch button:hover::after {
+    --dx: 5px; --dy: 7px;
+    animation: navDust .8s ease-out infinite;
+    animation-delay: .3s;
+  }
+  @keyframes navDust {
+    0% { opacity: 0; transform: translate(0, 0) scale(.5); }
+    30% { opacity: .85; }
+    100% { opacity: 0; transform: translate(var(--dx, 5px), var(--dy, -8px)) scale(1.15); }
+  }
 
   .section {
     flex: 1 1 auto; min-width: 0;
@@ -200,15 +245,31 @@
   /* ---- режим выгрузки FTP: переключатель с подсказкой вместо select ---- */
   .mode-switch { display: inline-flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
   .mode-switch button {
+    position: relative;   /* якорь для пылинок */
     padding: 7px 14px; font-size: 13px;
     background: var(--surface); color: var(--text);
     border: 1px solid var(--widget); border-radius: var(--radius-s);
     cursor: pointer; transition: background .15s, color .15s, border-color .15s, transform .12s;
   }
-  .mode-switch button:hover { border-color: var(--accent); color: var(--accent); }
+  /* Контраст при наведении: акцентный ТЕКСТ на --surface проваливался в
+     светлых темах (Audrey 2.2, Pinks 2.9, day 2.3) - текст остаётся
+     --text (гарантированная пара с фоном --bg), акцент уходит в край. */
+  .mode-switch button:hover {
+    background-color: var(--bg);
+    border-color: var(--accent);
+    color: var(--text);
+  }
   .mode-switch button:active { transform: scale(.95); }
   .mode-switch button.on {
     background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 600;
+  }
+  /* блик и пыль - ПОСЛЕ .on, чтобы shorthand background: не гасил их */
+  .mode-switch button:hover {
+    background-image: linear-gradient(105deg, transparent 34%,
+      color-mix(in srgb, var(--text) 20%, transparent) 50%, transparent 66%);
+    background-size: 260% 100%;
+    background-position: 220% 0;
+    animation: navShimmer .9s linear infinite;
   }
 
   /* ---- шрифты: две колонки - слева панелька 2x2 из ручек (заголовки,
@@ -302,4 +363,7 @@
   @media (prefers-reduced-motion: reduce) {
     .settings-overlay, .settings-card { animation: none; }
     .act-btn:hover .ico, .act-btn:active .ico, .act-btn.busy .ico { animation: none; transition: none; }
+    /* блик и пыль на кнопках гасим; без анимации пыль невидима (opacity: 0),
+       а блик стоит вне кнопки (background-position 220%) */
+    .nav-item:hover, .mode-switch button:hover { animation: none; }
   }

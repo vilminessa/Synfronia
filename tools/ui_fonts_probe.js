@@ -1064,6 +1064,187 @@ async function waitForPage() {
     console.log(`  модальность: клик по вкладке -> фокус=${afterTab.focused} ` +
       `без подсказки=${afterTab.hidden}; клик+отъезд подсказка скрыта=` +
       `${afterClick.hidden}; Tab-подсказка=${kbdTip.mode} Escape=${escTip}`);
+    // ===== кнопки настроек: контраст и эффекты при наведении =====
+    // Жалобы: у неактивных кнопок-вкладок текст слипался с кнопкой (mode-switch
+    // вообще красил ховер-текст в акцент: по WCAG Audrey 2.2, Pinks 2.9,
+    // day 2.3). Теперь ховер обязан держать пару --text/--bg - её гарантирует
+    // любая тема, - а поверх идут блик (мерцание) и пыль. Замеры гоняются и
+    // тематическим зондом: проверка выполняется на всех 6 темах.
+    console.log("--- кнопки настроек: контраст и эффекты ---");
+    await evaluate('switchSection("ui"); true');
+    await sleep(150);
+    const MEASURE = `
+      function lum(c) {
+        var m = (c || "").match(/[\\d.]+/g) || [0, 0, 0];
+        function f(x) { x = Number(x) / 255;
+          return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); }
+        return 0.2126 * f(m[0]) + 0.7152 * f(m[1]) + 0.0722 * f(m[2]);
+      }
+      function norm(v) { return (v || "").replace(/\\s+/g, " "); }
+      function rgb(v) {
+        var h = (v || "").trim();
+        if (h.charAt(0) === "#") {
+          var s = h.slice(1);
+          if (s.length === 3) s = s[0] + s[0] + s[1] + s[1] + s[2] + s[2];
+          return "rgb(" + parseInt(s.slice(0, 2), 16) + ", " +
+                 parseInt(s.slice(2, 4), 16) + ", " + parseInt(s.slice(4, 6), 16) + ")";
+        }
+        return norm(h);
+      }
+      var root = getComputedStyle(document.documentElement);
+      var vars = {bg: norm(rgb(root.getPropertyValue("--bg"))),
+                  text: norm(rgb(root.getPropertyValue("--text"))),
+                  widget: norm(rgb(root.getPropertyValue("--widget"))),
+                  accent: norm(rgb(root.getPropertyValue("--accent")))};
+      function box(sel) {
+        var el = document.querySelector(sel);
+        if (!el || !el.getClientRects().length) return null;   // не отрисовано
+        var r = el.getBoundingClientRect();
+        return {cx: Math.round(r.left + r.width / 2), cy: Math.round(r.top + r.height / 2)};
+      }
+      function reveal(sel) {
+        var el = document.querySelector(sel);
+        if (!el) return false;
+        el.scrollIntoView({block: "center"});
+        return true;
+      }
+      function hover(sel) {
+        var el = document.querySelector(sel);
+        if (!el) return null;
+        var cs = getComputedStyle(el);
+        var a = lum(cs.color), b = lum(cs.backgroundColor);
+        return {ratio: Math.round((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) * 100) / 100,
+                hovered: el.matches(":hover"),
+                active: el.classList.contains("active"),
+                color: cs.color, bg: cs.backgroundColor,
+                isBg: norm(cs.backgroundColor) === vars.bg,
+                isText: norm(cs.color) === vars.text,
+                isWidgetBorder: norm(cs.borderTopColor) === vars.widget,
+                isAccentBorder: norm(cs.borderTopColor) === vars.accent,
+                isAccentBg: norm(cs.backgroundColor) === vars.accent,
+                shimmer: cs.animationName.indexOf("navShimmer") >= 0,
+                pos: cs.backgroundPosition};
+      }`;
+    const measure = (js) => evaluate(`(function () {${MEASURE}
+      ${js}
+    })()`);
+    const dustSample = (sel, pseudo) => evaluate(`(function () {
+      var el = document.querySelector(${JSON.stringify(sel)});
+      if (!el) return {anim: "", op: -1};
+      var cs = getComputedStyle(el, "${pseudo}");
+      return {anim: cs.animationName, op: parseFloat(cs.opacity)};
+    })()`);
+    // пыль живёт полсекунды из восьми - берём пик по четырём замерам
+    const dustAlive = async (sel) => {
+      let anim = "", peak = 0;
+      for (let i = 0; i < 4; i++) {
+        const d = await dustSample(sel, i % 2 ? "::after" : "::before");
+        anim = anim || d.anim;
+        peak = Math.max(peak, d.op);
+        await sleep(150);
+      }
+      return {anim: anim, peak: peak, ok: anim.indexOf("navDust") >= 0 && peak > 0.05};
+    };
+    // 1) неактивный раздел слева: контраст, блик, пыль
+    const dlInactive = await evaluate(
+      '!document.getElementById("nav-dl").classList.contains("active")');
+    if (!dlInactive) fail("nav-dl активен - проверка не о том элементе");
+    await measure('reveal("#nav-dl"); return true;');
+    const navBox = await measure('return box("#nav-dl");');
+    let navHover1 = null, navHover2 = null, navDust = null;
+    if (navBox) {
+      await mouseMove(navBox.cx, navBox.cy);
+      await sleep(300);                       // переход .15s успевает закончиться
+      navHover1 = await measure('return hover("#nav-dl");');
+      navDust = await dustAlive("#nav-dl");
+      await sleep(250);
+      navHover2 = await measure('return hover("#nav-dl");');
+    } else {
+      fail("кнопка nav-dl не найдена");
+    }
+    // 2) активный раздел на ховере остаётся акцентным (регресс)
+    await measure('reveal("#nav-ui"); return true;');
+    const navActiveBox = await measure('return box("#nav-ui");');
+    let navActive = null;
+    if (navActiveBox) {
+      await mouseMove(navActiveBox.cx, navActiveBox.cy);
+      await sleep(300);
+      navActive = await measure('return hover("#nav-ui");');
+    }
+    // 3) неактивная кнопка режима выгрузки (FTP). Поле «Режим» имеет
+    // visible_if: _WHEN_ACTIVE - при выключенном флаге оно display:none и
+    // наводиться не на что, поэтому флаг включаем на время проверок.
+    await evaluate('switchSection("ftp"); true');
+    await sleep(200);
+    await evaluate(`(function () {
+      var f = document.getElementById("ftp-active");
+      f.checked = true; f.dispatchEvent(new Event("change"));
+      return true;
+    })()`);
+    await sleep(300);
+    await measure('reveal(".mode-switch button:not(.on)"); return true;');
+    const modeBox = await measure('return box(".mode-switch button:not(.on)");');
+    let modeHover1 = null, modeHover2 = null, modeDust = null;
+    if (modeBox) {
+      await mouseMove(modeBox.cx, modeBox.cy);
+      await sleep(300);
+      modeHover1 = await measure('return hover(".mode-switch button:not(.on)");');
+      modeDust = await dustAlive(".mode-switch button:not(.on)");
+      await sleep(250);
+      modeHover2 = await measure('return hover(".mode-switch button:not(.on)");');
+    } else {
+      fail("кнопка режима выгрузки не найдена");
+    }
+    // 4) выбранная кнопка режима остаётся акцентной (регресс)
+    await measure('reveal(".mode-switch button.on"); return true;');
+    const modeOnBox = await measure('return box(".mode-switch button.on");');
+    let modeOn = null;
+    if (modeOnBox) {
+      await mouseMove(modeOnBox.cx, modeOnBox.cy);
+      await sleep(300);
+      modeOn = await measure('return hover(".mode-switch button.on");');
+    }
+    // возврат состояния: флаг выгрузки выключен обратно
+    await evaluate(`(function () {
+      var f = document.getElementById("ftp-active");
+      f.checked = false; f.dispatchEvent(new Event("change"));
+      return true;
+    })()`);
+    await sleep(250);
+    const hoverChecks = [
+      ["раздел: контраст >= 4.5", navHover1 && navHover1.ratio >= 4.5],
+      ["раздел: наведение реально попало на кнопку", navHover1 && navHover1.hovered],
+      ["раздел: фон ховера = --bg (пара текст/фон гарантируется темой)",
+        navHover1 && navHover1.isBg],
+      ["раздел: текст = --text", navHover1 && navHover1.isText],
+      ["раздел: край = --widget", navHover1 && navHover1.isWidgetBorder],
+      ["раздел: блик запущен", navHover1 && navHover1.shimmer],
+      ["раздел: блик движется", navHover1 && navHover2 && navHover1.pos !== navHover2.pos],
+      ["раздел: пыль вылетает", navDust && navDust.ok],
+      ["выбранный раздел: фон остаётся --accent", navActive && navActive.isAccentBg],
+      ["режим выгрузки: контраст >= 4.5", modeHover1 && modeHover1.ratio >= 4.5],
+      ["режим выгрузки: наведение реально попало на кнопку", modeHover1 && modeHover1.hovered],
+      ["режим выгрузки: фон ховера = --bg", modeHover1 && modeHover1.isBg],
+      ["режим выгрузки: край = --accent", modeHover1 && modeHover1.isAccentBorder],
+      ["режим выгрузки: блик запущен", modeHover1 && modeHover1.shimmer],
+      ["режим выгрузки: блик движется", modeHover1 && modeHover2 && modeHover1.pos !== modeHover2.pos],
+      ["режим выгрузки: пыль вылетает", modeDust && modeDust.ok],
+      ["выбранный режим: фон остаётся --accent", modeOn && modeOn.isAccentBg],
+    ];
+    hoverChecks.forEach(([name, okFlag]) => { if (!okFlag) fail(name); });
+    // возврат состояния: раздел ui, мышь в пустом месте
+    await evaluate('switchSection("ui"); true');
+    await mouseMove(6, 6);
+    console.log(`  ховер: раздел ratio=${navHover1 && navHover1.ratio} ` +
+      `цвет=${navHover1 && navHover1.color} фон=${navHover1 && navHover1.bg} ` +
+      `active=${navHover1 && navHover1.active} ` +
+      `фон=bg:${navHover1 && navHover1.isBg} блик=${navHover1 && navHover1.shimmer}/` +
+      `${navHover1 && navHover2 && navHover1.pos !== navHover2.pos} пыль=` +
+      `${navDust && navDust.ok}(пик ${navDust && navDust.peak}) активный=accent:` +
+      `${navActive && navActive.isAccentBg} | режим ratio=${modeHover1 && modeHover1.ratio} ` +
+      `цвет=${modeHover1 && modeHover1.color} фон=${modeHover1 && modeHover1.bg} ` +
+      `фон=bg:${modeHover1 && modeHover1.isBg} пыль=${modeDust && modeDust.ok} ` +
+      `выбранный=accent:${modeOn && modeOn.isAccentBg}`);
     // wiggle реплики кликера: каждые 500-й клик показывает комментарий с
     // анимацией msg-wiggle, и она правда двигает текст (замер трансформа)
     await evaluate(`(function () {
