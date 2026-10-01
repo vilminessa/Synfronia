@@ -38,7 +38,8 @@ from core import (
 from core import _file_log as file_log
 from core import _fonts_root as fonts_root
 from core import _themes_root as themes_root
-from paths import crash_evidence, logs_dir, webview_child_running
+from paths import crash_evidence, logs_dir, minidump_fault, newest_crash_dump, \
+    webview_child_running
 
 seed_bundled_fonts()   # вшитые шрифты в папку шрифтов: первый запуск работает без сети
 load_languages()
@@ -711,33 +712,71 @@ class Api:
 # и без реальных пауз (tools/check_webview_guard.py).
 
 def apply_render_env(settings: dict) -> None:
-    r"""--disable-gpu для WebView2: ручка «Аппаратное ускорение» или CPU после краша.
+    r"""--disable-gpu для WebView2 по ручке «Аппаратное ускорение».
 
-    Правило живёт в одном месте: ребёнок, запущенный надзором после падения,
-    лишь ставит SYNFRONIA_WEBVIEW_CPU=1 - и «не навсегда» получается само:
-    следующий обычный запуск флага не наследует и снова пробует GPU.
-    SYNFRONIA_WEBVIEW_GPU=1 - форс-возврат на GPU для одного запуска (отладка
-    сомнений «а точно ли GPU виноват»).
+    Ручка читается до старта WebView2 (см. панель «Рендеринг»), поэтому
+    вступает в силу только со следующего запуска. SYNFRONIA_WEBVIEW_GPU=1 -
+    форс-возврат на GPU для одного запуска (отладка). Повторы после краша
+    (см. dead_action) флагов не добавляют: эксперимент 01.10.2026 показал,
+    что --disable-gpu не спасает от падения в чужом хуке, а картинку лишь
+    деградирует.
     """
     if os.environ.get("SYNFRONIA_WEBVIEW_GPU") == "1":
         return
-    cpu = os.environ.get("SYNFRONIA_WEBVIEW_CPU") == "1"
-    if cpu or not settings_schema.value(settings, "render_gpu"):
+    if not settings_schema.value(settings, "render_gpu"):
         current = os.environ.get("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "")
         if "--disable-gpu" not in current:
             os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = \
                 (current + " --disable-gpu").strip()
 
 
-def dead_action(busy: bool, cpu_session: bool) -> str:
-    """Решение при пойманном мёртвом WebView2: "restart" либо причина отказа."""
-    if cpu_session:
-        # уже были в CPU-режиме: второй перезапуск дал бы петлю «краш-батут»
-        return "cpu-again"
+# Сколько раз подряд перезапускать окно после краша WebView2. Падение
+# интермиттирующее (эксперимент 01.10: ~15% запусков при живом RTSS, всегда
+# в одной точке чужого хука), поэтому лечится повтором, а не флагами:
+# три попытки дают ~0.3% невосстановления при той же вероятности.
+MAX_ATTEMPTS = 3
+
+
+def dead_action(busy: bool, attempt: int, max_attempts: int = MAX_ATTEMPTS) -> str:
+    """Решение при пойманном мёртвом WebView2: "restart" либо причина отказа.
+
+    attempt - номер текущей попытки (1 = обычный запуск; берётся из
+    SYNFRONIA_WEBVIEW_ATTEMPT, см. _restart_attempt).
+    """
     if busy:
         # страница мертва, но фоновая загрузка идёт - не убиваем работу
         return "busy"
+    if attempt >= max_attempts:
+        # петля из повторов не лечится - честно сообщаем (след уже записан)
+        return "give-up"
     return "restart"
+
+
+# Внедрённые сторонними программами DLL, из-за которых падал WebView2
+# (разборы дампов 01.10.2026: все краши - в RTSSHooks64.dll RivaTuner).
+_KNOWN_INJECTORS = {
+    "RTSSHooks64.dll": "RivaTuner Statistics Server / MSI Afterburner",
+    "RTSSHooks.dll": "RivaTuner Statistics Server / MSI Afterburner",
+    "nviewh64.dll": "NVIDIA nView",
+}
+
+
+def crash_hint(module) -> str:
+    """Подсказка по модулю падения: '' если модуль неизвестен или не наш.
+
+    Если виновата внедрённая чужая DLL - говорим прямо: это сторонний код,
+    падение не детерминировано и обычно лечится перезапуском (наш повтор),
+    либо закрытием той программы на время работы.
+    """
+    if not module:
+        return ""
+    base = str(module).replace("\\", "/").rsplit("/", 1)[-1]
+    owner = _KNOWN_INJECTORS.get(base)
+    if not owner:
+        return ""
+    return (f"виноват внедрённый хук {owner} ({base}) - сторонний код, "
+            "а не приложение: обычно помогает перезапуск (сторож делает это "
+            "сам), либо закрыть эту программу на время работы Synfronia")
 
 
 def guard_webview(alive, closing, on_dead, *, sleep=time.sleep, tick=0.5,
@@ -813,38 +852,53 @@ def main() -> None:
         except Exception:  # noqa: BLE001
             pass
 
+    def _attempt_no() -> int:
+        """Номер текущей попытки старта (1 = обычный запуск)."""
+        try:
+            return max(1, int(os.environ.get("SYNFRONIA_WEBVIEW_ATTEMPT", "1")))
+        except ValueError:
+            return 1
+
     def _webview_dead(reason: str) -> None:
-        # след для разбора: дамп Crashpad и GPU-события за час
+        # след для разбора: дамп Crashpad с модулем падения + GPU-события часа
         evidence = crash_evidence()
+        attempt = _attempt_no()
         line = (f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] сторож: WebView2 мёртв "
-                f"({reason}), окно показано; {evidence}")
+                f"({reason}), попытка {attempt}/{MAX_ATTEMPTS}, окно показано; "
+                f"{evidence}")
         print(line, file=sys.stderr, flush=True)
         try:
             with open(base_dir() / "gui_diag.log", "a", encoding="utf-8") as fh:
                 fh.write(line + "\n")
         except OSError:
             pass
-        action = dead_action(busy=bool(api._busy),
-                             cpu_session=os.environ.get("SYNFRONIA_WEBVIEW_CPU") == "1")
+        action = dead_action(busy=bool(api._busy), attempt=attempt)
         if action == "restart":
-            _restart_in_cpu()
-        elif action == "cpu-again":
-            _report_start_problem("WebView2 упал даже в CPU-режиме")
-        else:
+            _restart_attempt(attempt + 1)
+        elif action == "busy":
             _report_start_problem(
                 "WebView2 упал во время загрузки - дождитесь её окончания "
                 "(журнал пишется в logs) и перезапустите приложение")
+        else:
+            # петля повторов не помогла - называем модуль падения
+            fault = minidump_fault(newest_crash_dump()) or {}
+            hint = crash_hint(fault.get("module"))
+            msg = f"WebView2 упал {MAX_ATTEMPTS} раза подряд - {evidence}"
+            if hint:
+                msg += f". {hint[0].upper()}{hint[1:]}"
+            _report_start_problem(msg)
 
-    def _restart_in_cpu() -> None:
-        """Перезапуск в CPU-режиме: ребёнок наследует SYNFRONIA_WEBVIEW_CPU=1.
+    def _restart_attempt(next_no: int) -> None:
+        """Перезапуск окна с номером попытки next_no (ребёнок получает
+        SYNFRONIA_WEBVIEW_ATTEMPT=next_no).
 
         Окно уже мёртвое (страница не отрисуется), поэтому важнее свежее окно;
         сам процесс уходит сразу - иначе тёмное окно останется поверх нового.
-        Флаг действует только на этот запуск: обычный старт его не видит и
-        снова пробует GPU (см. apply_render_env).
+        Сон перед уходом даёт умирающему WebView2 отдать профиль
+        (SingletonLock) - иначе ребёнок стартует на горячем профиле.
         """
         env = dict(os.environ)
-        env["SYNFRONIA_WEBVIEW_CPU"] = "1"
+        env["SYNFRONIA_WEBVIEW_ATTEMPT"] = str(next_no)
         cmd = [sys.executable]
         if not getattr(sys, "frozen", False):
             cmd.append(str(base_dir() / "gui.py"))
@@ -855,9 +909,9 @@ def main() -> None:
                 stderr=subprocess.DEVNULL,
             )
         except OSError as exc:
-            _report_start_problem(f"перезапустить без GPU не вышло ({exc})")
+            _report_start_problem(f"перезапустить окно не вышло ({exc})")
             return
-        time.sleep(1.0)   # дать дочернему процессу взять профиль WebView2
+        time.sleep(2.0)   # дать умирающему WebView2 освободить профиль
         os._exit(0)
 
     def _guard() -> None:
