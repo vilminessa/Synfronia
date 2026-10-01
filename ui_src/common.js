@@ -404,6 +404,15 @@
 
   function initTooltips() {
     tipParts();
+    // Модальность ввода: показ по фокусу нужен только клавиатуре (Tab).
+    // Фокус по мыши получают и обычные клики, и программные .focus()
+    // (switchTab фокусирует поле при переключении вкладки) - в обоих случаях
+    // подсказка без наведения лишь мешает и залипает до клика в пустое место.
+    // pointerdown/keydown - стандартный признак: поколение событий важнее
+    // того, что фокус назначил скрипт.
+    var modality = "pointer";
+    document.addEventListener("pointerdown", function() { modality = "pointer"; }, true);
+    document.addEventListener("keydown", function() { modality = "keyboard"; }, true);
     document.addEventListener("pointerover", function(ev) {
       var el = tipAnchor(ev.target);
       if (!el) return;
@@ -441,6 +450,10 @@
       hideTip();
     });
     document.addEventListener("focusin", function(ev) {
+      // гейт модальности: мышью подсказку по фокусу не показываем (и активную
+      // hover-подсказку не гасим - она уйдёт сама по pointerout/:hover);
+      // клавиатуре показываем - иначе Tab-навигация останется без подсказок
+      if (modality !== "keyboard") return;
       var el = tipAnchor(ev.target);
       if (el) { if (TIP.target) hideTip(); showTip(el, "focus"); }
     });
