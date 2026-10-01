@@ -150,6 +150,17 @@
         check.setAttribute("data-i18n-tip", spec.title || spec.label);
         setTip(check, t(spec.title || spec.label));
       }
+      // double-click - сброс в дефолт схемы (webaudio-controls идиома):
+      // два клика переключателя уже вернули состояние туда-сюда, третий
+      // жест возвращает умолчание схемы и сохраняет его
+      check.addEventListener("dblclick", function(ev) {
+        ev.preventDefault();
+        var def = !!spec.default;
+        if (box.checked !== def) {
+          box.checked = def;
+          box.dispatchEvent(new Event("change", {bubbles: true}));
+        }
+      });
       return {nodes: [check], input: box, get: function() { return box.checked; },
               set: function(v) { box.checked = v !== false && !!v; }};
     }
@@ -200,7 +211,7 @@
       var disp = 0;                    // показываемый угол (анимация)
       var cur = numeric ? spec.default : (spec.default || "");
       var idx = 0;                     // позиционная: индекс выбранной позиции
-      var raf = 0, lastT = 0;
+      var raf = 0, lastT = 0, editT = 0;  // editT - таймер скрытия значения
       function norm(a) { return ((a % 360) + 360) % 360; }
       function nSteps() {
         return numeric ? Math.round((hi - lo) / step) + 1 : positions.length;
@@ -239,6 +250,11 @@
         "aria-valuemax": numeric ? String(hi) : "0"});
       var ind = el("i", "knob-ind");
       kwrap.appendChild(ind);
+      // временное значение на ручке (webaudio-controls идиома): цифра видна
+      // только пока идёт ввод (dragging/editing), в покое её нет - подсказка
+      // остаётся единственным местом показа (см. .knob-val в settings.css)
+      var valNode = el("b", "knob-val");
+      kwrap.appendChild(valNode);
       Object.defineProperty(kwrap, "value", {get: function() { return cur; }});
       // риски позиций: активная горит акцентом (детент виден)
       function renderTicks() {
@@ -258,6 +274,9 @@
       }
       function paint() {
         ind.style.transform = "rotate(" + disp.toFixed(2) + "deg)";
+        // значение на ручке: только числовым шкалам (у позиционных подпись
+        // длинная - семейство шрифта - и остаётся в подсказке)
+        valNode.textContent = numeric ? String(cur) : "";
         var text = tipText();
         setTip(kwrap, text);
         // setTip пишет aria-label узлу без текста - возвращаем подпись поля
@@ -305,6 +324,11 @@
       }
       // ввод изменил raw: новое значение + анимация к позиции
       function applyInput() {
+        // цифра на ручке появляется при любом вводе и гаснет через 0.8 с
+        // покоя (класс снимает и .dragging, и таймер)
+        kwrap.classList.add("editing");
+        clearTimeout(editT);
+        editT = setTimeout(function() { kwrap.classList.remove("editing"); }, 800);
         if (numeric) {
           commit(valueAt(raw));
         } else {
@@ -324,10 +348,16 @@
         kwrap.focus({preventScroll: true});   // fillSettings не трогает поле в фокусе
         kwrap.setPointerCapture(ev.pointerId);
         kwrap.classList.add("dragging");
-        var lx = ev.clientX;
+        var lx = ev.clientX, ly = ev.clientY;
         var move = function(e2) {
-          raw += (e2.clientX - lx) * 1.2;
-          lx = e2.clientX;
+          // драг по ОБЕИМ осям (webaudio-controls): вертикаль - основной
+          // жест, горизонтальный оставлен как есть; Shift = точное доводство
+          // (вчетверо меньше чувствительность - ступень шкалы меняется реже,
+          // значение от этого НЕ становится дробным: квантование шага цело)
+          var dx = e2.clientX - lx, dy = e2.clientY - ly;
+          lx = e2.clientX; ly = e2.clientY;
+          var k = e2.shiftKey ? 0.3 : 1.2;
+          raw += (dx + dy) * k;
           applyInput();
         };
         var up = function() {
@@ -346,9 +376,30 @@
         ev.preventDefault();
         kwrap.focus({preventScroll: true});   // и колесо под фокусом: poll не откатит
         var s = numeric ? sa() : sweepStep();
-        raw += (ev.deltaY < 0 ? s : -s);      // на упоре clampRaw не пустит дальше
+        // Shift - точная подстройка: четверть шага; квантование ступени
+        // остаётся, поэтому значение всё равно кратно шагу шкалы
+        var k = ev.shiftKey ? 0.25 : 1;
+        raw += (ev.deltaY < 0 ? s : -s) * k;   // на упоре clampRaw не пустит дальше
         applyInput();
       }, {passive: false});
+      // double-click - сброс в дефолт схемы (webaudio-controls идиома):
+      // числовая - прямиком к default, позиционная - к позиции со значением
+      // default (для шрифтов это системный шрифт "")
+      kwrap.addEventListener("dblclick", function(ev) {
+        ev.preventDefault();
+        if (numeric) {
+          retarget(angleFor(spec.default));
+        } else {
+          var di = 0;
+          for (var i = 0; i < positions.length; i++) {
+            if (positions[i].value === String(spec.default)) { di = i; break; }
+          }
+          raw = angForIdx(di);
+        }
+        applyInput();
+        kick();
+        paint();
+      });
       kwrap.addEventListener("keydown", function(ev) {
         if (ev.key === "Home") {
           ev.preventDefault();

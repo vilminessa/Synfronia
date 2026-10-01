@@ -889,6 +889,120 @@ async function waitForPage() {
         fail("подсказка веса не «Толщина шрифта - N%»: " + JSON.stringify(wTip));
       }
       console.log(`  подсказка веса: "${wTip.text}"`);
+
+      // --- этап 3: идиомы webaudio-controls ---
+      // 1) значение на ручке видно во время драга и гаснет в покое
+      await send("Input.dispatchMouseEvent", {type: "mouseMoved", x: knobBox.x, y: knobBox.y});
+      await send("Input.dispatchMouseEvent", {type: "mousePressed", x: knobBox.x,
+        y: knobBox.y, button: "left", buttons: 1, clickCount: 1});
+      await send("Input.dispatchMouseEvent", {type: "mouseMoved", x: knobBox.x + 30,
+        y: knobBox.y, button: "left", buttons: 1});
+      await sleep(220);   // editing + transition opacity .12с успевают
+      const dragVal = await evaluate(`(function () {
+        var v = document.querySelector("#font-weight .knob-val");
+        return v ? {text: v.textContent, op: parseFloat(getComputedStyle(v).opacity)} : null;
+      })()`);
+      await send("Input.dispatchMouseEvent", {type: "mouseReleased", x: knobBox.x + 30,
+        y: knobBox.y, button: "left", buttons: 0, clickCount: 1});
+      await sleep(1100);  // editing гаснет таймером 0.8 с + transition 0.12 с
+      const restVal = await evaluate(`(function () {
+        var v = document.querySelector("#font-weight .knob-val");
+        return v ? parseFloat(getComputedStyle(v).opacity) : -1;
+      })()`);
+      if (!(dragVal && dragVal.text && dragVal.op > 0.9 && restVal <= 0.05)) {
+        fail("значение на ручке не показалось при драге или не погасло в покое: " +
+             JSON.stringify({drag: dragVal, restOpacity: restVal}));
+      }
+      // 2) Shift = точное доводство. После mouseReleased raw квантован по
+      //    ступени (шаг веса = 360/81 ≈ 4.44°), а round от кратного
+      //    перебрасывает на следующую ступень при сдвиге > sa/2 ≈ 2.22°:
+      //    +5px со Shift (0.3°/px = 1.5°) её не трогает гарантированно,
+      //    те же +5px обычным драгом (1.2°/px = 6°) - трогают
+      const vA = await evaluate('document.getElementById("font-weight").value');
+      await send("Input.dispatchMouseEvent", {type: "mousePressed", x: knobBox.x,
+        y: knobBox.y, button: "left", buttons: 1, clickCount: 1, modifiers: 8});
+      await send("Input.dispatchMouseEvent", {type: "mouseMoved", x: knobBox.x + 5,
+        y: knobBox.y, button: "left", buttons: 1, modifiers: 8});
+      await sleep(120);
+      const vShift = await evaluate('document.getElementById("font-weight").value');
+      await send("Input.dispatchMouseEvent", {type: "mouseReleased", x: knobBox.x + 5,
+        y: knobBox.y, button: "left", buttons: 0, clickCount: 1});
+      await sleep(120);
+      if (vShift !== vA) {
+        fail("Shift не замедляет драг (ступень изменилась от +5px): " +
+             JSON.stringify({vA: vA, vShift: vShift}));
+      }
+      await send("Input.dispatchMouseEvent", {type: "mousePressed", x: knobBox.x,
+        y: knobBox.y, button: "left", buttons: 1, clickCount: 1});
+      await send("Input.dispatchMouseEvent", {type: "mouseMoved", x: knobBox.x + 5,
+        y: knobBox.y, button: "left", buttons: 1});
+      await sleep(120);
+      const vPlain = await evaluate('document.getElementById("font-weight").value');
+      await send("Input.dispatchMouseEvent", {type: "mouseReleased", x: knobBox.x + 5,
+        y: knobBox.y, button: "left", buttons: 0, clickCount: 1});
+      await sleep(120);
+      if (vPlain === vShift) {
+        fail("обычный драг не крутит ручку (+5px): " + JSON.stringify({vShift: vShift, vPlain: vPlain}));
+      }
+      // 3) double-click = сброс в дефолт схемы (font_weight: 400)
+      await send("Input.dispatchMouseEvent", {type: "mousePressed", x: knobBox.x,
+        y: knobBox.y, button: "left", buttons: 1, clickCount: 1});
+      await send("Input.dispatchMouseEvent", {type: "mouseReleased", x: knobBox.x,
+        y: knobBox.y, button: "left", buttons: 0, clickCount: 1});
+      await sleep(60);
+      await send("Input.dispatchMouseEvent", {type: "mousePressed", x: knobBox.x,
+        y: knobBox.y, button: "left", buttons: 1, clickCount: 2});
+      await send("Input.dispatchMouseEvent", {type: "mouseReleased", x: knobBox.x,
+        y: knobBox.y, button: "left", buttons: 0, clickCount: 2});
+      await sleep(200);
+      const vReset = await evaluate(`(function () {
+        var k = document.getElementById("font-weight");
+        var s = (window.__probe.saved || []).filter(function (x) {
+          return x[0] === "font_weight"; }).slice(-1)[0];
+        return {v: k.value, saved: s};
+      })()`);
+      if (!(vReset.v === 400 && vReset.saved && vReset.saved[1] === 400)) {
+        fail("double-click не сбросил ручку в дефолт схемы: " + JSON.stringify(vReset));
+      }
+      // 4) то же для позиционной ручки: сначала уводим с дефолта (иначе
+      //    сброс неотличим от состояния «и так системный»), потом dblclick
+      await evaluate('document.getElementById("font-sans").scrollIntoView({block: "center"}); true');
+      await sleep(80);
+      const fsBox = await evaluate(`(function () {
+        var k = document.getElementById("font-sans");
+        var r = k.getBoundingClientRect();
+        return {cx: Math.round(r.left + r.width / 2), cy: Math.round(r.top + r.height / 2)};
+      })()`);
+      await send("Input.dispatchMouseEvent", {type: "mouseMoved", x: fsBox.cx, y: fsBox.cy});
+      await send("Input.dispatchMouseEvent", {type: "mouseWheel", x: fsBox.cx,
+        y: fsBox.cy, deltaX: 0, deltaY: -120});
+      await sleep(150);
+      const fsMoved = await evaluate('document.getElementById("font-sans").value');
+      if (fsMoved === "") {
+        fail("колесо не увело позиционную ручку с дефолта: " + JSON.stringify({v: fsMoved}));
+      }
+      await send("Input.dispatchMouseEvent", {type: "mousePressed", x: fsBox.cx,
+        y: fsBox.cy, button: "left", buttons: 1, clickCount: 1});
+      await send("Input.dispatchMouseEvent", {type: "mouseReleased", x: fsBox.cx,
+        y: fsBox.cy, button: "left", buttons: 0, clickCount: 1});
+      await sleep(60);
+      await send("Input.dispatchMouseEvent", {type: "mousePressed", x: fsBox.cx,
+        y: fsBox.cy, button: "left", buttons: 1, clickCount: 2});
+      await send("Input.dispatchMouseEvent", {type: "mouseReleased", x: fsBox.cx,
+        y: fsBox.cy, button: "left", buttons: 0, clickCount: 2});
+      await sleep(200);
+      const fsReset = await evaluate(`(function () {
+        var k = document.getElementById("font-sans");
+        var s = (window.__probe.saved || []).filter(function (x) {
+          return x[0] === "font_sans"; }).slice(-1)[0];
+        return {v: k.value, saved: s};
+      })()`);
+      if (!(fsReset.v === "" && fsReset.saved && fsReset.saved[1] === "")) {
+        fail("double-click не сбросил позиционную ручку в системный шрифт: " +
+             JSON.stringify(fsReset));
+      }
+      console.log(`  идиомы: значение в драге="${dragVal && dragVal.text}" погасло=${restVal <= 0.05} ` +
+        `Shift ${vA}->${vShift} обычный ${vPlain} сброс веса=${vReset.v} сброс шрифта="${fsReset.v}"`);
     }
     for (const lang of LANGS) {
       const m = await evaluate(`(function () {
@@ -1942,6 +2056,53 @@ async function waitForPage() {
     if (!pxMoveOk) fail("тумблер едет: transform добирается до translate(20px)");
     await evaluate('var f = document.getElementById("ftp-active"); f.checked = false; f.dispatchEvent(new Event("change")); true');
     console.log(`  тумблер: transform ${pxMove.before} -> ${pxMove.after} галочка=${pxMove.opacity}`);
+    // этап 3: double-click = сброс в дефолт схемы (webaudio-controls идиома).
+    // Стартуем с true (не дефолт): два клика вернут true->false->true, и
+    // только dblclick опустит в false - иначе чек не отличим от toggle
+    await evaluate(`(function () {
+      var f = document.getElementById("ftp-active");
+      if (!f.checked) { f.checked = true; f.dispatchEvent(new Event("change")); }
+      return true;
+    })()`);
+    await sleep(250);
+    const pxBox2 = await evaluate(`(function () {
+      var s = document.querySelector("#section-ftp .check.pixel-toggle");
+      if (!s) return null;
+      var r = s.getBoundingClientRect();
+      return {cx: Math.round(r.left + r.width / 2), cy: Math.round(r.top + r.height / 2)};
+    })()`);
+    if (pxBox2) {
+      await send("Input.dispatchMouseEvent", {type: "mousePressed", x: pxBox2.cx,
+        y: pxBox2.cy, button: "left", buttons: 1, clickCount: 1});
+      await send("Input.dispatchMouseEvent", {type: "mouseReleased", x: pxBox2.cx,
+        y: pxBox2.cy, button: "left", buttons: 0, clickCount: 1});
+      await sleep(70);
+      await send("Input.dispatchMouseEvent", {type: "mousePressed", x: pxBox2.cx,
+        y: pxBox2.cy, button: "left", buttons: 1, clickCount: 2});
+      await send("Input.dispatchMouseEvent", {type: "mouseReleased", x: pxBox2.cx,
+        y: pxBox2.cy, button: "left", buttons: 0, clickCount: 2});
+      await sleep(250);
+      const pxDbl = await evaluate(`(function () {
+        var f = document.getElementById("ftp-active");
+        var s = (window.__probe.saved || []).filter(function (x) {
+          return x[0] === "ftp_active"; }).slice(-1)[0];
+        return {checked: f.checked, saved: s};
+      })()`);
+      if (!(pxDbl.checked === false && pxDbl.saved && pxDbl.saved[1] === false)) {
+        fail("double-click не сбросил тумблер в дефолт схемы: " + JSON.stringify(pxDbl));
+      }
+      console.log(`  тумблер dblclick -> checked=${pxDbl.checked} сохранено=${JSON.stringify(pxDbl.saved)}`);
+    } else {
+      fail("бокс тумблера не найден для dblclick");
+    }
+    // возврат состояния: флаг выгрузки выключен (visible_if спрячет поля
+    // обратно - иначе проверки перелива ниже меряют не то)
+    await evaluate(`(function () {
+      var f = document.getElementById("ftp-active");
+      if (f.checked) { f.checked = false; f.dispatchEvent(new Event("change")); }
+      return true;
+    })()`);
+    await sleep(200);
 
     console.log("--- подсказки схемы ---");
     const hints = await evaluate(`(function () {

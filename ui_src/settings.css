@@ -336,6 +336,20 @@
   .knob-tick.on {
     background: var(--accent); box-shadow: 0 0 4px var(--accent);
   }
+  /* значение на ручке во время ввода (webaudio-controls идиома): цифра
+     видна, пока идёт драг/колесо/стрелки (классы .dragging/.editing, у
+     .editing снимает таймер в settings.js); в покое её нет - показывает
+     подсказка, чек «число убрано из-под ручки» остаётся верным. Пустой
+     узел у позиционных ручек не занимает место (:empty). */
+  .knob-val {
+    position: absolute; inset: 0; z-index: 1;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 600; font-variant-numeric: tabular-nums;
+    color: var(--text); opacity: 0; transition: opacity .12s;
+    pointer-events: none;
+  }
+  .knob.dragging .knob-val, .knob.editing .knob-val { opacity: 1; }
+  .knob-val:empty { display: none; }
   /* предпросмотр: три строки - заголовок, абзац с весом, строка консоли */
   #font-preview { font-size: 13px; line-height: 1.4; }
   #font-preview .fp-head {
@@ -362,6 +376,7 @@
   }
   @media (prefers-reduced-motion: reduce) {
     .settings-overlay, .settings-card { animation: none; }
+    .knob-val { transition: none; }
     .act-btn:hover .ico, .act-btn:active .ico, .act-btn.busy .ico { animation: none; transition: none; }
     /* блик и пыль на кнопках гасим; без анимации пыль невидима (opacity: 0),
        а блик стоит вне кнопки (background-position 220%) */
