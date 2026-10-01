@@ -165,6 +165,26 @@ def main() -> int:
         ok(field in state, f"poll отдаёт {field}")
     ok("settings_open" not in state,
        "poll не тащит открытость: после перезагрузки страницы её отдаёт get_initial")
+    # регресс: стартовая проверка ffmpeg и poll обязаны говорить одно и то
+    # же - раньше _ffmpeg["ok"] оставался False до первой докачки, и первый
+    # тик затирал верное значение init (ложное «перекодировка недоступна»
+    # даже при установленном ffmpeg). find_ffmpeg подделываем: чек не должен
+    # зависеть от наличия ffmpeg на машине, которая гоняет проверку.
+    saved_find = gui.find_ffmpeg
+    for probe_result in (True, False):
+        gui.find_ffmpeg = lambda _r=probe_result: _r
+        try:
+            init_f = api.get_initial()
+            state_f = api.poll(0)
+            ok(init_f["ffmpeg"] == state_f["ffmpeg"]["ok"] == probe_result,
+               f"find_ffmpeg={probe_result}: get_initial.ffmpeg согласован с poll.ffmpeg.ok",
+               f'{init_f["ffmpeg"]} vs {state_f["ffmpeg"]["ok"]}')
+        finally:
+            gui.find_ffmpeg = saved_find
+    ok("transcoders" in state,
+       "poll отдаёт transcoders (после докачки карточка раскроет их без перезапуска)")
+    ok(isinstance(state["transcoders"], (list, type(None))),
+       "transcoders в poll - список или null", repr(state.get("transcoders")))
     for gone in ("poll_settings", "open_settings", "close_settings", "settings_open"):
         ok(not hasattr(api, gone), f"у Api больше нет {gone}()")
     ok(not hasattr(gui, "SettingsApi"), "моста SettingsApi больше нет")

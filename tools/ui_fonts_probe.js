@@ -2161,6 +2161,36 @@ async function waitForPage() {
       `разделы=${hints.navTips.filter(Boolean).length}; шестерёнка: подсказка=${!!hints.gearTip} aria="${hints.gearAria}"; ` +
       `крестик: подсказка=${!!hints.closeTip} aria="${hints.closeAria}"; «Обзор…»: подсказка=${!!hints.browseTip}`);
 
+    // этап кнопки ffmpeg: при отсутствии ffmpeg пояснение несёт кнопку
+    // ведения в общий оверлей докачки (transAvailability=false - ровно то
+    // состояние, что создаёт poll при !ffmpeg.ok)
+    const fbtn = await evaluate(`(function () {
+      switchSection("dl");
+      transAvailability = {ffmpeg: false, avail: []};
+      buildTranscodeOptions();
+      var note = document.getElementById("transcode-note");
+      var btn = document.getElementById("transcode-ffmpeg-dl");
+      return {hidden: note.hidden, text: note.textContent.trim(),
+              btn: btn ? btn.textContent.trim() : ""};
+    })()`);
+    if (!(fbtn.hidden === false && fbtn.text.length > 0 && fbtn.btn.length > 0)) {
+      fail("в пояснении нет кнопки «Загрузить FFmpeg»: " + JSON.stringify(fbtn));
+    }
+    const fbtnOpen = await evaluate(`(function () {
+      document.getElementById("transcode-ffmpeg-dl").click();
+      var ov = document.getElementById("ffmpeg-overlay");
+      var opened = !ov.classList.contains("ffmpeg-hidden");
+      ov.classList.add("ffmpeg-hidden");   // убираем за собой
+      // восстановление: как оставил hints-блок (все кодировщики partial,
+      // раздел ui) - последующие чеки мерят не это
+      transAvailability = {ffmpeg: true, avail: ["libx265", "nvenc"]};
+      buildTranscodeOptions();
+      switchSection("ui");
+      return opened;
+    })()`);
+    if (!fbtnOpen) fail("кнопка «Загрузить FFmpeg» не открыла оверлей докачки");
+    console.log(`  кнопка ffmpeg: note="${fbtn.text.slice(0, 42)}" кнопка="${fbtn.btn}" открыла=${fbtnOpen}`);
+
     console.log("--- контраст элементов ---");
     const contrast = await evaluate(CONTRAST);
     // палитра темы может быть любой, но границы слоёв должны читаться:
