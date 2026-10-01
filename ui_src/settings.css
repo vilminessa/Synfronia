@@ -283,7 +283,10 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
     gap: 4px 18px;
-    align-items: start;
+    /* колонки одной строки - одной высоты и уровня: панелька слева и
+       предпросмотр справа растягиваются на всю строку (верх и низ
+       совпадают), содержимое внутри остаётся прижатым к верху */
+    align-items: stretch;
   }
   .field-card:has(> .field-card-body > #font-preview) .knob-panel {
     grid-column: 1;
@@ -299,7 +302,7 @@
   }
   .field-card:has(> .field-card-body > #font-preview) #font-preview {
     grid-column: 2; grid-row: 1;
-    align-self: start; margin-top: 0;
+    margin-top: 0;
   }
   .field-card:has(> .field-card-body > #font-preview)
     .field-card-body > *:not(.knob-panel):not(#font-preview) {
@@ -315,7 +318,8 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
     gap: 4px 18px;
-    align-items: start;
+    /* как в карточке шрифтов: колонки одной строки одной высоты и уровня */
+    align-items: stretch;
   }
   .field-card:has(> .field-card-body > #tip-preview) .knob-panel {
     grid-column: 1;
@@ -331,7 +335,7 @@
   }
   .field-card:has(> .field-card-body > #tip-preview) #tip-preview {
     grid-column: 2; grid-row: 1;
-    align-self: start; margin-top: 0;
+    margin-top: 0;
   }
   .field-card:has(> .field-card-body > #tip-preview)
     .field-card-body > *:not(.knob-panel):not(#tip-preview) {
@@ -345,14 +349,19 @@
     border-radius: var(--radius-m);
     overflow: hidden;
   }
-  /* рамка-элемент: за него «лёжа» ложится плашка при repel = 0 */
+  /* рамка-элемент стилизована как стандартная кнопка карточки
+     (см. .theme-actions button: фон --surface, рамка --widget, radius-s);
+     за неё «лёжа» ложится плашка при repel = 0. Подпись - ключ
+     sheet.ui.tip_demo_el (переводится data-i18n при смене языка) */
   .tp-target {
     position: absolute; left: 16px; top: 50%; transform: translateY(-50%);
     width: 74px; height: 46px;
-    background: var(--widget);
-    border: 1px solid var(--accent);
+    display: flex; align-items: center; justify-content: center;
+    padding: 0 8px; text-align: center;
+    background: var(--surface); color: var(--text);
+    border: 1px solid var(--widget);
     border-radius: var(--radius-s, 6px);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08);
+    font-size: 12px; line-height: 1.35;
   }
   /* маркер направления: фиксированная «точка притяжения» вместо курсора */
   .tp-marker {
@@ -362,16 +371,20 @@
     border-radius: 50%;
     opacity: .75;
   }
-  /* плашка как настоящая подсказка, но без цикла: только transition */
+  /* плашка = настоящая подсказка: те же фон/рамка/кегль/тень, что у .tip
+     (см. main.css), плюс позиционирование сцены. Магия настоящей
+     подсказки (conic-обводка ::before, свечение ::after, пылинки)
+     расширена на .tp-bubble прямо в main.css - один источник стилей */
   .tp-bubble {
     position: absolute; top: 50%;
     transform: translateY(-50%);
-    padding: 5px 9px;
-    background: var(--widget);
-    border: 1px solid var(--accent);
+    max-width: 320px; padding: 7px 11px;
+    background: var(--surface); color: var(--text);
+    border: 1px solid var(--widget);
     border-radius: var(--radius-s, 6px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, .35);
-    font-size: 11px; white-space: nowrap;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, .45);
+    font-size: 12px; line-height: 1.35;
+    white-space: nowrap;
     transition: left .15s ease;
     z-index: 2;
   }
