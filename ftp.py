@@ -165,6 +165,25 @@ def _ssl_context(verify: bool) -> ssl.SSLContext:
     return ctx
 
 
+class _FtpTls(ftplib.FTP_TLS):
+    r"""FTPS с возобновлением TLS-сессии на канале данных.
+
+    Штатный ``FTP_TLS.ntransfercmd`` делает полный хендшейк заново, а FileZilla
+    Server с требованием возобновления отвечает «425 TLS session of data
+    connection not resumed» (и рвёт соединение раньше - «SSL: SHUTDOWN_WHILE_
+    IN_INIT» на обычном NLST). Передача сессии управляющего канала через
+    ``session=`` - штатный способ борьбы с этим; в самой библиотеке ftplib
+    такой передачи нет, отсюда подкласс.
+    """
+
+    def ntransfercmd(self, cmd, rest=None):
+        conn, size = ftplib.FTP.ntransfercmd(self, cmd, rest)
+        if self._prot_p:
+            conn = self.context.wrap_socket(conn, server_hostname=self.host,
+                                            session=self.sock.session)
+        return conn, size
+
+
 def connect(cfg: FtpConfig, log=None) -> ftplib.FTP:
     """Подключается и логинится (с PROT для FTPS). Пассивный режим."""
     if not cfg.host:
@@ -172,7 +191,7 @@ def connect(cfg: FtpConfig, log=None) -> ftplib.FTP:
     if log:
         log("info", cfg._t("ftp.connecting", host=cfg.describe()))
     if cfg.tls:
-        ftp = ftplib.FTP_TLS(context=_ssl_context(cfg.tls_verify))
+        ftp = _FtpTls(context=_ssl_context(cfg.tls_verify))
     else:
         ftp = ftplib.FTP()
     ftp.connect(cfg.host, cfg.port, timeout=cfg.timeout)
@@ -201,28 +220,51 @@ def ensure_dir(ftp: ftplib.FTP, path: str, lang: str = "en", log=None, done=None
     550/553/450 после MKD не считаем успехом, пока CWD не подтвердил, что
     каталог есть: «Permission denied» и «Access denied» выглядят одинаково.
     done — множество уже созданных путей, чтобы не слать повторный MKD.
+
+    Все пути считаются от исходного каталога и на выходе соединение
+    возвращается туда же: проверка существования идёт через CWD, поэтому без
+    возврата следующий STOR «каталог/файл» ушёл бы внутрь каталога второй
+    раз (сервер отвечал 550 No such file or directory).
     """
     parts = [p for p in str(path or "").split("/") if p]
-    current = ""
-    for part in parts:
-        current = f"{current}/{part}" if current else part
-        if done is not None and current in done:
-            continue
-        try:
-            ftp.mkd(current)
-        except ftplib.error_perm as exc:
-            code = str(exc).split(" ")[0]
-            if code not in ("550", "553", "450") or not _dir_exists(ftp, current):
+    if not parts:
+        return True
+    try:
+        base = ftp.pwd()
+    except (ftplib.Error, OSError):
+        base = None   # сервер без PWD: работаем относительно текущего каталога
+    prefix = (base or "").rstrip("/")
+    try:
+        current = ""
+        for part in parts:
+            current = f"{current}/{part}" if current else part
+            if base is None:
+                target = current
+            else:
+                target = f"{prefix}/{current}" if prefix else f"/{current}"
+            if done is not None and current in done:
+                continue
+            try:
+                ftp.mkd(target)
+            except ftplib.error_perm as exc:
+                code = str(exc).split(" ")[0]
+                if code not in ("550", "553", "450") or not _dir_exists(ftp, target):
+                    if log:
+                        log("error", _t(lang, "ftp.dir_failed", path=current, exc=exc))
+                    return False
+            except (ftplib.Error, OSError) as exc:
                 if log:
                     log("error", _t(lang, "ftp.dir_failed", path=current, exc=exc))
                 return False
-        except (ftplib.Error, OSError) as exc:
-            if log:
-                log("error", _t(lang, "ftp.dir_failed", path=current, exc=exc))
-            return False
-        if done is not None:
-            done.add(current)
-    return True
+            if done is not None:
+                done.add(current)
+        return True
+    finally:
+        if base:
+            try:
+                ftp.cwd(base)
+            except (ftplib.Error, OSError):
+                pass   # не смогли вернуться - дальше всё равно абсолютные пути
 
 
 def _remote_size(ftp: ftplib.FTP, path: str) -> int:

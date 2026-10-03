@@ -14,11 +14,19 @@ r"""Проверка схемы настроек без запуска прил�
   9. файл настроек: чужие ключи не пишутся, hevc переносится, значения чинятся,
      а обычное чтение файл не трогает;
  10. окно настроек: свой шаблон и стиль, общий JS в обоих окнах, схема не
-     утекает в главное окно, а оно само не рисует настройки.
+     утекает в главное окно, а оно само не рисует настройки;
+ 11. обход блокировок (dpi.py): решалка «нужен ли обход», отказы без
+     запуска и без прав администратора, список стратегий и кэш, невидимость
+     работы (проверка обновлений zapret, окна, имя задачи);
+ 12. выгрузка на FTP: возобновление TLS-сессии на канале данных, рендер
+     пути на сервере и ensure_dir на фейковом сервере (абсолютные пути и
+     возврат CWD).
 
 Запуск:  python tools/check_settings.py
 """
 
+import inspect
+import ftplib
 import json
 import os
 import re
@@ -35,6 +43,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 import dpi  # noqa: E402
+import ftp as ftp_mod  # noqa: E402
 import i18n  # noqa: E402
 import settings  # noqa: E402
 import settings_schema  # noqa: E402
@@ -570,6 +579,68 @@ def main() -> int:
     for ident in ('"dpi-probe":', '"dpi-scan":', '"dpi-start":', '"dpi-stop":',
                   'getElementById("dpi-note")'):
         ok(ident in settings_js, f"settings.js использует {ident}")
+
+    # 12. выгрузка на FTP: канал данных с возобновлением TLS-сессии
+    section("12. выгрузка на FTP")
+    ok(issubclass(ftp_mod._FtpTls, ftplib.FTP_TLS), "_FtpTls наследует FTP_TLS")
+    ntc = inspect.getsource(ftp_mod._FtpTls.ntransfercmd)
+    ok("session=self.sock.session" in ntc,
+       "канал данных получает сессию управляющего (иначе 425 у FileZilla)")
+    ok("ftplib.FTP.ntransfercmd(self" in ntc,
+       "ntransfercmd вызывает базовый FTP, а не FTP_TLS (без зацикливания)")
+    src_connect = inspect.getsource(ftp_mod.connect)
+    ok("_FtpTls(" in src_connect and "ftplib.FTP_TLS(" not in src_connect,
+       "connect() в режиме FTPS берёт подкласс, а не штатный FTP_TLS")
+    # путь на сервере: {playlist} без плейлиста схлопывается в корень шаблона,
+    # ".." и пустые сегменты выкидываются - выше базового каталога не уйти
+    ok(ftp_mod.render_path("media/{playlist}", {"playlist": ""}) == "media",
+       "{playlist} без плейлиста -> сегмент пропал, папка осталась",
+       ftp_mod.render_path("media/{playlist}", {"playlist": ""}))
+    ok(ftp_mod.render_path("media/{playlist}", {"playlist": "Мой плейлист"})
+       == "media/Мой плейлист", "{playlist} с названием -> подпапка")
+    ok(ftp_mod.render_path("../{playlist}", {"playlist": "x"}) == "x",
+       ".. из пути выбрасывается", ftp_mod.render_path("../{playlist}", {"playlist": "x"}))
+
+    # ensure_dir на фейковом сервере: абсолютные пути и возврат CWD - именно
+    # из-за отсутствия возврата STOR «media/файл» уходил в /media/media/файл
+    class _FakeFtp:
+        def __init__(self, existing=(), denied=(), where="/"):
+            self.existing = set(existing) | {"/"}   # корень есть всегда
+            self.denied = set(denied)
+            self.where = where
+            self.cmds = []
+
+        def pwd(self):
+            return self.where
+
+        def mkd(self, path):
+            self.cmds.append(("MKD", path))
+            if path in self.existing:
+                raise ftplib.error_perm("550 Permission denied")   # уже есть
+            if path in self.denied:
+                raise ftplib.error_perm("550 Permission denied")
+            self.existing.add(path)
+
+        def cwd(self, path):
+            self.cmds.append(("CWD", path))
+            target = path if path.startswith("/") else f"{self.where.rstrip('/')}/{path}"
+            if target not in self.existing:
+                raise ftplib.error_perm("550 Failed to change directory.")
+            self.where = target
+
+    fake = _FakeFtp(existing={"/media"})
+    ok(ftp_mod.ensure_dir(fake, "media/Мой плейлист") is True,
+       "ensure_dir создаёт недостающие сегменты", str(fake.cmds))
+    ok(("MKD", "/media") in fake.cmds and ("MKD", "/media/Мой плейлист") in fake.cmds,
+       "MKD идёт абсолютными путями от исходного каталога", str(fake.cmds))
+    ok(fake.where == "/", "CWD возвращён в исходный каталог (иначе media/media)",
+       f"остались в {fake.where}")
+    again = _FakeFtp(existing={"/media"})
+    ok(ftp_mod.ensure_dir(again, "") is True and not again.cmds,
+       "пустой путь - ни одной команды")
+    denied = _FakeFtp(existing={"/media"}, denied={"/media/x"})
+    ok(ftp_mod.ensure_dir(denied, "media/x") is False,
+       "отказ сервера на втором сегменте -> False, без исключения")
 
     print(f"\nитог: {_checks - len(_fails)}/{_checks} ok")
     if _fails:

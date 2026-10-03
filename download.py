@@ -87,8 +87,9 @@ def main() -> int:
             ftp=ftp,
         )
     finally:
-        # обход гасим в любом исходе: и после ошибки, и после Ctrl+C
-        if bypass is not None:
+        # обход гасим в любом исходе - и после ошибки, и после Ctrl+C,
+        # но только если гасить просили (dpi_stop_after, как в gui)
+        if bypass is not None and bypass.stop_after:
             dpi.stop(bypass, log=_log)
     return 0 if not dl.stopped else 1
 
