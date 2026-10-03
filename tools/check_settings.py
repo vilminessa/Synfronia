@@ -21,6 +21,7 @@ r"""Проверка схемы настроек без запуска прил�
 
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -33,6 +34,7 @@ utf8_console.force_utf8()
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+import dpi  # noqa: E402
 import i18n  # noqa: E402
 import settings  # noqa: E402
 import settings_schema  # noqa: E402
@@ -62,6 +64,9 @@ LEGACY_DOM = {
     "ftp-tls", "ftp-tls-verify", "ftp-pasv", "ftp-delete-local", "ftp-dir",
     "ftp-dir-note", "ftp-template", "ftp-timeout", "ftp-retries",
     "ftp-test", "ftp-test-note",
+    # раздел «Обход»
+    "dpi-auto", "dpi-stop-after", "dpi-dir", "dpi-mode", "dpi-bat", "dpi-args",
+    "dpi-timeout", "dpi-probe", "dpi-start", "dpi-stop", "dpi-note",
     # вне панели
     "group",
 }
@@ -98,6 +103,11 @@ COERCE_CASES = [
     ("ftp_host", None, ""),
     ("ftp_user", 42, "42"),
     ("ftp_password", None, ""),
+    ("dpi_timeout", 1, 5),
+    ("dpi_timeout", "300", 300),
+    ("dpi_mode", "nope", "bat"),
+    ("dpi_auto", "true", True),
+    ("dpi_dir", None, ""),
     ("some_garbage", "x", "x"),         # чужой ключ не трогаем
 ]
 
@@ -165,7 +175,7 @@ def main() -> int:
     section("1. схема собирается")
     groups = settings_schema.groups()
     ids = [g["id"] for g in groups]
-    ok(ids == ["ui", "dl", "ftp"], "вкладки в порядке ui, dl, ftp", str(ids))
+    ok(ids == ["ui", "dl", "dpi", "ftp"], "вкладки в порядке ui, dl, dpi, ftp", str(ids))
     ok(all(g.get("label") for g in groups), "у вкладок есть подписи")
     ok(settings_schema.flat_prefix("ftp") == "ftp_", "у выгрузки префикс ftp_")
     ok(settings_schema.flat_prefix("dl") == "", "у загрузчика префикса нет (совместимость)")
@@ -207,7 +217,7 @@ def main() -> int:
     doms = _doms()
     ok(len(doms) == len(set(doms)), "dom-id уникальны",
        str([d for d in doms if doms.count(d) > 1]))
-    ok(len(flat_names) == 32, "в схеме 32 сохраняемые настройки", str(len(flat_names)))
+    ok(len(flat_names) == 39, "в схеме 39 сохраняемых настроек", str(len(flat_names)))
 
     # 3. совместимость с текущим файлом
     section("3. плоский формат не поехал")
@@ -457,6 +467,60 @@ def main() -> int:
        "схема настроек не утекает в главное окно")
     ok('id="settings-block"' not in main_html and 'class="overlay"' not in main_html,
        "старый блок настроек из главной страницы убран")
+
+    # 11. обход блокировок (dpi.py): решалка, отказы без запуска, переводы
+    section("11. обход блокировок")
+    ok(ids.index("dl") < ids.index("dpi") < ids.index("ftp"),
+       "вкладка обхода между загрузчиком и выгрузкой", str(ids))
+    ok(settings_schema.flat_prefix("dpi") == "dpi_", "у обхода префикс dpi_")
+    d = dpi.DpiConfig({})
+    got = (d.auto, d.stop_after, d.dir, d.mode, d.bat, d.args, d.timeout)
+    ok(got == (False, True, "", "bat", "general.bat", "", 45),
+       "DpiConfig без файла = умолчания схемы", str(got))
+    # решалка: обход включается только при включённом флажке И закрытом
+    # маршруте - две отрицательные ветки и не дают поднять zapret «просто так»
+    for auto, reachable, expected in ((False, False, "skip"), (False, True, "skip"),
+                                      (True, False, "start"), (True, True, "skip")):
+        got = dpi.resolve({"dpi_auto": auto}, reachable)
+        ok(got == expected, f"resolve(auto={auto}, reachable={reachable}) = {expected!r}",
+           f"получилось {got!r}")
+    # негатив: непригодная папка - отказ текстом, без запуска и без UAC
+    for label, bad_dir in (("пустой папки", ""),
+                           ("несуществующей папки",
+                            os.path.join(tempfile.gettempdir(), "synf-no-such-dir"))):
+        try:
+            dpi.command(dpi.DpiConfig({"dpi_dir": bad_dir}))
+            ok(False, f"command при {label} поднимает ValueError")
+        except ValueError as exc:
+            ok(bool(str(exc).strip()), f"command при {label} поднимает ValueError с текстом",
+               str(exc))
+    # негатив: закрытый порт -> False, и ни один процесс не появляется
+    st_before = dpi.status()
+    ok(dpi.probe(host="127.0.0.1", port=1, timeout=0.3) is False,
+       "probe по закрытому порту = False")
+    ok(dpi.status() == st_before, "probe не трогает процессы", str(dpi.status()))
+    # старт при непригодной папке не доходит до запроса прав администратора
+    res = dpi.start(dpi.DpiConfig({"dpi_dir": ""}))
+    if st_before["running"]:
+        ok(res.get("ok") is True and res.get("already") is True,
+           "start при запущенном winws = already", str(res))
+    else:
+        ok(res.get("ok") is False and bool(res.get("error")),
+           "start без папки -> отказ с текстом", str(res))
+    ok(dpi.status() == st_before, "start при отказе не трогает процессы",
+       str(dpi.status()))
+    # все ключи, которые модуль спрашивает у i18n, есть во всех 6 языках
+    dpi_src = (ROOT / "dpi.py").read_text(encoding="utf-8")
+    used = sorted(set(re.findall(r'"(sheet\.dpi\.[\w.]+)"', dpi_src)))
+    ok(len(used) >= 10, f"в dpi.py {len(used)} ключей i18n", str(used))
+    missing = {lang: [k for k in used if k not in i18n.I18N.get(lang, {})]
+               for lang in i18n.LANGUAGES}
+    missing = {lang: ks for lang, ks in missing.items() if ks}
+    ok(not missing, "ключи обхода переведены во всех языках", str(missing))
+    # кнопки и общее пояснение обхода обязаны жить в actions settings.js
+    for ident in ('"dpi-probe":', '"dpi-start":', '"dpi-stop":',
+                  'getElementById("dpi-note")'):
+        ok(ident in settings_js, f"settings.js использует {ident}")
 
     print(f"\nитог: {_checks - len(_fails)}/{_checks} ok")
     if _fails:

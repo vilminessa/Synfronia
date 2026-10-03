@@ -28,6 +28,13 @@
   "ftp_delete_local": false,
   "ftp_timeout": 60,
   "ftp_retries": 3,
+  "dpi_auto": false,
+  "dpi_stop_after": true,
+  "dpi_dir": "",
+  "dpi_mode": "bat",
+  "dpi_bat": "general.bat",
+  "dpi_args": "",
+  "dpi_timeout": 45,
   "render_gpu": true,
   "render_anim": true,
   "render_blur": true

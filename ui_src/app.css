@@ -50,6 +50,8 @@
   .note { margin-top: 6px; font-size: 12px; opacity: .7; }
   #ftp-test-note.ok { color: var(--accent); opacity: 1; }
   #ftp-test-note.bad { color: var(--warn); opacity: 1; }
+  #dpi-note.ok { color: var(--accent); opacity: 1; }
+  #dpi-note.bad { color: var(--warn); opacity: 1; }
 
   /* ---- подсказки ----
      Один элемент на страницу (см. initTooltips в common.js): показывается с

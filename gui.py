@@ -11,6 +11,7 @@ from collections import deque
 
 import webview
 
+import dpi
 import settings_schema
 from core import (
     Downloader,
@@ -606,6 +607,7 @@ class Api:
 
     def _run(self, url, dest, playlist, group, subtitles, quality, transcode, ftp=None) -> None:
         crashed = False
+        bypass = self._bypass_begin()
         try:
             self.dl.download(
                 url,
@@ -644,6 +646,9 @@ class Api:
                     key = _STATUS_KEY.get(mode, "p.ready")
                     self._status = tr(self._lang, key, ok=got, total=all_got)
                 self._progress = {"mode": "determinate", "value": 100.0}
+            # обход гасим сразу после окончания - итоговая строка и подсветка
+            # кнопки не должны ждать taskkill
+            self._bypass_end(bypass)
         # итог загрузки (busy -> result/status) - будим сразу: кнопка и
         # статус не должны ждать heartbeat
         self._ping()
@@ -658,6 +663,7 @@ class Api:
         total = len(urls)
         done = failed = 0
         cancelled = False
+        bypass = self._bypass_begin()
         try:
             for i, url in enumerate(urls, 1):
                 with self._lock:
@@ -719,8 +725,59 @@ class Api:
                     self._result = _RESULT_MODE.get("partial", "warn")
                     self._status = tr(self._lang, "p.done_partial",
                                       ok=done, total=total)
+            self._bypass_end(bypass)
         # итог массовой: busy, result, финальные статусы строк
         self._ping()
+
+    def _bypass_begin(self):
+        """Поднимает обход перед загрузкой, если он нужен. Конфиг или None.
+
+        Обход включается только когда он разрешён настройками и маршрут
+        закрыт: работающий YouTube не трогаем вовсе. Любая ошибка здесь
+        не должна ронять загрузку - исключения глушим с записью в журнал,
+        дальше идём как есть (с закрытым маршрутом yt-dlp сам скажет).
+        """
+        cfg = dpi.DpiConfig(self.settings, self._lang)
+        if not cfg.auto:   # без флажка маршрут даже не проверяем
+            return None
+        try:
+            reachable = dpi.probe()
+        except Exception as exc:  # noqa: BLE001 - маршрут проверяем, а не ломаем
+            self._log("warning", str(exc))
+            reachable = False
+        if dpi.resolve(cfg, reachable) != "start":
+            if reachable:
+                self._log("info", tr(self._lang, "sheet.dpi.log.ok"))
+            return None
+        self._log("warning", tr(self._lang, "sheet.dpi.log.auto"))
+        res = dpi.start(cfg, log=self._log)
+        if res.get("ok"):
+            return cfg
+        self._log("error", res.get("error") or tr(self._lang, "sheet.dpi.start_fail"))
+        return None
+
+    def _bypass_end(self, cfg) -> None:
+        """Гасит обход, если поднимали сами и настройки об этом просят."""
+        if not cfg:
+            return
+        try:
+            dpi.stop(cfg, log=self._log)
+        except Exception as exc:  # noqa: BLE001 - итог загрузки не должен упасть
+            self._log("warning", str(exc))
+
+    def dpi_probe(self) -> dict:
+        """Проверка маршрута по кнопке: YouTube отвечает или нет."""
+        return {"ok": True, "reachable": dpi.probe()}
+
+    def dpi_start(self) -> dict:
+        """Запуск обхода по кнопке из карточки настроек."""
+        cfg = dpi.DpiConfig(self.settings, self._lang)
+        return dpi.start(cfg, log=self._log)
+
+    def dpi_stop(self) -> dict:
+        """Остановка обхода по кнопке из карточки настроек."""
+        cfg = dpi.DpiConfig(self.settings, self._lang)
+        return dpi.stop(cfg, log=self._log)
 
     def test_ftp(self) -> dict:
         """Проверка настроек FTP: подключается и сразу отключается."""

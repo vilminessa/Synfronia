@@ -1342,6 +1342,9 @@ async function waitForPage() {
     // 3) неактивная кнопка режима выгрузки (FTP). Поле «Режим» имеет
     // visible_if: _WHEN_ACTIVE - при выключенном флаге оно display:none и
     // наводиться не на что, поэтому флаг включаем на время проверок.
+    // Селектор намеренно с вешен на #ftp-mode: переключатель такого вида
+    // есть и у раздела «Обход» (вкладка идёт раньше), и общий .mode-switch
+    // навёлся бы именно на него - проверка прошла бы мимо выгрузки.
     await evaluate('switchSection("ftp"); true');
     await sleep(200);
     await evaluate(`(function () {
@@ -1350,27 +1353,27 @@ async function waitForPage() {
       return true;
     })()`);
     await sleep(300);
-    await measure('reveal(".mode-switch button:not(.on)"); return true;');
-    const modeBox = await measure('return box(".mode-switch button:not(.on)");');
+    await measure('reveal("#ftp-mode button:not(.on)"); return true;');
+    const modeBox = await measure('return box("#ftp-mode button:not(.on)");');
     let modeHover1 = null, modeHover2 = null, modeDust = null;
     if (modeBox) {
       await mouseMove(modeBox.cx, modeBox.cy);
       await sleep(300);
-      modeHover1 = await measure('return hover(".mode-switch button:not(.on)");');
-      modeDust = await dustAlive(".mode-switch button:not(.on)");
+      modeHover1 = await measure('return hover("#ftp-mode button:not(.on)");');
+      modeDust = await dustAlive("#ftp-mode button:not(.on)");
       await sleep(250);
-      modeHover2 = await measure('return hover(".mode-switch button:not(.on)");');
+      modeHover2 = await measure('return hover("#ftp-mode button:not(.on)");');
     } else {
       fail("кнопка режима выгрузки не найдена");
     }
     // 4) выбранная кнопка режима остаётся акцентной (регресс)
-    await measure('reveal(".mode-switch button.on"); return true;');
-    const modeOnBox = await measure('return box(".mode-switch button.on");');
+    await measure('reveal("#ftp-mode button.on"); return true;');
+    const modeOnBox = await measure('return box("#ftp-mode button.on");');
     let modeOn = null;
     if (modeOnBox) {
       await mouseMove(modeOnBox.cx, modeOnBox.cy);
       await sleep(300);
-      modeOn = await measure('return hover(".mode-switch button.on");');
+      modeOn = await measure('return hover("#ftp-mode button.on");');
     }
     // возврат состояния: флаг выгрузки выключен обратно
     await evaluate(`(function () {

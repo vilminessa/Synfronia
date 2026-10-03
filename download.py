@@ -3,6 +3,7 @@
 import argparse
 import sys
 
+import dpi
 from core import (
     LANGUAGES,
     QUALITY_FORMATS,
@@ -15,6 +16,26 @@ from core import (
     load_settings,
     tr,
 )
+
+
+def _raise_bypass(mode: str, settings: dict, lang: str, log):
+    """Поднимает обход по флагу --bypass. Возвращает конфиг для гашения или None.
+
+    auto - только по настройке dpi_auto и только когда маршрут закрыт;
+    on - поднять явно, даже если YouTube уже открыт; off - не трогать.
+    Ошибка запуска не роняет загрузку: причину пишем в журнал и идём дальше.
+    """
+    cfg = dpi.DpiConfig(settings, lang)
+    if mode == "off" or (mode == "auto" and not cfg.auto):
+        return None
+    if mode == "auto" and dpi.probe():
+        log("info", tr(lang, "sheet.dpi.log.ok"))
+        return None
+    res = dpi.start(cfg, log=log)
+    if res.get("ok"):
+        return cfg
+    log("error", res.get("error") or tr(lang, "sheet.dpi.start_fail"))
+    return None
 
 
 def main() -> int:
@@ -30,6 +51,9 @@ def main() -> int:
     parser.add_argument("--lang", choices=LANGUAGES, default="en")
     parser.add_argument("--no-ftp", action="store_true",
                         help="не выгружать на FTP, даже если он включён в настройках")
+    parser.add_argument("--bypass", choices=("auto", "on", "off"), default="auto",
+                        help="обход блокировок: auto - по настройке dpi_auto и только "
+                             "когда YouTube закрыт, on - поднять явно, off - не трогать")
     args = parser.parse_args()
 
     playlist = args.playlist or is_playlist(args.url)
@@ -45,16 +69,22 @@ def main() -> int:
             print(f"[warning] {tr(args.lang, 'ftp.no_host')}")
 
     dl = Downloader(on_log=_log, lang=args.lang)
-    dl.download(
-        args.url,
-        args.dest,
-        playlist=playlist,
-        group=not args.no_group,
-        subtitles=args.subtitles,
-        quality=args.quality,
-        transcode=args.transcode,
-        ftp=ftp,
-    )
+    bypass = _raise_bypass(args.bypass, settings, args.lang, _log)
+    try:
+        dl.download(
+            args.url,
+            args.dest,
+            playlist=playlist,
+            group=not args.no_group,
+            subtitles=args.subtitles,
+            quality=args.quality,
+            transcode=args.transcode,
+            ftp=ftp,
+        )
+    finally:
+        # обход гасим в любом исходе: и после ошибки, и после Ctrl+C
+        if bypass is not None:
+            dpi.stop(bypass, log=_log)
     return 0 if not dl.stopped else 1
 
 

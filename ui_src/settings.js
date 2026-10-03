@@ -920,6 +920,46 @@
         note.className = "note bad";
         note.textContent = (res && res.error) || t("sheet.ftp.test_fail");
       }
+    },
+    // обход блокировок: три команды делят одно пояснение (dpi-note) -
+    // каждая тут же пишет в него свой исход, как это делает ftp-test
+    "dpi-probe": async function() {
+      var note = document.getElementById("dpi-note");
+      note.className = "note";
+      note.textContent = t("sheet.dpi.testing");
+      var res = await pywebview.api.dpi_probe();
+      if (res && res.reachable) {
+        note.className = "note ok";
+        note.textContent = t("sheet.dpi.test_ok");
+      } else {
+        note.className = "note bad";
+        note.textContent = t("sheet.dpi.test_fail");
+      }
+    },
+    "dpi-start": async function() {
+      var note = document.getElementById("dpi-note");
+      note.className = "note";
+      note.textContent = t("sheet.dpi.starting");
+      var res = await pywebview.api.dpi_start();
+      if (res && res.ok) {
+        note.className = "note ok";
+        note.textContent = t("sheet.dpi.start_ok");
+      } else {
+        note.className = "note bad";
+        note.textContent = (res && res.error) || t("sheet.dpi.start_fail");
+      }
+    },
+    "dpi-stop": async function() {
+      var note = document.getElementById("dpi-note");
+      note.className = "note";
+      var res = await pywebview.api.dpi_stop();
+      if (res && res.ok) {
+        note.className = "note ok";
+        note.textContent = t("sheet.dpi.stop_ok");
+      } else {
+        note.className = "note bad";
+        note.textContent = (res && res.error) || t("sheet.dpi.stop_fail");
+      }
     }
   };
   var NOTE_FILLERS = {ftpDirNote: updateFtpDirNote, fontPreview: updateFontPreview,

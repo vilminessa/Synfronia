@@ -160,6 +160,7 @@ CORE_GROUPS = [
 # Модули, отдающие свои настройки: имя модуля -> id группы в нём.
 MODULE_GROUPS = (
     ("downloader", "dl"),
+    ("dpi", "dpi"),
     ("ftp", "ftp"),
 )
 
