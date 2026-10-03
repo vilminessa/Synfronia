@@ -936,6 +936,21 @@
         note.textContent = t("sheet.dpi.test_fail");
       }
     },
+    // полный перебор стратегий: работает минуты, поэтому пояснение сразу
+    // говорит об этом и не даёт выглядеть как зависший клик
+    "dpi-scan": async function() {
+      var note = document.getElementById("dpi-note");
+      note.className = "note";
+      note.textContent = t("sheet.dpi.scanning");
+      var res = await pywebview.api.dpi_scan();
+      if (res && res.ok) {
+        note.className = "note ok";
+        note.textContent = t("sheet.dpi.scan_ok").replace("{name}", res.best || "");
+      } else {
+        note.className = "note bad";
+        note.textContent = (res && res.error) || t("sheet.dpi.scan_fail");
+      }
+    },
     "dpi-start": async function() {
       var note = document.getElementById("dpi-note");
       note.className = "note";

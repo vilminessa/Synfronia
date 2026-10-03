@@ -66,7 +66,7 @@ LEGACY_DOM = {
     "ftp-test", "ftp-test-note",
     # раздел «Обход»
     "dpi-auto", "dpi-stop-after", "dpi-dir", "dpi-mode", "dpi-bat", "dpi-args",
-    "dpi-timeout", "dpi-probe", "dpi-start", "dpi-stop", "dpi-note",
+    "dpi-timeout", "dpi-probe", "dpi-scan", "dpi-start", "dpi-stop", "dpi-note",
     # вне панели
     "group",
 }
@@ -517,8 +517,42 @@ def main() -> int:
                for lang in i18n.LANGUAGES}
     missing = {lang: ks for lang, ks in missing.items() if ks}
     ok(not missing, "ключи обхода переведены во всех языках", str(missing))
+    # подбор рабочей стратегии: список, кэш и отказы без UAC и без сети
+    tmpdir = Path(tempfile.mkdtemp(prefix="synf-dpi-strategies-"))
+    try:
+        empty = dpi.DpiConfig({"dpi_dir": str(tmpdir)})
+        ok(dpi.strategies(empty) == [], "без файлов стратегий - пустой список",
+           str(dpi.strategies(empty)))
+        for name in ("general (ALT10).bat", "general (ALT2).bat", "general.bat"):
+            (tmpdir / name).write_text("", encoding="ascii")
+        ok(dpi.strategies(empty) == ["general (ALT2).bat", "general (ALT10).bat",
+                                     "general.bat"],
+           "стратегии идут в натуральном порядке (ALT2 раньше ALT10)",
+           str(dpi.strategies(empty)))
+        # негатив: непригодная папка - отказ до запроса прав администратора
+        missing = dpi.DpiConfig({"dpi_dir": str(tmpdir / "no-such-dir")})
+        res = dpi.scan(missing)
+        ok(res.get("ok") is False and bool(res.get("error")),
+           "scan при непригодной папке -> отказ с текстом", str(res))
+        # негатив: выключенный флажок - auto не ходит в сеть и ничего не запускает
+        off = dpi.auto(dpi.DpiConfig({"dpi_auto": False, "dpi_dir": ""}))
+        ok(off == {"ok": True, "started": False},
+           "auto при выключенном флажке = ничего не делает", str(off))
+        # кэш: записал - прочитал; битый файл не роняет чтение
+        dpi.write_cache("general (ALT).bat")
+        ok(dpi.read_cache() == "general (ALT).bat", "кэш стратегии пишется и читается",
+           str(dpi.read_cache()))
+        cache_file = dpi._probe_dir() / "strategy.json"
+        cache_file.write_text("{ не json", encoding="utf-8")
+        ok(dpi.read_cache() is None, "битый кэш -> None, без исключения")
+        try:
+            cache_file.unlink()
+        except OSError:
+            pass
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
     # кнопки и общее пояснение обхода обязаны жить в actions settings.js
-    for ident in ('"dpi-probe":', '"dpi-start":', '"dpi-stop":',
+    for ident in ('"dpi-probe":', '"dpi-scan":', '"dpi-start":', '"dpi-stop":',
                   'getElementById("dpi-note")'):
         ok(ident in settings_js, f"settings.js использует {ident}")
 

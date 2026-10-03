@@ -21,21 +21,26 @@ from core import (
 def _raise_bypass(mode: str, settings: dict, lang: str, log):
     """Поднимает обход по флагу --bypass. Возвращает конфиг для гашения или None.
 
-    auto - только по настройке dpi_auto и только когда маршрут закрыт;
-    on - поднять явно, даже если YouTube уже открыт; off - не трогать.
-    Ошибка запуска не роняет загрузку: причину пишем в журнал и идём дальше.
+    auto - по настройке dpi_auto: доступ -> сохранённая стратегия -> подбор
+    (тот же путь, что в gui._bypass_begin); on - включить явно; off - не
+    трогать. Ошибка запуска не роняет загрузку: причину пишем в журнал.
     """
     cfg = dpi.DpiConfig(settings, lang)
-    if mode == "off" or (mode == "auto" and not cfg.auto):
+    if mode == "off":
         return None
-    if mode == "auto" and dpi.probe():
-        log("info", tr(lang, "sheet.dpi.log.ok"))
+    try:
+        if mode == "on":
+            res = dpi.start(cfg, log=log)
+            # чужой уже запущенный обход своим не считаем - гасить нечего
+            return cfg if res.get("ok") and not res.get("already") else None
+        res = dpi.auto(cfg, log=log)
+    except Exception as exc:  # noqa: BLE001 - обход не должен ломать загрузку
+        log("error", str(exc))
         return None
-    res = dpi.start(cfg, log=log)
-    if res.get("ok"):
-        return cfg
-    log("error", res.get("error") or tr(lang, "sheet.dpi.start_fail"))
-    return None
+    if not res.get("ok"):
+        log("error", res.get("error") or tr(lang, "sheet.dpi.start_fail"))
+        return None
+    return cfg if res.get("started") else None
 
 
 def main() -> int:
