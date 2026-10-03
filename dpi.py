@@ -24,6 +24,7 @@ import os
 import re
 import socket
 import ssl
+import subprocess
 import time
 from ctypes import wintypes
 from pathlib import Path
@@ -35,6 +36,13 @@ PROBE_HOST = "www.youtube.com"
 PROBE_PORT = 443
 PROBE_TIMEOUT = 6.0
 WINWS_IMAGE = "winws.exe"
+# Служебная задача планировщика: её регистрация - единственный запрос прав,
+# дальше помощник поднимается через schtasks /Run без диалога UAC.
+TASK_NAME = "SynfroniaBypass"
+RUNNER_NAME = "bypass_runner.ps1"
+# MultipleInstances, которым зарегистрирована задача; маркер лежит рядом с
+# кэшем - при смене политики задача перерегистрировывается (один запрос прав)
+TASK_POLICY = "parallel"
 
 
 # -- проверка маршрута ----------------------------------------------------
@@ -96,6 +104,26 @@ class DpiConfig:
         return tr(self.lang, key, **kwargs)
 
 
+def _bat_path(cfg: DpiConfig, bat: str | None = None) -> str:
+    """Путь к файлу стратегии с проверками, дающими переведённый текст ошибки.
+
+    Общая для режима bat и для команды запуска: одна и та же проверка папки
+    и файла, чтобы отказ приходил ДО запроса прав администратора.
+    """
+    if not cfg.dir:
+        raise ValueError(cfg.t("sheet.dpi.no_dir"))
+    root = Path(cfg.dir)
+    if not root.is_dir():
+        raise ValueError(cfg.t("sheet.dpi.bad_dir", dir=cfg.dir))
+    name = (bat or cfg.bat).strip()
+    if not name:
+        raise ValueError(cfg.t("sheet.dpi.no_bat", name=name))
+    path = Path(name) if os.path.isabs(name) else root / name
+    if not path.is_file():
+        raise ValueError(cfg.t("sheet.dpi.no_bat", name=str(path)))
+    return str(path)
+
+
 def command(cfg: DpiConfig, bat: str | None = None) -> tuple[str, str]:
     """(exe, параметры) для запуска обхода.
 
@@ -106,22 +134,17 @@ def command(cfg: DpiConfig, bat: str | None = None) -> tuple[str, str]:
     готов к показу в журнале и в пояснении. bat - запуск конкретного файла
     стратегии (так подбираем рабочую), иначе берётся настройка cfg.bat.
     """
-    if not cfg.dir:
-        raise ValueError(cfg.t("sheet.dpi.no_dir"))
-    root = Path(cfg.dir)
-    if not root.is_dir():
-        raise ValueError(cfg.t("sheet.dpi.bad_dir", dir=cfg.dir))
     if cfg.mode == "args":
+        if not cfg.dir:
+            raise ValueError(cfg.t("sheet.dpi.no_dir"))
+        root = Path(cfg.dir)
+        if not root.is_dir():
+            raise ValueError(cfg.t("sheet.dpi.bad_dir", dir=cfg.dir))
         exe = root / WINWS_IMAGE
         if not exe.is_file():
             raise ValueError(cfg.t("sheet.dpi.no_winws", dir=str(root)))
         return str(exe), cfg.args.strip()
-    name = (bat or cfg.bat).strip()
-    if not name:
-        raise ValueError(cfg.t("sheet.dpi.no_bat", name=name))
-    path = Path(name) if os.path.isabs(name) else root / name
-    if not path.is_file():
-        raise ValueError(cfg.t("sheet.dpi.no_bat", name=str(path)))
+    path = _bat_path(cfg, bat)
     return os.environ.get("COMSPEC", "cmd.exe"), f'/c "{path}"'
 
 
@@ -186,6 +209,179 @@ def _elevated(exe: str, params: str) -> bool:
     return code > 32
 
 
+def _powershell() -> str:
+    """Путь к Windows PowerShell: он есть всегда, в отличие от python в сборке."""
+    exe = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
+                       r"System32\WindowsPowerShell\v1.0\powershell.exe")
+    return exe if os.path.isfile(exe) else "powershell.exe"
+
+
+def _schtasks() -> str:
+    exe = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
+                       "System32", "schtasks.exe")
+    return exe if os.path.isfile(exe) else "schtasks.exe"
+
+
+def _task_exists(name: str = TASK_NAME) -> bool:
+    """Есть ли служебная задача: запрос без повышения прав, работает сразу."""
+    try:
+        out = subprocess.run([_schtasks(), "/Query", "/TN", name],
+                             capture_output=True, timeout=25)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return out.returncode == 0
+
+
+def _register_task(runner: Path) -> bool:
+    """Регистрирует служебную задачу - ЕДИНСТВЕННЫЙ запрос прав за весь срок.
+
+    После этого помощник запускается через schtasks /Run: служба
+    планировщика поднимает его сама, без диалога UAC. Отказ или ошибка =
+    False, и вызывающий уходит на запасной путь runas (как до задачи).
+    """
+    params = (f'-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden '
+              f'-File "{runner}" -Probe "{runner.parent}" -Register '
+              f'-Policy "{TASK_POLICY}"')
+    if not _elevated(_powershell(), params):
+        return False
+    for _ in range(30):   # регистрация быстрая, но ждём с запасом
+        if _task_exists() and _task_policy_ok():
+            return True
+        time.sleep(0.5)
+    return _task_exists() and _task_policy_ok()
+
+
+def _task_policy_ok() -> bool:
+    """Задача зарегистрирована текущей политикой инстансов (см. TASK_POLICY)."""
+    try:
+        text = (_probe_dir() / "task.policy").read_text(encoding="ascii")
+    except OSError:
+        return False
+    return text.strip() == TASK_POLICY
+
+
+def _trigger() -> bool:
+    """Просит планировщик выполнить задачу - уже без запроса прав.
+
+    Перед запуском гасится остаток прошлого раза: если предыдущий экземпляр
+    не завершился (PowerShell дожидается дескрипторы дочерних процессов),
+    новый уходит в очередь и не стартует вовсе - так уже было на практике.
+    Операции у нас строго по одной, поэтому гасить «выполняющееся» безопасно.
+    """
+    exe = _schtasks()
+    try:
+        subprocess.run([exe, "/End", "/TN", TASK_NAME], capture_output=True, timeout=25)
+        time.sleep(1.0)
+        for _ in range(3):
+            out = subprocess.run([exe, "/Run", "/TN", TASK_NAME],
+                                 capture_output=True, timeout=30)
+            if out.returncode == 0:
+                return True
+            time.sleep(1.5)   # задача ещё не отпустила прошлый экземпляр
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return False
+
+
+def _write_runner() -> Path:
+    """Держит скрипт помощника свежим: задача ссылается на путь, а содержимое
+    меняется вместе с кодом."""
+    probe_dir = _probe_dir()
+    runner = probe_dir / RUNNER_NAME
+    try:
+        runner.write_text(_RUNNER_SOURCE, encoding="utf-8", newline="\n")
+    except OSError:
+        pass
+    return runner
+
+
+def _wait_result(probe_dir: Path, token: str, wait: float) -> dict | None:
+    """Ждёт итог помощника: файл пишется атомарно (tmp -> move), поэтому
+    читабельный JSON уже готовый результат."""
+    path = probe_dir / f"result-{token}.json"
+    deadline = time.time() + max(5.0, wait)
+    while time.time() < deadline:
+        data = _read_json(path)
+        if data is not None:
+            try:
+                path.unlink()
+            except OSError:
+                pass
+            return data
+        time.sleep(0.3)
+    return None
+
+
+def _run_action(cfg: DpiConfig, action: str, payload: dict, wait: float,
+                log=None) -> dict | None:
+    """Одна операция, требующая прав. Итог придёт файлом result-<token>.json.
+
+    Путь запуска: задача есть -> schtasks /Run (без UAC); нет -> регистрация
+    (один UAC на весь срок службы); и от неё отказались -> runas, как раньше.
+    None = запустить помощника не удалось вообще.
+    """
+    runner = _write_runner()
+    probe_dir = runner.parent
+    for stale in list(probe_dir.glob("result-*.json*")) + [probe_dir / "runner.log"]:
+        try:
+            stale.unlink()
+        except OSError:
+            pass
+    token = str(int(time.time() * 1000))
+    req = {"action": action, "token": token, "root": cfg.dir, "target": PROBE_HOST,
+           "bat": "", "exe": "", "args": "", "configs": []}
+    req.update(payload)
+    try:
+        (probe_dir / "request.json").write_text(
+            json.dumps(req, ensure_ascii=False), encoding="utf-8")
+    except OSError as exc:
+        if log:
+            log("error", str(exc))
+        return {"ok": False, "error": str(exc)}
+    if _task_exists() and _task_policy_ok():
+        have_task = True
+    else:
+        if log:
+            log("info", cfg.t("sheet.dpi.log.task"))
+        have_task = _register_task(runner)   # маркер политики пишет регистрация
+    if have_task:
+        launched = _trigger()
+        # самодиагностика: помощник пишет первую строку сразу. Тишина дольше
+        # 20 секунд = задача ушла в очередь или не стартовала - лучше разовый
+        # запрос прав, чем молчаливое ожидание до таймаута
+        if launched and not _runner_booted(20):
+            if log:
+                log("warning", cfg.t("sheet.dpi.log.fallback"))
+            launched = _elevated(
+                _powershell(),
+                f'-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden '
+                f'-File "{runner}" -Probe "{probe_dir}"')
+    else:
+        # запасной путь: UAC на каждый вызов, если задачу не завели
+        launched = _elevated(_powershell(),
+                             f'-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden '
+                             f'-File "{runner}" -Probe "{probe_dir}"')
+    if not launched:
+        return None
+    data = _wait_result(probe_dir, token, wait)
+    # таймаут - отдельный ответ: вызывающий сам подбирает свой текст
+    return data if data is not None else {"ok": False, "timeout": True}
+
+
+def _runner_booted(timeout: float) -> bool:
+    """Успел ли помощник написать первую строку журнала (значит - запустился)."""
+    path = _probe_dir() / "runner.log"
+    deadline = time.time() + max(1.0, timeout)
+    while time.time() < deadline:
+        try:
+            if path.is_file() and path.stat().st_size > 0:
+                return True
+        except OSError:
+            pass
+        time.sleep(0.4)
+    return False
+
+
 def start(cfg: DpiConfig, log=None, wait: bool = True, bat: str | None = None) -> dict:
     """Поднимает обход и ждёт, пока маршрут откроется. bat - своя стратегия.
 
@@ -198,18 +394,34 @@ def start(cfg: DpiConfig, log=None, wait: bool = True, bat: str | None = None) -
             log("info", cfg.t("sheet.dpi.log.already"))
         return {"ok": True, "pid": st["pid"], "already": True}
     try:
-        exe, params = command(cfg, bat=bat)
+        # проверки папки и файла - ДО запроса прав: нечего поднимать ради отказа
+        if cfg.mode == "args":
+            exe, params = command(cfg)
+            payload = {"exe": exe, "args": params}
+        else:
+            payload = {"bat": _bat_path(cfg, bat)}
     except ValueError as exc:
         if log:
             log("error", str(exc))
         return {"ok": False, "error": str(exc)}
-    if not _elevated(exe, params):
+    if log:
+        log("info", cfg.t("sheet.dpi.log.start"))
+    res = _run_action(cfg, "start", payload, wait=60, log=log)
+    if res is None:
         err = cfg.t("sheet.dpi.no_uac")
         if log:
             log("error", err)
         return {"ok": False, "error": err}
-    if log:
-        log("info", cfg.t("sheet.dpi.log.start"))
+    if res.get("timeout"):
+        err = cfg.t("sheet.dpi.start_timeout")
+        if log:
+            log("error", err)
+        return {"ok": False, "error": err, "running": status()["running"]}
+    if not res.get("ok"):
+        err = cfg.t("sheet.dpi.start_fail")
+        if log:
+            log("error", err)
+        return {"ok": False, "error": err}
     if not wait:
         return {"ok": True, "pid": status()["pid"]}
     # драйвер и ловушка поднимаются за доли секунды, но первый проб может
@@ -226,15 +438,15 @@ def start(cfg: DpiConfig, log=None, wait: bool = True, bat: str | None = None) -
 
 
 def stop(cfg: DpiConfig, log=None) -> dict:
-    """Гасит обход: taskkill по winws.exe с повышением прав."""
+    """Гасит обход: winws убивает помощник, права - задача планировщика."""
     st = status()
     if not st["running"]:
         if log:
             log("info", cfg.t("sheet.dpi.log.not_running"))
         return {"ok": True, "running": False}
-    if not _elevated(os.environ.get("COMSPEC", "cmd.exe"),
-                     f"/c taskkill /f /t /im {WINWS_IMAGE}"):
-        err = cfg.t("sheet.dpi.no_uac")
+    res = _run_action(cfg, "stop", {}, wait=45, log=log)
+    if res is None or not res.get("ok"):
+        err = cfg.t("sheet.dpi.no_uac") if res is None else cfg.t("sheet.dpi.stop_fail")
         if log:
             log("error", err)
         return {"ok": False, "error": err}
@@ -257,88 +469,190 @@ def stop(cfg: DpiConfig, log=None) -> dict:
 # ниже): в собранном приложении python.exe рядом нет, а PowerShell есть
 # всегда. Он же меряет хендшейк - чтобы не плодить второй механизм пробы.
 
-_HELPER_SOURCE = r'''
+_RUNNER_SOURCE = r'''
 param(
-    [Parameter(Mandatory = $true)][string]$Root,
-    [Parameter(Mandatory = $true)][string]$Result,
-    [string]$Target = "www.youtube.com"
+    [Parameter(Mandatory = $true)][string]$Probe,
+    [string]$Policy = "",
+    [switch]$Register
 )
 $ErrorActionPreference = "SilentlyContinue"
+$log = Join-Path $Probe "runner.log"
+function LG($m) {
+    try { Add-Content -Path $log -Value ("{0} {1}" -f (Get-Date -Format "HH:mm:ss"), $m) -Encoding ASCII } catch { }
+}
+# earliest possible trace: if the task context stalls, we still know we booted
+try { "boot" | Add-Content -Path $log -Encoding ASCII } catch { }
 
-function Test-Tls {
-    param([int]$Timeout = 5)
-    $sw = [Diagnostics.Stopwatch]::StartNew()
-    $tcp = $null
-    $ssl = $null
+# zapret opens its releases page on every strategy start unless this is set
+# (service.bat: "if defined NO_UPDATE_CHECK exit /b") - that is the source of
+# the browser tabs, so it is set before anything is started
+$env:NO_UPDATE_CHECK = "1"
+
+Add-Type -Namespace Synf -Name Win -MemberDefinition '[DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int n);'
+LG "addtype ok"
+$Curl = "$env:SystemRoot\System32\curl.exe"
+if (-not (Test-Path $Curl)) { $Curl = "curl.exe" }
+$Target = "www.youtube.com"
+
+if ($Register) {
+    # One-time task registration: afterwards the app fires schtasks /Run and
+    # the scheduler service raises the helper itself - no UAC dialog ever.
     try {
-        $tcp = New-Object Net.Sockets.TcpClient
-        $begin = $tcp.BeginConnect($Target, 443, $null, $null)
-        if (-not $begin.AsyncWaitHandle.WaitOne($Timeout * 1000)) { return $null }
-        $tcp.EndConnect($begin)
-        $ssl = New-Object Net.Security.SslStream($tcp.GetStream(), $false, { $true })
-        $ssl.ReadTimeout = $Timeout * 1000
-        $handshake = $ssl.AuthenticateAsClientAsync($Target)
-        if (-not $handshake.AsyncWaitHandle.WaitOne($Timeout * 1000)) { return $null }
-        if (-not $ssl.IsAuthenticated) { return $null }
-        return [int]$sw.ElapsedMilliseconds
+        $ps = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+        $ps1 = Join-Path $Probe "bypass_runner.ps1"
+        $action = New-ScheduledTaskAction -Execute $ps -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ps1`" -Probe `"$Probe`""
+        $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).Date
+        $principal = New-ScheduledTaskPrincipal -UserId ("{0}\{1}" -f $env:USERDOMAIN, $env:USERNAME) -RunLevel Highest
+        # Parallel: winws остаётся работать после нашего выхода, планировщик
+        # же держит задачу «выполняющейся», пока живы дочерние процессы - при
+        # IgnoreNew/Queue следующий запуск ушёл бы в очередь и не стартовал
+        $settings = New-ScheduledTaskSettingsSet -MultipleInstances Parallel -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+        Register-ScheduledTask -TaskName "SynfroniaBypass" -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+        # маркер пишет сам регистрационный запуск: приложение сверяет его с
+        # текущей политикой и перерегистрирует задачу только при её смене
+        if ($Policy) { try { Set-Content -Path (Join-Path $Probe "task.policy") -Value $Policy -Encoding ASCII } catch { } }
+        LG "task registered policy=$Policy"
     } catch {
-        return $null
-    } finally {
-        if ($ssl) { try { $ssl.Dispose() } catch { } }
-        if ($tcp) { try { $tcp.Close() } catch { } }
+        LG "register failed: $($_.Exception.Message)"
+        exit 1
     }
+    exit 0
 }
 
-$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $isAdmin) { exit 1 }
+$token = "0"
+$action = ""
+$req = $null
+try {
+    $req = Get-Content (Join-Path $Probe "request.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+    $token = "$($req.token)"
+    $action = "$($req.action)"
+    if ($req.target) { $Target = "$($req.target)" }
+    LG "req action=$action token=$token"
+} catch {
+    LG "request read failed: $($_.Exception.Message)"
+}
+$outPath = Join-Path $Probe ("result-" + $token + ".json")
 
-# the scan replaces whatever bypass runs now; the winner is back at the end
-Get-Process -Name "winws" -ErrorAction SilentlyContinue | Stop-Process -Force
-Start-Sleep -Milliseconds 600
+function Finish($Payload) {
+    try {
+        $tmp = "$outPath.tmp"
+        $Payload | ConvertTo-Json -Depth 6 | Set-Content -Path $tmp -Encoding UTF8
+        Move-Item -Path $tmp -Destination $outPath -Force
+        LG "result written action=$action"
+    } catch { LG "result write failed: $($_.Exception.Message)" }
+}
 
-$files = @(Get-ChildItem -Path $Root -Filter "general*.bat" -ErrorAction SilentlyContinue |
-    Sort-Object { [Regex]::Replace($_.Name, "(\d+)", { $args[0].Value.PadLeft(8, "0") }) })
-$results = New-Object System.Collections.Generic.List[object]
-$bestName = $null
-$bestPath = $null
-$bestMs = 2147483647
-
-foreach ($f in $files) {
+function Stop-Winws {
     Get-Process -Name "winws" -ErrorAction SilentlyContinue | Stop-Process -Force
-    Start-Sleep -Milliseconds 400
-    Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$($f.FullName)`"" -WorkingDirectory $Root -WindowStyle Minimized | Out-Null
-    $up = $false
-    for ($k = 0; $k -lt 20 -and -not $up; $k++) {
-        Start-Sleep -Milliseconds 250
-        $up = [bool](Get-Process -Name "winws" -ErrorAction SilentlyContinue)
-    }
-    $ms = $null
-    if ($up) {
-        Start-Sleep -Milliseconds 700
-        $ms = Test-Tls 5
-        if ($null -eq $ms) { Start-Sleep -Milliseconds 600; $ms = Test-Tls 5 }
-    }
-    $ok = ($null -ne $ms)
-    $results.Add([PSCustomObject]@{ name = $f.Name; ok = $ok; ms = $ms })
-    if ($ok -and ([int]$ms -lt $bestMs)) { $bestMs = [int]$ms; $bestName = $f.Name; $bestPath = $f.FullName }
+    Start-Sleep -Milliseconds 500
 }
 
-if ($bestName) {
-    # the winner must stay running: the loop stopped on some other config
-    if ($results[$results.Count - 1].name -ne $bestName) {
-        Get-Process -Name "winws" -ErrorAction SilentlyContinue | Stop-Process -Force
-        Start-Sleep -Milliseconds 400
-        Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$bestPath`"" -WorkingDirectory $Root -WindowStyle Minimized | Out-Null
-        Start-Sleep -Milliseconds 1200
+function Hide-Winws {
+    # strategy consoles are started minimized by their bat files; the user
+    # should not see them at all, so they are hidden a few times in a row
+    for ($t = 0; $t -lt 6; $t++) {
+        Get-Process -Name "winws" -ErrorAction SilentlyContinue | ForEach-Object {
+            if ($_.MainWindowHandle -ne 0) { [Synf.Win]::ShowWindow($_.MainWindowHandle, 0) | Out-Null }
+        }
+        Start-Sleep -Milliseconds 300
     }
-} else {
-    Get-Process -Name "winws" -ErrorAction SilentlyContinue | Stop-Process -Force
 }
 
-$out = [PSCustomObject]@{ done = $true; best = $bestName; results = @($results) }
-$tmp = "$Result.tmp"
-$out | ConvertTo-Json -Depth 5 | Set-Content -Path $tmp -Encoding UTF8
-Move-Item -Path $tmp -Destination $Result -Force
+function Start-Target {
+    param($Root, $Bat, $Exe, $WinArgs)
+    if ($Bat) {
+        Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$Bat`"" -WorkingDirectory $Root -WindowStyle Hidden | Out-Null
+    } elseif ($Exe) {
+        Start-Process -FilePath $Exe -ArgumentList $WinArgs -WorkingDirectory $Root -WindowStyle Hidden | Out-Null
+    }
+}
+
+function Wait-Winws {
+    param([int]$Ms = 7000)
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    while ($sw.ElapsedMilliseconds -lt $Ms) {
+        if (Get-Process -Name "winws" -ErrorAction SilentlyContinue) { return $true }
+        Start-Sleep -Milliseconds 200
+    }
+    return $false
+}
+
+function Test-Http {
+    # curl (schannel) - the same way the stock zapret tester probes: .NET
+    # SslStream answered "not-authenticated" even on a healthy host here
+    param([int]$Timeout = 6)
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    $code = & $Curl -sS -o NUL -m $Timeout --connect-timeout $Timeout --ssl-no-revoke -w "%{http_code}" "https://$Target/" 2>$null
+    $exit = $LASTEXITCODE
+    $ms = [int]$sw.ElapsedMilliseconds
+    $code = ("$code").Trim()
+    if (($exit -eq 0) -and $code -and ($code -ne "000")) { return $ms }
+    return $null
+}
+
+function Test-One {
+    # start one strategy by name and probe it: returns ms or $null
+    param($Root, $Name)
+    Stop-Winws
+    Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$(Join-Path $Root $Name)`"" -WorkingDirectory $Root -WindowStyle Hidden | Out-Null
+    $up = Wait-Winws 7000
+    if ($up) { Hide-Winws }
+    if (-not $up) { return $null }
+    Start-Sleep -Milliseconds 700
+    $ms = Test-Http 6
+    if ($null -eq $ms) { Start-Sleep -Milliseconds 500; $ms = Test-Http 6 }
+    return $ms
+}
+
+try {
+    LG "action=$action token=$token"
+    switch ($action) {
+        "start" {
+            Stop-Winws
+            Start-Target -Root $req.root -Bat $req.bat -Exe $req.exe -WinArgs $req.args
+            $up = Wait-Winws 7000
+            Hide-Winws
+            Finish ([PSCustomObject]@{ ok = [bool]$up; action = "start" })
+        }
+        "stop" {
+            Stop-Winws
+            Finish ([PSCustomObject]@{ ok = $true; action = "stop" })
+        }
+        "scan" {
+            $root = "$($req.root)"
+            $results = New-Object System.Collections.Generic.List[object]
+            $bestName = $null
+            $bestMs = 2147483647
+            foreach ($name in @($req.configs)) {
+                $ms = Test-One $root "$name"
+                $ok = ($null -ne $ms)
+                $results.Add([PSCustomObject]@{ name = "$name"; ok = $ok; ms = $ms })
+                LG ("  {0} ms={1}" -f $name, $ms)
+                if ($ok -and ([int]$ms -lt $bestMs)) { $bestMs = [int]$ms; $bestName = "$name" }
+            }
+            # the winner stays running until the app stops it
+            if ($bestName) {
+                Stop-Winws
+                Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$(Join-Path $root $bestName)`"" -WorkingDirectory $root -WindowStyle Hidden | Out-Null
+                Wait-Winws 7000 | Out-Null
+                Hide-Winws
+            } else {
+                Stop-Winws
+            }
+            Finish ([PSCustomObject]@{ ok = [bool]$bestName; action = "scan"; best = $bestName; results = @($results.ToArray()) })
+        }
+        default {
+            Finish ([PSCustomObject]@{ ok = $false; action = $action; error = "unknown action" })
+        }
+    }
+} catch {
+    LG "FATAL: $($_.Exception.Message) line=$($_.InvocationInfo.ScriptLineNumber)"
+    Finish ([PSCustomObject]@{ ok = $false; action = $action; error = "$($_.Exception.Message)" })
+}
+# Уход жёстко, а не return: стратегия остаётся работать дочерним процессом и
+# держит консольные дескрипторы - без этого PowerShell дожидается их, задача
+# вечно «выполняется», а следующие запуски уходят в очередь (так и было).
+try { [Environment]::Exit(0) } catch { exit 0 }
 '''
 
 
@@ -385,6 +699,23 @@ def write_cache(name: str) -> None:
         pass
 
 
+def _remember_strategy(name: str) -> None:
+    """Записывает подобранную стратегию в настройку dpi_bat.
+
+    Импорт ленивый: settings тянет схему, а схема лениво тянет этот модуль -
+    на уровне модулей это был бы цикл. Ошибка записи не важна: кэш уже
+    обновлён, а настройка - только удобство ручного запуска.
+    """
+    try:
+        import settings as settings_mod
+        data = settings_mod.load_settings()
+        if data.get("dpi_bat") != name:
+            data["dpi_bat"] = name
+            settings_mod.save_settings(data)
+    except Exception:  # noqa: BLE001 - настройка вторична относительно кэша
+        pass
+
+
 def _read_json(path: Path):
     try:
         return json.loads(path.read_text(encoding="utf-8-sig"))
@@ -392,12 +723,22 @@ def _read_json(path: Path):
         return None
 
 
+def _runner_tail(limit: int = 8) -> list[str]:
+    """Последние строки журнала помощника - чтобы ошибка подбора объяснялась."""
+    try:
+        text = (_probe_dir() / "runner.log").read_text(encoding="utf-8",
+                                                        errors="replace")
+    except OSError:
+        return []
+    return [ln for ln in text.splitlines() if ln.strip()][-limit:]
+
+
 def scan(cfg: DpiConfig, log=None, wait: float | None = None) -> dict:
     """Прогоняет все стратегии и оставляет включённой ту, где соединение лучше.
 
-    Одна сессия UAC на весь перебор: помощник по очереди запускает
-    general*.bat, по каждой меряет TLS-хендшейк к YouTube (две пробы),
-    пишет итог в JSON и не гасит победителя. Кэш обновляется.
+    Весь перебор - одна операция с правами: помощник по очереди запускает
+    general*.bat, по каждой меряет ответ YouTube (две пробы), пишет итог в
+    JSON и не гасит победителя. Кэш обновляется.
     {"ok": True, "best": имя, "results": [...]} либо
     {"ok": False, "error": текст, "results": [...]}.
     """
@@ -407,57 +748,37 @@ def scan(cfg: DpiConfig, log=None, wait: float | None = None) -> dict:
         if log:
             log("error", err)
         return {"ok": False, "error": err, "results": []}
-    probe_dir = _probe_dir()
-    helper = probe_dir / "strategy_scan.ps1"
-    result = probe_dir / "scan.json"
-    for stale in list(probe_dir.glob("scan*.json*")):
-        try:
-            stale.unlink()
-        except OSError:
-            pass
-    try:
-        helper.write_text(_HELPER_SOURCE, encoding="utf-8")
-    except OSError as exc:
-        if log:
-            log("error", str(exc))
-        return {"ok": False, "error": str(exc), "results": []}
-    params = (f'-NoProfile -ExecutionPolicy Bypass -File "{helper}" '
-              f'-Root "{cfg.dir}" -Result "{result}"')
-    exe = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
-                       r"System32\WindowsPowerShell\v1.0\powershell.exe")
-    if not os.path.isfile(exe):
-        exe = "powershell.exe"
-    if not _elevated(exe, params):
+    if log:
+        log("info", cfg.t("sheet.dpi.scanning"))
+    # на стратегию уходит до ~15с (старт, две пробы, спрятать окно); запас
+    # даётся с учётом всего списка и старта задачи планировщика
+    data = _run_action(cfg, "scan", {"configs": names},
+                       wait=wait or (60 + 25 * len(names)), log=log)
+    if data is None:
         err = cfg.t("sheet.dpi.no_uac")
         if log:
             log("error", err)
+            for line in _runner_tail():
+                log("warning", f"scan: {line}")
         return {"ok": False, "error": err, "results": []}
-    # на стратегию уходит до ~15с (старт + две пробы по 5с) плюс перезапуск
-    # победителя; запас даётся с учётом всего списка
-    deadline = time.time() + (wait or (30 + 20 * len(names)))
-    while time.time() < deadline:
-        data = _read_json(result)
-        if data and data.get("done"):
-            results = data.get("results") or []
-            best = data.get("best")
-            try:
-                result.unlink()
-            except OSError:
-                pass
-            if best and probe():
-                write_cache(best)
-                if log:
-                    log("info", cfg.t("sheet.dpi.log.scanned", name=best))
-                return {"ok": True, "best": str(best), "results": results}
-            err = cfg.t("sheet.dpi.scan_fail")
-            if log:
-                log("error", err)
-            return {"ok": False, "error": err, "results": results}
-        time.sleep(0.5)
+    results = data.get("results") or []
+    best = data.get("best")
+    if data.get("ok") and best and probe():
+        write_cache(best)
+        # найденная стратегия становится настроенной: кнопка «Включить обход»
+        # и режим без кэша должны работать так же, как только что подобранный
+        _remember_strategy(best)
+        if log:
+            log("info", cfg.t("sheet.dpi.log.scanned", name=best))
+        return {"ok": True, "best": str(best), "results": results}
     err = cfg.t("sheet.dpi.scan_fail")
+    if data.get("error"):
+        err = f"{err} ({data['error']})"
     if log:
         log("error", err)
-    return {"ok": False, "error": err, "results": []}
+        for line in _runner_tail():
+            log("warning", f"scan: {line}")
+    return {"ok": False, "error": err, "results": results}
 
 
 def auto(cfg: DpiConfig, log=None) -> dict:

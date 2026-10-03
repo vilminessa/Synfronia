@@ -551,6 +551,21 @@ def main() -> int:
             pass
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
+    # невидимость работы: помощник глушит проверку обновлений zapret (иначе
+    # каждый старт стратегии открывает страницу релизов в браузере) и прячет
+    # окна стратегий; имя задачи - простое, оно уходит в schtasks
+    ok("NO_UPDATE_CHECK" in dpi._RUNNER_SOURCE,
+       "помощник глушит проверку обновлений zapret (нет вкладок браузера)")
+    ok("ShowWindow" in dpi._RUNNER_SOURCE, "помощник прячет окна стратегий")
+    ok("WindowStyle Hidden" in dpi._RUNNER_SOURCE,
+       "помощник и его команды стартуют без окон")
+    ok(dpi.TASK_NAME.isascii() and " " not in dpi.TASK_NAME,
+       "имя задачи планировщика простое (ASCII, без пробелов)", dpi.TASK_NAME)
+    # негатив: проверка наличия задачи работает без прав и не путает имена
+    ok(dpi._task_exists("SynfroniaNoSuchTask") is False,
+       "несуществующая задача не выдаётся за существующую")
+    ok("_run_action" in (ROOT / "dpi.py").read_text(encoding="utf-8"),
+       "все операции с правами идут через единый _run_action")
     # кнопки и общее пояснение обхода обязаны жить в actions settings.js
     for ident in ('"dpi-probe":', '"dpi-scan":', '"dpi-start":', '"dpi-stop":',
                   'getElementById("dpi-note")'):
