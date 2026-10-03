@@ -446,6 +446,8 @@ The full list with license texts is in
 | [PyInstaller](https://github.com/pyinstaller/pyinstaller) | **build-time only**, GPL-2.0+ with the special build exception - it is not redistributed |
 | [ffmpeg](https://ffmpeg.org/) | **external, NOT bundled** - downloaded by the user or the app at first run; GPL applies to ffmpeg itself, not to this project's binaries |
 | [JetBrains Mono](https://www.jetbrains.com/lp/mono/) | bundled font, OFL-1.1 (attribution shipped next to it) |
+| [zapret-discord-youtube](https://github.com/Flowseal/zapret-discord-youtube) | bundled bypass package, MIT (seeds into `%LOCALAPPDATA%\Synfronia\Bypass`) |
+| WinDivert, cygwin1.dll (inside that package) | part of the bundled package, LGPL-3.0+ **or** GPL-2.0 / LGPL-2.1+ - see notices |
 | CPython | bundled runtime, PSF License Agreement |
 
 UI palette inspirations: [color-hex.com](https://color-hex.com/) (see

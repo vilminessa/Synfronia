@@ -44,6 +44,8 @@ from paths import crash_evidence, logs_dir, minidump_fault, newest_crash_dump, \
     webview_child_running
 
 seed_bundled_fonts()   # вшитые шрифты в папку шрифтов: первый запуск работает без сети
+dpi.registry_autofill(on_log=file_log)   # свои установки (службы, типовые папки)
+dpi.seed_bundled_bypass(on_log=file_log)   # вшитый обход в Bypass: тоже без сети
 load_languages()
 load_fonts()   # раньше load_themes: темы проверяют font/font_mono по списку семейств
 load_themes()
@@ -295,12 +297,18 @@ class Api:
             self._ffmpeg["ok"] = found
         if self._transcoders is None:
             self._transcoders = available_transcoders()
+        registry = dpi.registry_load()
         return {
             "settings": dict(self.settings),
             "ffmpeg": found,
             "default_dir": self._dest or str(default_download_dir()),
             "transcoders": list(self._transcoders),
             "fonts": fonts_embed(),
+            # установки обхода: карточка рисует селект из этого списка
+            "bypasses": [{"id": i.get("id"), "path": i.get("path"),
+                          "layout": i.get("layout"),
+                          "source": i.get("source")} for i in registry["items"]],
+            "bypass_active": registry["active"],
             # карточка открыта? после пересборки страницы её надо вернуть
             "settings_open": self._settings_open,
         }
@@ -781,6 +789,71 @@ class Api:
         """Остановка обхода по кнопке из карточки настроек."""
         cfg = dpi.DpiConfig(self.settings, self._lang)
         return dpi.stop(cfg, log=self._log)
+
+    # -- реестр установок обхода (несколько версий и папок) --------------------
+    @staticmethod
+    def _bypass_issues(report: dict, lang: str) -> list:
+        """Коды отказов (folder/winws/strategies/lists) -> переведённые строки."""
+        return [tr(lang, f"sheet.dpi.issue.{code}") for code in report.get("issues", [])]
+
+    def bypass_list(self) -> dict:
+        """Реестр установок с актуальной проверкой каждой папки.
+
+        Проверка на каждый запрос, а не один раз при добавлении: папку могли
+        удалить или переименовать, и карточка обязана это показать.
+        """
+        data = dpi.registry_load()
+        items = []
+        for item in data["items"]:
+            report = dpi.validate_install(item["path"])
+            entry = dict(item)
+            entry["ok"] = report["ok"]
+            entry["layout"] = report["layout"]
+            entry["strategies"] = report["strategies"]
+            entry["issues"] = self._bypass_issues(report, self._lang)
+            items.append(entry)
+        return {"active": data["active"], "items": items}
+
+    def bypass_validate(self, path: str = "") -> dict:
+        """«Есть ли обходники в папке» - проверка для поля выбора."""
+        target = (path or "").strip()
+        report = dpi.validate_install(target)
+        return {"path": target, "ok": report["ok"], "layout": report["layout"],
+                "winws": report["winws"], "strategies": report["strategies"],
+                "issues": self._bypass_issues(report, self._lang)}
+
+    def bypass_detect(self) -> dict:
+        """Установки вне реестра: службы от service.bat и типовые папки."""
+        found = []
+        for report in dpi.registry_detect():
+            found.append({"path": report["path"], "layout": report["layout"],
+                          "strategies": report["strategies"],
+                          "issues": self._bypass_issues(report, self._lang)})
+        return {"found": found}
+
+    def bypass_add(self, path: str = "") -> dict:
+        """Добавляет папку в реестр и делает её активной (только валидную)."""
+        target = (path or "").strip()
+        res = dpi.registry_add(target)
+        if not res.get("ok"):
+            return {"ok": False, "path": target,
+                    "issues": self._bypass_issues(res.get("report", {}), self._lang)}
+        self._bump_ui()
+        return {"ok": True, "item": res["item"], "strategies": res["report"]["strategies"]}
+
+    def bypass_select(self, item_id: str = "") -> dict:
+        """Делает установку активной: её стратегии и подбор станут главными."""
+        res = dpi.registry_select(str(item_id or ""))
+        if res.get("ok"):
+            self._bump_ui()
+        return res
+
+    def bypass_remove(self, item_id: str = "") -> dict:
+        """Убирает установку из реестра (папку на диске не трогает)."""
+        res = dpi.registry_remove(str(item_id or ""))
+        if res.get("ok"):
+            self._bump_ui()
+        return res
 
     def test_ftp(self) -> dict:
         """Проверка настроек FTP: подключается и сразу отключается."""

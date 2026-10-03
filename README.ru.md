@@ -456,6 +456,8 @@ node  tools/ui_themes_probe.js          # вёрстка карточки по �
 | PyInstaller (только сборка) | GPL-2.0+ с исключением | https://github.com/pyinstaller/pyinstaller |
 | ffmpeg (внешний, не входит в exe) | GPL | https://ffmpeg.org/ |
 | JetBrains Mono (вшит, `assets/fonts`) | OFL-1.1 | https://github.com/google/fonts |
+| zapret-discord-youtube (вшит, `assets/bypass`) | MIT | https://github.com/Flowseal/zapret-discord-youtube |
+| WinDivert, cygwin1.dll (внутри пакета обхода) | LGPL-3.0+ или GPL-2.0 / LGPL-2.1+ | https://github.com/basil00/WinDivert |
 | Python | PSF | https://www.python.org/ |
 | certifi, urllib3, idna, cffi, cryptography | MPL-2.0 / MIT / BSD-3 / MIT-0 / Apache-2.0 | см. notices |
 

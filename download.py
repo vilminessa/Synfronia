@@ -66,6 +66,8 @@ def main() -> int:
     def _log(level: str, msg: str) -> None:
         print(f"[{level}] {msg}")
 
+    dpi.registry_autofill(on_log=_log)   # свои установки (службы, типовые папки)
+    dpi.seed_bundled_bypass(on_log=_log)   # вшитый обход доступен и без графики
     settings = load_settings()
     ftp = None
     if not args.no_ftp:

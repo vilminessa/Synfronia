@@ -19,17 +19,21 @@ dpi_mode, dpi_bat, dpi_args, dpi_timeout.
 """
 
 import ctypes
+import hashlib
 import json
 import os
 import re
+import shutil
 import socket
 import ssl
 import subprocess
 import time
+import zipfile
 from ctypes import wintypes
 from pathlib import Path
 
 from i18n import tr
+from paths import base_dir
 from settings_schema import value as _value
 
 PROBE_HOST = "www.youtube.com"
@@ -672,13 +676,10 @@ def _natkey(name: str) -> str:
 
 
 def strategies(cfg: DpiConfig) -> list[str]:
-    """Имена файлов стратегий (general*.bat) в папке zapret, по порядку."""
+    """Файлы стратегий активной установки (относительные пути, оба layout-а)."""
     if not cfg.dir:
         return []
-    root = Path(cfg.dir)
-    if not root.is_dir():
-        return []
-    return sorted((p.name for p in root.glob("general*.bat")), key=_natkey)
+    return strategies_in(cfg.dir)
 
 
 def read_cache() -> str | None:
@@ -818,6 +819,352 @@ def auto(cfg: DpiConfig, log=None) -> dict:
         return {"ok": True, "started": True, "strategy": res.get("best"),
                 "results": res.get("results")}
     return {"ok": False, "error": res.get("error") or cfg.t("sheet.dpi.scan_fail")}
+
+
+# -- реестр установок: несколько версий и папок обхода -----------------------
+# Вшитый пакет раскладывается в %LOCALAPPDATA%\Synfronia\Bypass, свои папки
+# добавляются вручную. Реестр отвечает «какой обход включать», валидация -
+# «есть ли там вообще обходники»: winws.exe, файлы стратегий и (для layout-а
+# Flowseal) списки. Всё считается относительно папки установки, поэтому
+# бандл с версией в имени и чужая распаковка zapret-win-bundle одинаково
+# опознаются.
+
+LAYOUT_FLOWSEAL = "flowseal"   # general*.bat + bin\winws.exe + lists\
+LAYOUT_WINWS = "winws"         # preset*.cmd + winws.exe (zapret-win-bundle)
+_MAX_SCAN_DIRS = 60
+
+
+def bypass_root() -> Path:
+    r"""%LOCALAPPDATA%\Synfronia\Bypass - куда раскладывается вшитый обход."""
+    root = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "Synfronia" / "Bypass"
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+    return root
+
+
+def _bundled_dir() -> Path:
+    """Папка со вшитыми пакетами: assets/bypass (рядом с исходниками или в _MEIPASS)."""
+    here = Path(__file__).resolve().parent
+    for root in (here, base_dir()):
+        path = root / "assets" / "bypass"
+        if path.is_dir():
+            return path
+    return here / "assets" / "bypass"
+
+
+def registry_path() -> Path:
+    r"""Реестр установок лежит рядом с кэшем: %LOCALAPPDATA%\Synfronia\bypasses.json."""
+    return _probe_dir().parent / "bypasses.json"
+
+
+def _install_dirs(path: Path) -> list[Path]:
+    """Сама папка и её подкаталоги до глубины 3: бандл кладёт всё в свою папку."""
+    out, frontier = [path], [path]
+    for _ in range(3):
+        nxt = []
+        for d in frontier:
+            try:
+                kids = [p for p in d.iterdir() if p.is_dir()][:25]
+            except OSError:
+                continue
+            for kid in kids:
+                if kid not in out:
+                    out.append(kid)
+                    nxt.append(kid)
+            if len(out) >= _MAX_SCAN_DIRS:
+                break
+        if len(out) >= _MAX_SCAN_DIRS or not nxt:
+            break
+        frontier = nxt
+    return out[:_MAX_SCAN_DIRS]
+
+
+def _scan_install(path) -> dict:
+    """Разбор установки одним проходом: winws, стратегии, списки, layout."""
+    rep = {"path": str(path), "ok": False, "layout": None, "winws": "",
+           "strategies": [], "lists": False, "issues": []}
+    root = Path(path)
+    if not root.is_dir():
+        rep["issues"].append("folder")
+        return rep
+    dirs = _install_dirs(root)
+    winws_dir = next((d for d in dirs if (d / WINWS_IMAGE).is_file()), None)
+    if winws_dir is None:
+        rep["issues"].append("winws")
+        return rep
+    rep["winws"] = str(winws_dir / WINWS_IMAGE)
+
+    def collect(pattern: str) -> list[str]:
+        found: list[str] = []
+        for d in dirs:
+            for f in sorted(d.glob(pattern), key=lambda p: _natkey(p.name)):
+                if f.is_file():
+                    found.append(f.relative_to(root).as_posix())
+        return found
+
+    bat = collect("general*.bat")
+    preset = collect("preset*.cmd")
+    if bat:
+        rep["layout"], rep["strategies"] = LAYOUT_FLOWSEAL, bat
+        rep["lists"] = any((d / "lists").is_dir() for d in dirs)
+        if not rep["lists"]:
+            rep["issues"].append("lists")
+    elif preset:
+        rep["layout"], rep["strategies"] = LAYOUT_WINWS, preset
+    else:
+        rep["issues"].append("strategies")
+    rep["ok"] = not rep["issues"]
+    return rep
+
+
+def validate_install(path) -> dict:
+    """«Есть ли обходники в папке»: issues - коды, перевод делает фронтенд."""
+    return _scan_install(path)
+
+
+def strategies_in(path) -> list[str]:
+    """Относительные пути файлов стратегий установки (натуральный порядок)."""
+    return _scan_install(path)["strategies"]
+
+
+def _item_id(path: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", Path(path).name.lower()).strip("-") or "bypass"
+    digest = hashlib.sha1(path.encode("utf-8", "replace")).hexdigest()[:8]
+    return f"{slug}-{digest}"
+
+
+def registry_load() -> dict:
+    """Реестр установок: {"active": id|None, "items": [...]}. Битый файл - пусто."""
+    try:
+        data = json.loads(registry_path().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        data = None
+    if not isinstance(data, dict):
+        data = {}
+    items = [i for i in (data.get("items") or [])
+             if isinstance(i, dict) and i.get("path")]
+    ids = {i.get("id") for i in items}
+    active = data.get("active")
+    if active not in ids:
+        active = items[0].get("id") if items else None
+    return {"active": active, "items": items}
+
+
+def registry_save(data: dict) -> None:
+    try:
+        registry_path().write_text(json.dumps(data, ensure_ascii=False, indent=2),
+                                   encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _sync_active_setting(item) -> None:
+    """Зеркало активной установки в dpi_dir: панель и CLI читают его же.
+
+    Импорт ленивый: settings тянет схему, схема лениво тянет этот модуль.
+    """
+    path = (item or {}).get("path", "")
+    try:
+        import settings as settings_mod
+        data = settings_mod.load_settings()
+        if data.get("dpi_dir") != path:
+            data["dpi_dir"] = path
+            settings_mod.save_settings(data)
+    except Exception:  # noqa: BLE001 - зеркало вторично относительно реестра
+        pass
+
+
+def registry_add(path, source: str = "local", repo: str = "", tag: str = "",
+                 select: bool = True) -> dict:
+    """Регистрирует установку после валидации. {"ok": True, "item", "report"}
+    либо {"ok": False, "issues": [...], "report"} - битую папку не берём."""
+    rep = _scan_install(path)
+    if not rep["ok"]:
+        return {"ok": False, "issues": rep["issues"], "report": rep}
+    resolved = str(Path(path).resolve())
+    data = registry_load()
+    item = next((i for i in data["items"]
+                 if str(Path(str(i["path"])).resolve()) == resolved), None)
+    if item is None:
+        item = {"id": _item_id(resolved), "path": resolved, "source": source,
+                "repo": repo, "tag": tag, "layout": rep["layout"],
+                "added": int(time.time())}
+        data["items"].append(item)
+    item["last_seen"] = int(time.time())
+    if select or data["active"] not in {i.get("id") for i in data["items"]}:
+        data["active"] = item["id"]
+    registry_save(data)
+    if data["active"] == item["id"]:
+        _sync_active_setting(item)
+    return {"ok": True, "item": item, "report": rep}
+
+
+def registry_select(item_id: str) -> dict:
+    data = registry_load()
+    item = next((i for i in data["items"] if i.get("id") == item_id), None)
+    if item is None:
+        return {"ok": False, "error": "not_found"}
+    data["active"] = item_id
+    registry_save(data)
+    _sync_active_setting(item)
+    return {"ok": True, "item": item}
+
+
+def registry_remove(item_id: str) -> dict:
+    """Убирает установку из реестра (папку на диске не трогает)."""
+    data = registry_load()
+    before = len(data["items"])
+    data["items"] = [i for i in data["items"] if i.get("id") != item_id]
+    if len(data["items"]) == before:
+        return {"ok": False, "error": "not_found"}
+    if data["active"] == item_id:
+        data["active"] = data["items"][0].get("id") if data["items"] else None
+    registry_save(data)
+    active = next((i for i in data["items"] if i.get("id") == data["active"]), None)
+    _sync_active_setting(active)
+    return {"ok": True, "registry": data}
+
+
+def _service_dirs() -> list[str]:
+    """Папки, на которые указывают службы с winws.exe (service.bat и т.п.).
+
+    Путь службы читается из реестра - без прав администратора; имя службы
+    не захардкожено, потому что service*.cmd от разных авторов называют её
+    по-разному.
+    """
+    try:
+        import winreg
+    except ImportError:
+        return []
+    out: set[str] = set()
+    try:
+        key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                             r"SYSTEM\CurrentControlSet\Services")
+    except OSError:
+        return []
+    try:
+        count = winreg.QueryInfoKey(key)[0]
+        for index in range(count):
+            try:
+                sub = winreg.OpenKey(key, winreg.EnumKey(key, index))
+                image = str(winreg.QueryValueEx(sub, "ImagePath")[0])
+                winreg.CloseKey(sub)
+            except OSError:
+                continue
+            found = (re.search(r'"([^"]*winws\.exe)"', image, re.I)
+                     or re.search(r"(\S*winws\.exe)", image, re.I))
+            if found:
+                out.add(str(Path(found.group(1)).parent))
+    finally:
+        winreg.CloseKey(key)
+    return sorted(out)
+
+
+def registry_detect() -> list[dict]:
+    """Установки, которых ещё нет в реестре: службы и типовые папки."""
+    known = {str(Path(str(i["path"])).resolve()) for i in registry_load()["items"]}
+    candidates: set[str] = set(_service_dirs())
+    for base in [bypass_root(), Path(r"C:\\"), Path(r"D:\\"), Path(r"E:\\")]:
+        try:
+            for child in list(base.glob("zapret*"))[:30]:
+                if child.is_dir():
+                    candidates.add(str(child))
+        except OSError:
+            continue
+    found = []
+    for cand in sorted(candidates):
+        if cand in known:
+            continue
+        rep = _scan_install(Path(cand))
+        if rep["strategies"]:
+            rep["issues"] = [i for i in rep["issues"] if i != "lists"] or rep["issues"]
+            found.append(rep)
+    return found
+
+
+def registry_autofill(on_log=None) -> dict:
+    """Регистрирует найденные установки, не делая их активными.
+
+    Вызывается при старте до раскладки вшитого пакета: своя установка (её
+    служба крутится и так) должна значиться в реестре первой, а вшитый
+    пакет - остаться базовым запасным, который подхватится, только когда
+    больше ничего нет. Повторные вызовы идемпотентны.
+    """
+    log = on_log or (lambda level, msg: None)
+    before = {i.get("id") for i in registry_load()["items"]}
+    added = []
+    for report in registry_detect():
+        res = registry_add(report["path"], source="local", select=False)
+        if res.get("ok") and res["item"].get("id") not in before:
+            added.append(res["item"]["path"])
+            log("info", f"bypass: найдена установка {res['item']['path']}")
+    return {"added": added}
+
+
+def _extract_zip(zf, dest: Path) -> None:
+    """Распаковка с защитой от zip-slip: путь не должен уйти за dest."""
+    base = str(dest.resolve())
+    for info in zf.infolist():
+        if not info.filename:
+            continue
+        target = str((dest / info.filename).resolve())
+        if target != base and not target.startswith(base + os.sep):
+            raise ValueError(f"небезопасный путь в архиве: {info.filename}")
+    zf.extractall(dest)
+
+
+def seed_bundled_bypass(on_log=None) -> dict:
+    r"""Раскладывает вшитые пакеты обхода в %LOCALAPPDATA%\Synfronia\Bypass.
+
+    Работает без сети - как шрифты, при первом запуске. Уже существующая
+    папка не пересоздаётся, но обязательно попадает в реестр (иначе после
+    чистки реестра вшитый обход «исчезнет» из списка). Рядом с архивом
+    лежит LICENSE - условие MIT, сам zip лицензии не содержит.
+
+    Возвращает {"added": [...], "skipped": [...], "failed": [...]}.
+    """
+    report = {"added": [], "skipped": [], "failed": []}
+    log = on_log or (lambda level, msg: None)
+    src = _bundled_dir()
+    archives = sorted(src.glob("*.zip")) if src.is_dir() else []
+    if not archives:
+        log("info", "bypass: вшитых пакетов нет (assets/bypass), пропуск")
+        return report
+    root = bypass_root()
+    select = registry_load()["active"] is None
+    for archive in archives:
+        try:
+            with zipfile.ZipFile(archive) as zf:
+                tops = {i.filename.split("/")[0].split("\\")[0]
+                        for i in zf.infolist() if i.filename}
+                top = next(iter(tops), "")
+                install = (root / top) if top else root
+                if install.is_dir() and any(install.rglob(WINWS_IMAGE)):
+                    report["skipped"].append(install.name)
+                    registry_add(install, source="bundled", select=select)
+                    select = False
+                    continue
+                _extract_zip(zf, root)
+            for license_file in src.glob("LICENSE*"):
+                try:
+                    shutil.copyfile(license_file, install / license_file.name)
+                except OSError:
+                    pass
+            res = registry_add(install, source="bundled", select=select)
+            select = False
+            if res.get("ok"):
+                report["added"].append(install.name)
+                log("info", f"bypass: разложен вшитый пакет {install.name}")
+            else:
+                report["failed"].append(archive.name)
+                log("warning", f"bypass: пакет {archive.name} не прошёл проверку: "
+                               f"{','.join(res.get('issues', []))}")
+        except Exception as exc:  # noqa: BLE001 - битый архив не должен ронять старт
+            report["failed"].append(archive.name)
+            log("error", f"bypass: {archive.name} не распаковался ({exc})")
+    return report
 
 
 # Панель настроек модуля: порядок строк = порядок полей, у флажков и полей

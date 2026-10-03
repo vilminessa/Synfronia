@@ -25,6 +25,10 @@ requirements of each license.
 | CPython | 3.14.2 (bundled) | PSF License Agreement | https://www.python.org/ |
 | ffmpeg | any recent build (external, NOT bundled) | GPL-2.0-or-later | https://ffmpeg.org/ |
 | [JetBrains Mono](https://www.jetbrains.com/lp/mono/) | variable (bundled, `assets/fonts`) | OFL-1.1 | https://github.com/google/fonts/tree/main/ofl/jetbrainsmono |
+| [zapret-discord-youtube](https://github.com/Flowseal/zapret-discord-youtube) | 1.10.3 (bundled, `assets/bypass`) | MIT | https://github.com/Flowseal/zapret-discord-youtube/releases/tag/1.10.3 |
+| winws.exe (inside the bundled package above) | as shipped | distributed under the bundle's MIT notice (see note) | https://github.com/bol-van/zapret |
+| WinDivert (`WinDivert.dll`, `WinDivert64.sys`, inside the bundle) | 2.x (as shipped) | LGPL-3.0-or-later OR GPL-2.0 | https://github.com/basil00/WinDivert |
+| cygwin1.dll (inside the bundle) | as shipped | LGPL-2.1-or-later | https://cygwin.com/ |
 
 ## yt-dlp — Unlicense
 
@@ -344,6 +348,65 @@ the git history and in the corresponding tags).
 
 CJK glyphs (Japanese, Chinese, Korean) are not covered by this file; the
 app falls back to the system font for those scripts.
+
+## Bundled bypass package — MIT (with WinDivert / cygwin notices)
+
+A ready-to-run bypass bundle is bundled in `assets/bypass`
+(`zapret-discord-youtube-1.10.3.zip`, unmodified upstream release) and is
+laid out into `%LOCALAPPDATA%\Synfronia\Bypass\zapret-discord-youtube-1.10.3`
+on first launch, so a clean install can enable a basic bypass **without
+network access** — exactly like the bundled test fonts. The license text is
+copied next to the extracted files as `LICENSE-flowseal.txt`.
+
+Source: https://github.com/Flowseal/zapret-discord-youtube/releases/tag/1.10.3
+
+The package is distributed by its authors under the MIT License
+(`LICENSE-flowseal.txt`, reproduced in `assets/bypass/`):
+
+```
+MIT License
+
+Copyright (c) 2016-2026 bol-van
+Copyright (c) 2024-2026 Flowseal
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+Third-party binaries inside that package are redistributed **unmodified, as
+part of the package**, under their own terms:
+
+- **WinDivert** (`bin/WinDivert.dll`, `bin/WinDivert64.sys`) is dual-licensed:
+  LGPL-3.0-or-later **or** GPL-2.0, at your option. It is aggregated with (not
+  linked into) this program; no modifications are made to it.
+  Full texts: https://github.com/basil00/WinDivert/blob/master/LICENSE
+- **cygwin1.dll** (`bin/cygwin1.dll`) is part of the Cygwin project and is
+  distributed under the GNU LGPL v2.1 (with the Cygwin linking exception).
+  Full text: https://cygwin.com/licensing.html
+- **winws.exe** is built from [bol-van/zapret](https://github.com/bol-van/zapret).
+  The upstream zapret repository currently carries **no license file**, so the
+  terms on which this executable is redistributed here are those of the
+  bundle that ships it (the MIT notice above, which names bol-van as a
+  copyright holder). Upstream: https://github.com/bol-van/zapret
+
+This project's own PolyForm Noncommercial License does not apply to these
+components; each keeps its own license, and no claim of ownership is made
+over them.
 
 ## CSS / visual references (rain & liquid-glass effects)
 

@@ -20,7 +20,10 @@ r"""Проверка схемы настроек без запуска прил�
      работы (проверка обновлений zapret, окна, имя задачи);
  12. выгрузка на FTP: возобновление TLS-сессии на канале данных, рендер
      пути на сервере и ensure_dir на фейковом сервере (абсолютные пути и
-     возврат CWD).
+     возврат CWD);
+ 13. реестр установок обхода: вшитый пакет раскладывается без сети,
+     битые папки не регистрируются, оба layout-а опознаются, архив с
+     zip-slip не распаковывается.
 
 Запуск:  python tools/check_settings.py
 """
@@ -33,6 +36,7 @@ import re
 import shutil
 import sys
 import tempfile
+import zipfile
 from pathlib import Path
 
 import utf8_console  # локальный помощник tools/, доступен по sys.path[0] скрипта
@@ -532,6 +536,9 @@ def main() -> int:
         empty = dpi.DpiConfig({"dpi_dir": str(tmpdir)})
         ok(dpi.strategies(empty) == [], "без файлов стратегий - пустой список",
            str(dpi.strategies(empty)))
+        # папка обязана быть установкой (есть winws.exe), иначе разбор
+        # установки честно откажет - см. раздел 13
+        (tmpdir / "winws.exe").write_bytes(b"MZ")
         for name in ("general (ALT10).bat", "general (ALT2).bat", "general.bat"):
             (tmpdir / name).write_text("", encoding="ascii")
         ok(dpi.strategies(empty) == ["general (ALT2).bat", "general (ALT10).bat",
@@ -641,6 +648,119 @@ def main() -> int:
     denied = _FakeFtp(existing={"/media"}, denied={"/media/x"})
     ok(ftp_mod.ensure_dir(denied, "media/x") is False,
        "отказ сервера на втором сегменте -> False, без исключения")
+
+    # 13. реестр установок обхода и вшитый пакет (работа без сети)
+    section("13. реестр установок и вшитый обход")
+    bundled = dpi._bundled_dir()
+    archives = sorted(bundled.glob("*.zip")) if bundled.is_dir() else []
+    ok(bool(archives), "в assets/bypass лежит вшитый пакет", str(bundled))
+    license_file = bundled / "LICENSE-flowseal.txt"
+    ok(license_file.is_file(),
+       "рядом лежит MIT-лицензия (условие распространения пакета)",
+       str(license_file))
+
+    iso = Path(tempfile.mkdtemp(prefix="synf-bypass-"))
+    old_local = os.environ.get("LOCALAPPDATA")
+    os.environ["LOCALAPPDATA"] = str(iso)
+    try:
+        rep = dpi.seed_bundled_bypass()
+        ok(not rep["failed"] and bool(rep["added"]),
+           "вшитый пакет разложен в Synfronia\\Bypass", str(rep))
+        reg = dpi.registry_load()
+        ok(bool(reg["items"]) and reg["active"] in {i.get("id") for i in reg["items"]},
+           "после распаковки установка зарегистрирована и активна", str(reg["active"]))
+        installed = Path(reg["items"][0]["path"])
+        ok(str(installed).startswith(str(iso)),
+           "попали в изолированную Bypass, а не в рабочую", str(installed))
+        scan = dpi.validate_install(installed)
+        ok(scan["ok"] and scan["layout"] == dpi.LAYOUT_FLOWSEAL,
+           "распакованная установка валидна (layout flowseal)", str(scan["issues"]))
+        ok(len(scan["strategies"]) >= 20,
+           f"найдено стратегий: {len(scan['strategies'])}", str(scan["strategies"][:3]))
+        ok((installed / "LICENSE-flowseal.txt").is_file(),
+           "лицензия скопирована внутрь установки")
+        again = dpi.seed_bundled_bypass()
+        ok(not again["added"], "повторный запуск ничего не дублирует", str(again))
+        # автозаполнение: находит свои установки, но не отбирает активную
+        fake_local = dpi.bypass_root() / "zapret-local"
+        (fake_local / "bin").mkdir(parents=True, exist_ok=True)
+        (fake_local / "bin" / "winws.exe").write_bytes(b"MZ")
+        (fake_local / "general.bat").write_text("@echo off", encoding="ascii")
+        auto = dpi.registry_autofill()
+        ok(len(auto["added"]) >= 1, "автозаполнение находит чужую установку", str(auto))
+        ok(dpi.registry_load()["active"] == reg["active"],
+           "автозаполнение не отбирает активную установку", str(dpi.registry_load()["active"]))
+        ok(dpi.registry_autofill()["added"] == [],
+           "повторное автозаполнение идемпотентно")
+        ok(settings.load_settings().get("dpi_dir") == str(installed),
+           "dpi_dir зеркалит активную установку",
+           str(settings.load_settings().get("dpi_dir")))
+
+        # негативы: битую папку в реестр не берём
+        empty_dir = iso / "not-a-bypass"
+        empty_dir.mkdir()
+        bad = dpi.registry_add(str(empty_dir))
+        ok(bad.get("ok") is False and "winws" in bad.get("issues", []),
+           "папка без winws.exe отклоняется с кодом issues", str(bad.get("issues")))
+        ok(dpi.validate_install(str(iso / "no-such-dir"))["issues"] == ["folder"],
+           "несуществующая папка -> код folder")
+        ok(str(empty_dir) not in [i["path"] for i in dpi.registry_load()["items"]],
+           "отклонённая папка не попала в реестр")
+
+        # layout-б от другого автора: winws и preset-стратегии во вложенной папке
+        bundle = iso / "zapret-win-bundle-master"
+        (bundle / "zapret-winws").mkdir(parents=True)
+        (bundle / "zapret-winws" / "winws.exe").write_bytes(b"MZ")
+        (bundle / "zapret-winws" / "preset1.cmd").write_text("@echo off", encoding="ascii")
+        (bundle / "zapret-winws" / "preset2.cmd").write_text("@echo off", encoding="ascii")
+        b = dpi.validate_install(str(bundle))
+        ok(b["ok"] and b["layout"] == dpi.LAYOUT_WINWS,
+           "zapret-win-bundle опознан как layout winws", str(b))
+        ok(b["strategies"] == ["zapret-winws/preset1.cmd", "zapret-winws/preset2.cmd"],
+           "preset-стратегии идут относительными путями", str(b["strategies"]))
+        ok(b["issues"] == [], "для layout winws папка lists не обязательна", str(b["issues"]))
+
+        # zip-slip: архив, который лезет наружу, распаковывать нельзя
+        evil = iso / "evil.zip"
+        with zipfile.ZipFile(evil, "w") as zf:
+            zf.writestr("../evil.txt", "x")
+            zf.writestr("ok/file.txt", "y")
+        try:
+            with zipfile.ZipFile(evil) as zf:
+                dpi._extract_zip(zf, iso / "out")
+            ok(False, "zip-slip отклонён")
+        except ValueError:
+            ok(True, "zip-slip отклонён (путь за пределы назначения)")
+
+        # реестр: снятие активной установки переносит выбор, чужой id - отказ
+        active = dpi.registry_load()["active"]
+        ok(dpi.registry_remove(active).get("ok") is True, "активная установка снимается")
+        after = dpi.registry_load()
+        ok(after["active"] is None or after["active"] in {i.get("id") for i in after["items"]},
+           "после снятия active всегда указывает на существующее", str(after["active"]))
+        ok(dpi.registry_remove("no-such-id").get("ok") is False,
+           "чужой id -> отказ, а не тихий успех")
+        ok(dpi.registry_select("no-such-id").get("ok") is False,
+           "выбор несуществующей установки -> отказ")
+    finally:
+        if old_local is not None:
+            os.environ["LOCALAPPDATA"] = old_local
+        shutil.rmtree(iso, ignore_errors=True)
+
+    # ключи отказов переведены и используются из gui
+    for code in ("folder", "winws", "strategies", "lists"):
+        key = f"sheet.dpi.issue.{code}"
+        ok(all(key in i18n.I18N.get(lang, {}) for lang in i18n.LANGUAGES),
+           f"{key} есть во всех языках")
+    gui_src = (ROOT / "gui.py").read_text(encoding="utf-8")
+    ok("sheet.dpi.issue." in gui_src, "gui переводит коды отказов")
+    for name in ("bypass_list", "bypass_validate", "bypass_detect", "bypass_add",
+                 "bypass_select", "bypass_remove"):
+        ok(f"def {name}(" in gui_src, f"Api.{name} существует")
+    spec_src = (ROOT / "Synfronia.spec").read_text(encoding="utf-8")
+    ok('"assets/bypass"' in spec_src, "пакет попадает в сборку (spec datas)")
+    ok("registry_autofill" in gui_src, "старт ищет свои установки")
+    ok("seed_bundled_bypass" in gui_src, "старт раскладывает вшитый пакет")
 
     print(f"\nитог: {_checks - len(_fails)}/{_checks} ok")
     if _fails:

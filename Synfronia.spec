@@ -59,6 +59,16 @@ if _font_dir.is_dir():
 else:
     print(f"WARNING: {[_font_dir]} not found - test fonts will not be bundled")
 
+# Вшитый пакет обхода (Flowseal zapret-discord-youtube, MIT; см.
+# assets/bypass/LICENSE-flowseal.txt и THIRD_PARTY_NOTICES.md).
+# При первом запуске dpi.seed_bundled_bypass() раскладывает его в
+# %LOCALAPPDATA%\Synfronia\Bypass, поэтому базовый обход работает без сети.
+_bypass_dir = Path(SPECPATH) / "assets" / "bypass"
+if _bypass_dir.is_dir():
+    datas += [(str(p), "assets/bypass") for p in sorted(_bypass_dir.iterdir()) if p.is_file()]
+else:
+    print(f"WARNING: {[_bypass_dir]} not found - bundled bypass will not be bundled")
+
 
 a = Analysis(
     ['gui.py'],
