@@ -1433,8 +1433,22 @@ SETTINGS = {
          "options": [["restore", "sheet.dpi.after.restore"],
                      ["keep", "sheet.dpi.after.keep"],
                      ["off", "sheet.dpi.after.off"]]},
+        {"key": "install", "type": "choice", "label": "sheet.dpi.install",
+         "default": "", "dom": "dpi-install", "transient": True,
+         # список приходит из get_initial().bypasses (реестр), поэтому
+         # options здесь нет - их докрашивает settings.js, как для языков
+         "options_source": "bypasses", "value_source": "bypass_active"},
+        {"type": "note", "transient": True, "dom": "dpi-install-note"},
+        {"type": "actions", "transient": True, "buttons": [
+            {"dom": "bypass-choose", "label": "sheet.dpi.choose"},
+            {"dom": "bypass-add", "label": "sheet.dpi.add"},
+            {"dom": "bypass-detect", "label": "sheet.dpi.detect"},
+            {"dom": "bypass-remove", "label": "sheet.dpi.remove"},
+        ]},
         {"key": "dir", "type": "text", "label": "sheet.dpi.dir", "default": "",
-         "placeholder": "C:\\zapret", "live": True, "title": "sheet.dpi.dir.hint"},
+         # зеркало активной установки: панель его не рисует (его место занял
+         # селект выше), но DpiConfig и CLI читают значение отсюда же
+         "in_panel": False},
         {"key": "mode", "type": "choice_buttons", "label": "sheet.dpi.mode",
          "default": "bat",
          "option_hints": {"bat": "sheet.dpi.mode.bat.hint",

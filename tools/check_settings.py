@@ -78,8 +78,10 @@ LEGACY_DOM = {
     "ftp-dir-note", "ftp-template", "ftp-timeout", "ftp-retries",
     "ftp-test", "ftp-test-note",
     # раздел «Обход»
-    "dpi-orch", "dpi-after", "dpi-dir", "dpi-mode", "dpi-bat", "dpi-args",
-    "dpi-timeout", "dpi-probe", "dpi-scan", "dpi-start", "dpi-stop", "dpi-note",
+    "dpi-orch", "dpi-after", "dpi-install", "dpi-install-note", "dpi-dir",
+    "dpi-mode", "dpi-bat", "dpi-args", "dpi-timeout", "dpi-probe", "dpi-scan",
+    "dpi-start", "dpi-stop", "dpi-note",
+    "bypass-choose", "bypass-add", "bypass-detect", "bypass-remove",
     # вне панели
     "group",
 }
@@ -636,6 +638,41 @@ def main() -> int:
     ok("need_bypass" in gui_src and "_need_bypass_dialog" in gui_src,
        "gui отдаёт need_bypass вместо старта в режиме «спрашивать»")
     ok("pending_restore" in gui_src, "старт возвращает хвост прерванной загрузки")
+    # выбор обхода: селект вместо текстового пути, модал и загрузка версий
+    _, dir_spec = settings_schema.field("dpi.dir")
+    ok(dir_spec.get("in_panel") is False,
+       "dpi_dir убран из панели (его место занял селект), но остаётся настройкой")
+    _, install_spec = settings_schema.field("dpi.install")
+    ok(install_spec.get("transient") and install_spec.get("value_source"),
+       "выбор установки транзиентен и берёт значение из get_initial")
+    settings_html = (ROOT / "ui_src" / "settings.html").read_text(encoding="utf-8")
+    ok('id="bypass-dialog"' in settings_html, "модал «Выберите обход» есть в карточке")
+    for dom in ("bypass-install-list", "bypass-release-list", "bypass-repo-row",
+                "bypass-download-note", "bypass-dialog-close", "bypass-dialog-done",
+                "bypass-dialog-add", "bypass-dialog-detect", "bypass-dialog-remove"):
+        ok(f'id="{dom}"' in settings_html, f"в модале есть {dom}")
+    for dom in ("bypass-install-list", "bypass-release-list", "bypass-repo-row",
+                "bypass-download-note", "bypass-dialog-close", "bypass-dialog-done"):
+        ok(dom in settings_js, f"settings.js знает про {dom}")
+    for name in ("bypass_repos", "bypass_releases", "bypass_download"):
+        ok(f"def {name}(" in gui_src, f"Api.{name} существует")
+    # список репозиториев замкнут: наружу уходят только два разрешённых
+    found = re.search(r"GH_REPOS = \(([^)]*)\)", gui_src)
+    repos = re.findall(r'"([^"]+)"', found.group(1)) if found else []
+    ok(repos == ["Flowseal/zapret-discord-youtube", "bol-van/zapret-win-bundle"],
+       "разрешены ровно два репозитория", str(repos))
+    # все ключи, которых касаются наши исходники, переведены во всех языках
+    used = set()
+    for rel in ("dpi.py", "gui.py", "download.py", "ui_src/settings.js",
+                "ui_src/app.js", "ui_src/index.html", "ui_src/settings.html"):
+        src = (ROOT / rel).read_text(encoding="utf-8")
+        used |= set(re.findall(r'["\'](sheet\.dpi\.[\w.]+)["\']', src))
+        used |= set(re.findall(r'data-i18n="(sheet\.dpi\.[\w.]+)"', src))
+    missing = {lang: sorted(k for k in used if k not in i18n.I18N.get(lang, {}))
+               for lang in i18n.LANGUAGES}
+    missing = {lang: ks for lang, ks in missing.items() if ks}
+    ok(not missing, f"все {len(used)} ключей обхода переведены во всех языках",
+       str(missing))
     # кнопки и общее пояснение обхода обязаны жить в actions settings.js
     for ident in ('"dpi-probe":', '"dpi-scan":', '"dpi-start":', '"dpi-stop":',
                   'getElementById("dpi-note")'):

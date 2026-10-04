@@ -975,6 +975,38 @@
         note.className = "note bad";
         note.textContent = (res && res.error) || t("sheet.dpi.stop_fail");
       }
+    },
+    // установки обхода: выбор из реестра (модал) и пополнение реестра
+    "bypass-choose": function() { openBypassDialog(); },
+    "bypass-add": async function() {
+      var picked = await pywebview.api.browse_folder();
+      if (!picked) return;
+      var res = await pywebview.api.bypass_add(picked);
+      updateBypassNote(res && res.ok
+        ? t("sheet.dpi.added").replace("{p}", picked)
+        : ((res && res.issues || []).join(" ") || t("sheet.dpi.add_failed")));
+      refreshBypasses();
+    },
+    "bypass-detect": async function() {
+      var found = [];
+      try { found = (await pywebview.api.bypass_detect()).found || []; }
+      catch (e) { found = []; }
+      var added = 0;
+      for (var i = 0; i < found.length; i++) {
+        // найденное регистрируем, НО не делаем активным - иначе выбор
+        // пользователя слетал бы на каждый поиск
+        var res = await pywebview.api.bypass_add(found[i].path, false);
+        if (res && res.ok) added++;
+      }
+      await refreshBypasses();
+      updateBypassNote(t("sheet.dpi.detected").replace("{n}", String(added)));
+    },
+    "bypass-remove": async function() {
+      var sel = document.getElementById("dpi-install");
+      if (!sel || !sel.value) return;
+      var res = await pywebview.api.bypass_remove(sel.value);
+      if (res && res.ok) refreshBypasses();
+      else updateBypassNote(t("sheet.dpi.remove_failed"));
     }
   };
   var NOTE_FILLERS = {ftpDirNote: updateFtpDirNote, fontPreview: updateFontPreview,
@@ -1090,6 +1122,182 @@
     });
   }
 
+  // -- выбор обхода: пикер в панели, модал со списком и загрузкой версий ------
+  // Реестр живёт в Python (bypasses.json), здесь - только отображение:
+  // селект в панели, строки в модале и список версий из GitHub.
+  var bypasses = [];
+  var bypassActive = null;
+  var bypassRepos = [];
+  var bypassRepo = "";
+
+  function activeInstall() {
+    for (var i = 0; i < bypasses.length; i++) {
+      if (bypasses[i].id === bypassActive) return bypasses[i];
+    }
+    return null;
+  }
+
+  function buildBypassOptions() {
+    var sel = document.getElementById("dpi-install");
+    if (!sel || !bypasses.length) return;
+    fillSelectNode(sel, bypasses.map(function(b) { return [b.id, b.path]; }), bypassActive);
+  }
+
+  // Пояснение под селектом: сколько установок, какая активна и есть ли у неё
+  // проблемы (нет winws / нет стратегий / нет списков).
+  function updateBypassNote(text) {
+    var note = document.getElementById("dpi-install-note");
+    if (!note) return;
+    if (text) { note.textContent = text; return; }
+    var cur = activeInstall();
+    if (!cur) { note.textContent = t("sheet.dpi.note.none"); return; }
+    note.textContent = t(cur.ok ? "sheet.dpi.note.ok" : "sheet.dpi.note.bad")
+      .replace("{n}", String(bypasses.length))
+      .replace("{s}", String((cur.strategies || []).length))
+      .replace("{p}", (cur.issues || []).join(" ") || "-");
+  }
+
+  async function refreshBypasses() {
+    try {
+      var res = await pywebview.api.bypass_list();
+      bypasses = (res && res.items) || [];
+      bypassActive = (res && res.active) || null;
+    } catch (e) { console.error("bypass list:", e); }
+    buildBypassOptions();
+    updateBypassNote();
+    renderInstallRows();
+  }
+
+  function renderInstallRows() {
+    var list = document.getElementById("bypass-install-list");
+    if (!list) return;
+    list.innerHTML = "";
+    if (!bypasses.length) {
+      var empty = document.createElement("li");
+      empty.className = "bypass-row muted";
+      empty.textContent = t("sheet.dpi.note.none");
+      list.appendChild(empty);
+      return;
+    }
+    bypasses.forEach(function(item) {
+      var li = document.createElement("li");
+      li.className = "bypass-row" + (item.id === bypassActive ? " active" : "");
+      var name = document.createElement("span");
+      name.className = "bypass-row-name";
+      name.textContent = item.path;
+      var mark = document.createElement("span");
+      mark.className = "bypass-row-mark";
+      mark.textContent = item.ok
+        ? t("sheet.dpi.row.ok").replace("{s}", String((item.strategies || []).length))
+        : ((item.issues || []).join(" ") || t("sheet.dpi.row.bad"));
+      li.appendChild(name);
+      li.appendChild(mark);
+      li.addEventListener("click", function() {
+        pywebview.api.bypass_select(item.id).then(function(res) {
+          if (res && res.ok) refreshBypasses();
+        });
+      });
+      list.appendChild(li);
+    });
+  }
+
+  function openBypassDialog() {
+    var dlg = document.getElementById("bypass-dialog");
+    if (!dlg) return;
+    dlg.hidden = false;
+    refreshBypasses().then(loadBypassRepos);
+  }
+
+  function closeBypassDialog() {
+    var dlg = document.getElementById("bypass-dialog");
+    if (dlg) dlg.hidden = true;
+  }
+
+  async function loadBypassRepos() {
+    var row = document.getElementById("bypass-repo-row");
+    if (!row) return;
+    if (!bypassRepos.length) {
+      try { bypassRepos = (await pywebview.api.bypass_repos()).repos || []; }
+      catch (e) { bypassRepos = []; }
+    }
+    if (!bypassRepo && bypassRepos.length) bypassRepo = bypassRepos[0];
+    row.innerHTML = "";
+    bypassRepos.forEach(function(repo) {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "bypass-repo" + (repo === bypassRepo ? " active" : "");
+      btn.textContent = repo.split("/")[1] || repo;
+      btn.title = repo;
+      btn.addEventListener("click", function() {
+        bypassRepo = repo;
+        loadBypassRepos();
+      });
+      row.appendChild(btn);
+    });
+    await loadBypassReleases();
+  }
+
+  async function loadBypassReleases() {
+    var list = document.getElementById("bypass-release-list");
+    var note = document.getElementById("bypass-download-note");
+    if (!list) return;
+    list.innerHTML = "";
+    var pending = document.createElement("li");
+    pending.className = "bypass-row muted";
+    pending.textContent = t("sheet.dpi.gh.loading");
+    list.appendChild(pending);
+    var res;
+    try { res = await pywebview.api.bypass_releases(bypassRepo); }
+    catch (e) { res = {ok: false, error: String(e)}; }
+    list.innerHTML = "";
+    if (!res || !res.ok) {
+      var err = document.createElement("li");
+      err.className = "bypass-row muted";
+      err.textContent = (res && res.error) || t("sheet.dpi.gh.offline");
+      list.appendChild(err);
+      return;
+    }
+    if (note) note.textContent = res.stale ? t("sheet.dpi.gh.stale") : "";
+    (res.entries || []).forEach(function(entry) {
+      var li = document.createElement("li");
+      li.className = "bypass-row";
+      var label = document.createElement("span");
+      label.className = "bypass-row-name";
+      label.textContent = entry.branch ? t("sheet.dpi.gh.branch") : (entry.tag || entry.name);
+      var size = document.createElement("span");
+      size.className = "bypass-row-mark";
+      size.textContent = entry.size ? (Math.round(entry.size / 1048576) + " MB") : "";
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "bypass-row-btn";
+      btn.textContent = t("sheet.dpi.gh.get");
+      btn.addEventListener("click", function() { downloadBypass(entry, btn); });
+      li.appendChild(label);
+      li.appendChild(size);
+      li.appendChild(btn);
+      list.appendChild(li);
+    });
+  }
+
+  async function downloadBypass(entry, btn) {
+    var note = document.getElementById("bypass-download-note");
+    if (!note || !btn || btn.disabled) return;
+    btn.disabled = true;
+    note.textContent = t("sheet.dpi.gh.downloading");
+    var res;
+    try { res = await pywebview.api.bypass_download(bypassRepo, entry.tag); }
+    catch (e) { res = {ok: false, error: String(e)}; }
+    btn.disabled = false;
+    if (res && res.ok) {
+      note.textContent = t("sheet.dpi.gh.done")
+        .replace("{s}", String((res.strategies || []).length));
+      refreshBypasses();
+    } else {
+      note.textContent = (res && (res.error || (res.issues || []).join(" ")))
+        || t("sheet.dpi.gh.failed");
+    }
+  }
+
   function bindSettings() {
     Object.keys(panelFields).forEach(function(key) {
       var f = panelFields[key], spec = f.spec, node = f.input;
@@ -1113,6 +1321,26 @@
     Object.keys(ACTIONS).forEach(function(dom) {
       if (panelButtons[dom]) panelButtons[dom].addEventListener("click", function() { ACTIONS[dom](); });
     });
+    // модал выбора обхода живёт вне панели полей - вешаем кнопки сами
+    [["bypass-dialog-close", closeBypassDialog],
+     ["bypass-dialog-done", closeBypassDialog],
+     ["bypass-dialog-add", ACTIONS["bypass-add"]],
+     ["bypass-dialog-detect", ACTIONS["bypass-detect"]],
+     ["bypass-dialog-remove", ACTIONS["bypass-remove"]]].forEach(function(pair) {
+      var node = document.getElementById(pair[0]);
+      if (node && pair[1]) node.addEventListener("click", pair[1]);
+    });
+    // при открытии вкладки «Обход»: первый раз показываем выбор, дальше -
+    // только обновляем данные (пикер и пояснение должны быть свежими)
+    var dpiNav = document.getElementById("nav-dpi");
+    if (dpiNav) dpiNav.addEventListener("click", function() {
+      refreshBypasses().then(function() {
+        if (!bypasses.length) openBypassDialog();
+      });
+    });
+    // список установок и пояснение под ним тянутся из Python сразу после
+    // монтирования полей - иначе селект пуст до первого действия
+    refreshBypasses();
   }
 
   // Условия видимости описаны в схеме (visible_if) - здесь только их применение.
@@ -1173,6 +1401,15 @@
       FONT_PICK.weight = node.value || "";
       setFontVar("--font-weight", FONT_PICK.weight);
       refreshNotes();   // предпросмотр сразу показывает новую толщину
+    });
+    // выбор установки обхода: поле транзиентно (живёт в реестре), поэтому
+    // сохранять в settings.json нечего - зеркалом dpi_dir занимается Python
+    onChange("dpi.install", function(node) {
+      if (!node.value) return;
+      pywebview.api.bypass_select(node.value).then(function(res) {
+        if (res && res.ok) refreshBypasses();
+        else updateBypassNote(t("sheet.dpi.select_failed"));
+      });
     });
   }
 

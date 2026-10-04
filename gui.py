@@ -3,10 +3,14 @@
 import json
 import os
 import queue
+import re
+import shutil
 import subprocess
 import sys
 import threading
 import time
+import urllib.request
+import zipfile
 from collections import deque
 
 import webview
@@ -111,6 +115,35 @@ def _parse_bulk(text: str) -> tuple[list[str], int]:
             seen.add(s)
             urls.append(s)
     return urls, skipped
+
+
+def _release_entries(payload: list, repo: str) -> list:
+    """Разбор списка релизов: первый zip-ассет, либо архив ветки (zipball).
+
+    Репозитории без релизов (zapret-win-bundle) получают одну запись master -
+    в диалоге она помечена флагом branch и подписывается переводом.
+    """
+    entries = []
+    for rel in payload if isinstance(payload, list) else []:
+        assets = [a for a in (rel.get("assets") or [])
+                  if str(a.get("name", "")).lower().endswith(".zip")]
+        asset = assets[0] if assets else {}
+        entries.append({
+            "tag": str(rel.get("tag_name") or ""),
+            "name": str(rel.get("name") or rel.get("tag_name") or ""),
+            "url": asset.get("browser_download_url"),
+            "asset": str(asset.get("name") or ""),
+            "size": int(asset.get("size") or 0),
+            "published": str(rel.get("published_at") or ""),
+            "branch": False,
+        })
+    if not entries:
+        entries.append({
+            "tag": "master", "name": "master",
+            "url": f"https://api.github.com/repos/{repo}/zipball/master",
+            "asset": "master.zip", "size": 0, "published": "", "branch": True,
+        })
+    return entries
 
 
 class Api:
@@ -867,10 +900,11 @@ class Api:
                           "issues": self._bypass_issues(report, self._lang)})
         return {"found": found}
 
-    def bypass_add(self, path: str = "") -> dict:
-        """Добавляет папку в реестр и делает её активной (только валидную)."""
+    def bypass_add(self, path: str = "", select: bool = True) -> dict:
+        """Добавляет папку в реестр. select=False - регистрация без смены
+        активной установки (так заводит их автопоиск, не отбирая выбор)."""
         target = (path or "").strip()
-        res = dpi.registry_add(target)
+        res = dpi.registry_add(target, select=bool(select))
         if not res.get("ok"):
             return {"ok": False, "path": target,
                     "issues": self._bypass_issues(res.get("report", {}), self._lang)}
@@ -890,6 +924,111 @@ class Api:
         if res.get("ok"):
             self._bump_ui()
         return res
+
+    # -- загрузка версий обхода с GitHub ----------------------------------------
+    # Два репозитория с готовыми бандлами: у bol-van/zapret-win-bundle
+    # релизов нет, поэтому для него отдаём архив ветки (zipball master).
+    GH_REPOS = ("Flowseal/zapret-discord-youtube", "bol-van/zapret-win-bundle")
+    GH_TTL = 900   # кэш списка версий: у GitHub 60 запросов/час без токена
+
+    def _gh_cache_path(self):
+        return dpi._probe_dir() / "github_releases.json"
+
+    def bypass_repos(self) -> dict:
+        """Репозитории, из которых можно скачать обход."""
+        return {"repos": list(self.GH_REPOS)}
+
+    def bypass_releases(self, repo: str = "") -> dict:
+        """Список версий репозитория: {"ok", "entries": [...]}.
+
+        GitHub бывает недоступен - тогда отдаём кэш (даже протухший) либо
+        переведённую ошибку, но никогда не пустой список молча.
+        """
+        repo = (repo or "").strip()
+        if repo not in self.GH_REPOS:
+            return {"ok": False, "error": tr(self._lang, "sheet.dpi.gh.bad_repo")}
+        cache = None
+        try:
+            cache = json.loads(self._gh_cache_path().read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            cache = None
+        if isinstance(cache, dict) and isinstance(cache.get("repos"), dict) \
+                and repo in cache["repos"] and time.time() - (cache.get("ts") or 0) < self.GH_TTL:
+            return {"ok": True, "entries": cache["repos"][repo], "cached": True}
+        url = f"https://api.github.com/repos/{repo}/releases?per_page=30"
+        try:
+            req = urllib.request.Request(url, headers={
+                "User-Agent": "Synfronia", "Accept": "application/vnd.github+json"})
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                payload = json.loads(resp.read().decode("utf-8", "replace"))
+        except Exception as exc:  # noqa: BLE001 - любая сетевая беда -> кэш/ошибка
+            if isinstance(cache, dict) and isinstance(cache.get("repos"), dict) and cache["repos"].get(repo):
+                return {"ok": True, "entries": cache["repos"][repo], "cached": True,
+                        "stale": True, "error": tr(self._lang, "sheet.dpi.gh.offline")}
+            self._log("warning", f"github: {repo}: {exc}")
+            return {"ok": False, "error": tr(self._lang, "sheet.dpi.gh.offline")}
+        entries = _release_entries(payload if isinstance(payload, list) else [], repo)
+        repos = cache.get("repos") if isinstance(cache, dict) and isinstance(cache.get("repos"), dict) else {}
+        repos = dict(repos)
+        repos[repo] = entries
+        try:
+            self._gh_cache_path().write_text(
+                json.dumps({"ts": int(time.time()), "repos": repos}, ensure_ascii=False),
+                encoding="utf-8")
+        except OSError:
+            pass
+        return {"ok": True, "entries": entries}
+
+    def bypass_download(self, repo: str = "", tag: str = "") -> dict:
+        """Скачивает версию, раскладывает в Bypass и регистрирует её.
+
+        Адрес берётся из списка версий (или собирается для zipball), а не
+        из запроса страницы: наружу уходят только два разрешённых
+        репозитория. Распаковка - через общий dpi._extract_zip, то есть
+        с защитой от zip-slip, и сразу с проверкой «есть ли обходники».
+        """
+        listed = self.bypass_releases(repo)
+        if not listed.get("ok"):
+            return listed
+        entry = next((e for e in listed["entries"] if e.get("tag") == tag), None)
+        if not entry or not entry.get("url"):
+            return {"ok": False, "error": tr(self._lang, "sheet.dpi.gh.no_asset")}
+        tmp = dpi._probe_dir() / f"bypass-{re.sub(r'[^A-Za-z0-9._-]', '_', tag or 'x')}.zip"
+        try:
+            req = urllib.request.Request(entry["url"], headers={
+                "User-Agent": "Synfronia", "Accept": "application/octet-stream"})
+            with urllib.request.urlopen(req, timeout=120) as resp, open(tmp, "wb") as fh:
+                while True:
+                    chunk = resp.read(1 << 16)
+                    if not chunk:
+                        break
+                    fh.write(chunk)
+            with zipfile.ZipFile(tmp) as zf:
+                tops = {i.filename.split("/")[0].split("\\")[0]
+                        for i in zf.infolist() if i.filename}
+                top = next(iter(tops), "")
+                install = dpi.bypass_root() / top if top else dpi.bypass_root()
+                dpi._extract_zip(zf, dpi.bypass_root())
+            for license_file in dpi._bundled_dir().glob("LICENSE*"):
+                try:
+                    shutil.copyfile(license_file, install / license_file.name)
+                except OSError:
+                    pass
+        except Exception as exc:  # noqa: BLE001 - сеть и архив чужие, падать нельзя
+            self._log("warning", f"github: {repo}@{tag}: {exc}")
+            return {"ok": False, "error": tr(self._lang, "sheet.dpi.gh.failed")}
+        finally:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+        res = dpi.registry_add(install, source="github", repo=repo, tag=tag)
+        if not res.get("ok"):
+            return {"ok": False, "path": str(install),
+                    "issues": self._bypass_issues(res.get("report", {}), self._lang)}
+        self._bump_ui()
+        return {"ok": True, "item": res["item"],
+                "strategies": res["report"]["strategies"]}
 
     def test_ftp(self) -> dict:
         """Проверка настроек FTP: подключается и сразу отключается."""
