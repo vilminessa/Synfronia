@@ -598,6 +598,48 @@ def main() -> int:
         ok(dpi.read_cache(install=str(other)) is None,
            "кэш чужой установки не подхватывается",
            str(dpi.read_cache(install=str(other))))
+
+        # негатив: стратегия ссылается на несуществующий файл-фейк - установка
+        # негодна, хотя winws.exe и папка lists на месте. Именно так обход и
+        # умирал после чистки: winws не находил ACTIVE_*.bin и выходил сразу
+        pay = tmpdir / "payload-install"
+        (pay / "bin").mkdir(parents=True)
+        (pay / "lists").mkdir()
+        (pay / "bin" / "winws.exe").write_bytes(b"MZ")
+        (pay / "general (ALT9).bat").write_text(
+            'start "" /min "%BIN%winws.exe" --fake="%BIN%ACTIVE_DISCORD_UDP.bin"\n',
+            encoding="ascii")
+        rep = dpi.validate_install(str(pay))
+        ok(rep["ok"] is False and "payload" in rep["issues"],
+           "стратегия с отсутствующим файлом-фейком -> отказ payload",
+           str(rep["issues"]))
+        ok(rep.get("payload") == ["BIN/ACTIVE_DISCORD_UDP.bin"],
+           "в отчёте перечислен недостающий файл", str(rep.get("payload")))
+        (pay / "bin" / "ACTIVE_DISCORD_UDP.bin").write_bytes(b"\x00")
+        ok(dpi.validate_install(str(pay))["ok"] is True,
+           "файл появился - установка снова годна")
+
+        # починка из вшитого архива: только недостающее, без перезаписи
+        # и без выхода наружу (zip-slip)
+        zpath = tmpdir / "bundle.zip"
+        with zipfile.ZipFile(zpath, "w") as zf:
+            zf.writestr("top/bin/winws.exe", b"MZ")
+            zf.writestr("top/bin/ACTIVE_DISCORD_UDP.bin", b"FAKE")
+            zf.writestr("top/lists/list-google.txt", b"x")
+            zf.writestr("../evil.txt", b"x")
+            zf.writestr("top/../evil2.txt", b"x")
+        target = tmpdir / "install"
+        (target / "bin").mkdir(parents=True)
+        (target / "bin" / "winws.exe").write_bytes(b"EXISTING")
+        with zipfile.ZipFile(zpath) as zf:
+            restored = dpi._repair_from_zip(zf, target, "top")
+        ok(restored == 2, "починка дописала два недостающих файла", str(restored))
+        ok((target / "bin" / "ACTIVE_DISCORD_UDP.bin").read_bytes() == b"FAKE",
+           "недостающий файл-фейк восстановлен")
+        ok((target / "bin" / "winws.exe").read_bytes() == b"EXISTING",
+           "существующий файл не перезаписан")
+        ok(not (tmpdir / "evil.txt").exists() and not (tmpdir / "evil2.txt").exists(),
+           "zip-slip не записал наружу")
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
     # невидимость работы: помощник глушит проверку обновлений zapret (иначе
@@ -868,7 +910,7 @@ def main() -> int:
         shutil.rmtree(iso, ignore_errors=True)
 
     # ключи отказов переведены и используются из gui
-    for code in ("folder", "winws", "strategies", "lists"):
+    for code in ("folder", "winws", "strategies", "lists", "payload"):
         key = f"sheet.dpi.issue.{code}"
         ok(all(key in i18n.I18N.get(lang, {}) for lang in i18n.LANGUAGES),
            f"{key} есть во всех языках")

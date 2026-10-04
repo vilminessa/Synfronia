@@ -1229,6 +1229,68 @@ def _install_dirs(path: Path) -> list[Path]:
     return out[:_MAX_SCAN_DIRS]
 
 
+def _missing_payload(root: Path, strategies: list) -> list:
+    """Файлы-фейки и списки, на которые ссылаются стратегии, но которых нет.
+
+    Ровно та поломка, из-за которой обход умирал мгновенно: из установки
+    пропали ACTIVE_*.bin, winws не находил файл из --dpi-desync-fake-* и
+    выходил сразу - а проверка смотрела только на наличие папки lists.
+    """
+    missing = set()
+    for rel in strategies:
+        try:
+            text = (root / str(rel)).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for var, name in re.findall(r"%(\w+)%([^%\r\n\"]+\.\w+)", text):
+            folder = {"BIN": "bin", "LISTS": "lists"}.get(var.upper())
+            if not folder:
+                continue
+            target = root / folder / name.strip().strip('"').strip()
+            if target.is_file():
+                continue
+            # *-user.txt service.bat создаёт ДО старта winws (шаблон
+            # «Never leave this file empty»), поэтому в свежей распаковке их
+            # отсутствие - норма, а не поломка; файлы BIN/ напротив нужны
+            # сразу, и именно их отсутствие убивало winws
+            if target.name.endswith("-user.txt"):
+                continue
+            missing.add(f"{var.upper()}/{target.name}")
+    return sorted(missing)
+
+
+def _repair_from_zip(zf, install: Path, top: str) -> int:
+    """Дописывает из архива ТОЛЬКО отсутствующие файлы (ничего не затирая).
+
+    Раскладка вшитого пакета могла пострадать от чистки: winws.exe и DLL
+    были блокированы и уцелели, а файлы-фейки - нет. Существующие файлы
+    не трогаем (пользователь мог их заменить), чужие пути отбрасываем.
+    """
+    restored = 0
+    prefix = f"{top}/"
+    base = str(install.resolve()) + os.sep
+    for info in zf.infolist():
+        name = info.filename
+        if info.is_dir() or not name.startswith(prefix):
+            continue
+        rel = name[len(prefix):]
+        if not rel or rel.endswith("/"):
+            continue
+        target = install / rel
+        if target.exists():
+            continue
+        if not str(target.resolve()).startswith(base):
+            continue   # zip-slip: наружу не пишем
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with zf.open(info) as src, open(target, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+            restored += 1
+        except OSError:
+            continue   # файл заблокирован (работает winws) - не мешаем
+    return restored
+
+
 def _scan_install(path) -> dict:
     """Разбор установки одним проходом: winws, стратегии, списки, layout."""
     rep = {"path": str(path), "ok": False, "layout": None, "winws": "",
@@ -1263,6 +1325,13 @@ def _scan_install(path) -> dict:
         rep["layout"], rep["strategies"] = LAYOUT_WINWS, preset
     else:
         rep["issues"].append("strategies")
+    # последняя проверка и по совпадению с реальностью: на что ссылаются
+    # стратегии и есть ли эти файлы (списки ACTIVE_*.bin как раз так и
+    # пропадают - winws при этом умирает сразу после старта)
+    missing = _missing_payload(root, rep["strategies"])
+    if missing:
+        rep["payload"] = missing
+        rep["issues"].append("payload")
     rep["ok"] = not rep["issues"]
     return rep
 
@@ -1473,7 +1542,7 @@ def seed_bundled_bypass(on_log=None) -> dict:
 
     Возвращает {"added": [...], "skipped": [...], "failed": [...]}.
     """
-    report = {"added": [], "skipped": [], "failed": []}
+    report = {"added": [], "skipped": [], "failed": [], "repaired": 0}
     log = on_log or (lambda level, msg: None)
     src = _bundled_dir()
     archives = sorted(src.glob("*.zip")) if src.is_dir() else []
@@ -1493,6 +1562,13 @@ def seed_bundled_bypass(on_log=None) -> dict:
                     report["skipped"].append(install.name)
                     registry_add(install, source="bundled", select=select)
                     select = False
+                    # Папка есть, но могла быть вычищена наполовину (чистка
+                    # душит только заблокированные файлы, а ACTIVE_*.bin не
+                    # заблокированы). Недостающее дописываем из архива.
+                    restored = _repair_from_zip(zf, install, top)
+                    if restored:
+                        report["repaired"] += restored
+                        log("info", f"bypass: восстановлено недостающих файлов - {restored}")
                     continue
                 _extract_zip(zf, root)
             for license_file in src.glob("LICENSE*"):
