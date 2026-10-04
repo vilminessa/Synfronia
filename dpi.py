@@ -1409,6 +1409,12 @@ def registry_add(path, source: str = "local", repo: str = "", tag: str = "",
                 "repo": repo, "tag": tag, "layout": rep["layout"],
                 "added": int(time.time())}
         data["items"].append(item)
+    elif source != "local" or tag:
+        # повторная регистрация после загрузки: происхождение обновляем,
+        # иначе установка из GitHub навсегда числится «local» без тега.
+        # Обычное же добавление папки (без источника) теги не затирает.
+        item.update({"source": source, "repo": repo, "tag": tag})
+    item["layout"] = rep["layout"]   # после обновления layout мог измениться
     item["last_seen"] = int(time.time())
     if select or data["active"] not in {i.get("id") for i in data["items"]}:
         data["active"] = item["id"]
@@ -1520,8 +1526,64 @@ def registry_autofill(on_log=None) -> dict:
     return {"added": added}
 
 
-def _extract_zip(zf, dest: Path) -> None:
-    """Распаковка с защитой от zip-slip: путь не должен уйти за dest."""
+def files_identical(a, b) -> bool:
+    """Два файла байт-в-байт одинаковы? (размер, затем sha256)."""
+    try:
+        if Path(a).stat().st_size != Path(b).stat().st_size:
+            return False
+    except OSError:
+        return False
+    left, right = hashlib.sha256(), hashlib.sha256()
+    try:
+        with open(a, "rb") as first, open(b, "rb") as second:
+            while True:
+                chunk_a, chunk_b = first.read(1 << 16), second.read(1 << 16)
+                if not chunk_a and not chunk_b:
+                    break
+                left.update(chunk_a)
+                right.update(chunk_b)
+    except OSError:
+        return False
+    return left.digest() == right.digest()
+
+
+def _same_as_archive(zf, info, target: Path) -> bool:
+    """Совпадает ли файл на диске байт-в-байт с содержимым архива."""
+    try:
+        if target.stat().st_size != info.file_size:
+            return False
+    except OSError:
+        return False
+    digest = hashlib.sha256()
+    try:
+        with zf.open(info) as fh:
+            for chunk in iter(lambda: fh.read(1 << 16), b""):
+                digest.update(chunk)
+    except OSError:
+        return False
+    # сравниваем размер уже проверили - хэш только на равных размерах
+    other = hashlib.sha256()
+    try:
+        with open(target, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 16), b""):
+                other.update(chunk)
+    except OSError:
+        return False
+    return digest.digest() == other.digest()
+
+
+def _extract_zip(zf, dest: Path) -> tuple:
+    """Распаковка: с защитой от zip-slip и с уважением к занятым файлам.
+
+    Проверка путей идёт ДО записи (выход наружу - ValueError, как раньше).
+    Дальше каждый файл пишется отдельно: идентичный пропускаем (занятый
+    winws.exe не мешает, если это тот же файл - а он и есть), занятый и
+    отличающийся собираем в locked. Раньше extractall падал на первом же
+    занятом файле, и всё скачивание превращалось в общую ошибку, а установка
+    оставалась наполовину перезаписанной.
+
+    Возвращает (сколько записано, список занятых путей).
+    """
     base = str(dest.resolve())
     for info in zf.infolist():
         if not info.filename:
@@ -1529,7 +1591,23 @@ def _extract_zip(zf, dest: Path) -> None:
         target = str((dest / info.filename).resolve())
         if target != base and not target.startswith(base + os.sep):
             raise ValueError(f"небезопасный путь в архиве: {info.filename}")
-    zf.extractall(dest)
+    written, locked = 0, []
+    for info in zf.infolist():
+        if info.is_dir() or not info.filename:
+            continue
+        target = dest / info.filename
+        if target.exists() and _same_as_archive(zf, info, target):
+            continue   # уже такой же - трогать нечего, блокировка не помешает
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with zf.open(info) as src, open(target, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+            written += 1
+        except PermissionError:
+            locked.append(info.filename)
+        except OSError as exc:
+            locked.append(f"{info.filename} ({exc})")
+    return written, locked
 
 
 def seed_bundled_bypass(on_log=None) -> dict:
@@ -1640,8 +1718,11 @@ SETTINGS = {
                           "args": "sheet.dpi.mode.args.hint"},
          "options": [["bat", "sheet.dpi.mode.bat"], ["args", "sheet.dpi.mode.args"]],
          "row": 1},
-        {"key": "bat", "type": "text", "label": "sheet.dpi.bat",
-         "default": "general.bat", "placeholder": "general.bat", "live": True,
+        {"key": "bat", "type": "choice", "label": "sheet.dpi.bat",
+         # список приходит из активной установки (как темы и шрифты), а не
+         # задаётся текстом: свободный ввод позволял указать несуществующий
+         # файл и узнать об этом лишь при старте
+         "default": "general.bat", "options_source": "strategies", "live": True,
          "visible_if": _WHEN_MODE_BAT, "title": "sheet.dpi.bat.hint"},
         {"key": "args", "type": "text", "label": "sheet.dpi.args", "default": "",
          "placeholder": "--wf-tcp=80,443 --filter-udp=443 ...", "live": True,

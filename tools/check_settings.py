@@ -727,6 +727,12 @@ def main() -> int:
         ok(dom in settings_js, f"settings.js знает про {dom}")
     for name in ("bypass_repos", "bypass_releases", "bypass_download"):
         ok(f"def {name}(" in gui_src, f"Api.{name} существует")
+    # скачивание идёт через staging: неудача не оставляет полусобранную папку,
+    # а занятые файлы возвращаются списком с точной ошибкой gh.locked
+    ok("stage-" in gui_src and "_merge_tree(" in gui_src,
+       "bypass_download распаковывает в staging и переносит в установку")
+    ok("sheet.dpi.gh.locked" in gui_src,
+       "занятый файл даёт точную ошибку, а не общую «не удалось скачать»")
     # список репозиториев замкнут: наружу уходят только два разрешённых
     found = re.search(r"GH_REPOS = \(([^)]*)\)", gui_src)
     repos = re.findall(r'"([^"]+)"', found.group(1)) if found else []
@@ -748,6 +754,39 @@ def main() -> int:
     for ident in ('"dpi-probe":', '"dpi-scan":', '"dpi-start":', '"dpi-stop":',
                   'getElementById("dpi-note")'):
         ok(ident in settings_js, f"settings.js использует {ident}")
+    # выбор стратегии списком, а не свободным текстом (текст позволял указать
+    # несуществующий файл и узнавать об этом лишь при старте обхода)
+    _, bat_spec = settings_schema.field("dpi.bat")
+    ok(bat_spec.get("type") == "choice", "dpi_bat - выбор, а не текст",
+       str(bat_spec.get("type")))
+    ok(bat_spec.get("options_source") == "strategies",
+       "список стратегий берётся из активной установки",
+       str(bat_spec.get("options_source")))
+    ok("function buildStrategyOptions" in settings_js,
+       "settings.js собирает список стратегий активной установки")
+    ok("buildStrategyOptions();" in settings_js,
+       "список стратегий пересобирается вместе со списком установок")
+    ok("list.indexOf(current) === -1" in settings_js
+       or "indexOf(current) === -1" in settings_js,
+       "текущее значение остаётся в списке, даже если его больше нет")
+    ok('id="bypass-strategy-list"' in settings_html,
+       "стратегии показаны списком в модале выбора")
+    ok("renderStrategyRows" in settings_js and "dpi_bat" in settings_js,
+       "стратегии в модале рисуются и выбираются щелчком")
+    ok('data-i18n="sheet.dpi.dialog.strategies"' in settings_html,
+       "заголовок списка стратегий под перевод")
+    # стаб пробника обязан покрывать все вызовы api из JS: иначе зонд падает
+    # с «is not a function» на первом же обходе (так и было с bypass_list)
+    stub_src = (ROOT / "tools" / "ui_probe_page.py").read_text(encoding="utf-8")
+    calls = set()
+    for rel in ("ui_src/settings.js", "ui_src/app.js", "ui_src/common.js",
+                "ui_src/settings.html", "ui_src/index.html"):
+        text = (ROOT / rel).read_text(encoding="utf-8")
+        calls |= set(re.findall(r"pywebview\.api\.(\w+)\s*\(", text))
+    missing_api = sorted(name for name in calls if f"{name}:" not in stub_src)
+    ok(not missing_api,
+       f"стаб пробника покрывает все {len(calls)} вызовов api из JS",
+       str(missing_api))
 
     # 12. выгрузка на FTP: канал данных с возобновлением TLS-сессии
     section("12. выгрузка на FTP")
@@ -869,6 +908,20 @@ def main() -> int:
         ok(str(empty_dir) not in [i["path"] for i in dpi.registry_load()["items"]],
            "отклонённая папка не попала в реестр")
 
+        # повторная регистрация после загрузки обновляет происхождение
+        dpi.registry_add(str(installed), source="github",
+                         repo="Flowseal/zapret-discord-youtube", tag="1.10.3",
+                         select=False)
+        pick = next(i for i in dpi.registry_load()["items"]
+                    if str(Path(str(i["path"])).resolve()) == str(installed.resolve()))
+        ok(pick.get("source") == "github" and pick.get("tag") == "1.10.3",
+           "источник и тег обновились после загрузки", str(pick))
+        dpi.registry_add(str(installed))
+        pick = next(i for i in dpi.registry_load()["items"]
+                    if str(Path(str(i["path"])).resolve()) == str(installed.resolve()))
+        ok(pick.get("source") == "github" and pick.get("tag") == "1.10.3",
+           "обычное добавление папки не затирает происхождение", str(pick))
+
         # layout-б от другого автора: winws и preset-стратегии во вложенной папке
         bundle = iso / "zapret-win-bundle-master"
         (bundle / "zapret-winws").mkdir(parents=True)
@@ -893,6 +946,28 @@ def main() -> int:
             ok(False, "zip-slip отклонён")
         except ValueError:
             ok(True, "zip-slip отклонён (путь за пределы назначения)")
+
+        # занятый файл (Errno 13 на winws.exe, пока обход работает): раньше
+        # extractall падал на первом же отказе и всё скачивание умирало.
+        # Идентичный файл пропускается, чужой уходит в locked, новый пишется.
+        lock_dir = iso / "locked-extract"
+        lock_dir.mkdir()
+        (lock_dir / "same.txt").write_text("same", encoding="utf-8")
+        (lock_dir / "busy.txt").mkdir()          # путь-каталог = занятый файл
+        pack = iso / "locked.zip"
+        with zipfile.ZipFile(pack, "w") as zf:
+            zf.writestr("same.txt", "same")      # уже такой же
+            zf.writestr("busy.txt", "new")       # отличается и занят
+            zf.writestr("fresh.txt", "fresh")    # новый
+        with zipfile.ZipFile(pack) as zf:
+            written, locked = dpi._extract_zip(zf, lock_dir)
+        ok(written == 1, "записан только новый файл", str(written))
+        ok(bool(locked) and locked[0].startswith("busy.txt"),
+           "занятый файл собран в locked, а не уронил распаковку", str(locked))
+        ok((lock_dir / "fresh.txt").read_text(encoding="utf-8") == "fresh",
+           "новый файл записан несмотря на занятый сосед")
+        ok((lock_dir / "same.txt").read_text(encoding="utf-8") == "same",
+           "идентичный файл пропущен без перезаписи")
 
         # реестр: снятие активной установки переносит выбор, чужой id - отказ
         active = dpi.registry_load()["active"]

@@ -12,7 +12,10 @@
      display: flex - без этого браузер показал бы скрытые строки */
   [hidden] { display: none !important; }
 
-  label { display: block; margin: 10px 0 4px; font-size: 13px; opacity: .9; }
+  /* Отступ подпись -> контрол 8px: 4px выглядело слипанием (жалоба - «элементы
+     слишком близко»); верхний отступ 10px остаётся, чтобы дыхание между
+     блоками не менялось. */
+  label { display: block; margin: 10px 0 8px; font-size: 13px; opacity: .9; }
   input[type=text], input[type=password], select {
     width: 100%; padding: 8px 10px; border-radius: var(--radius-s); border: 1px solid var(--surface);
     background: var(--widget); color: var(--text); font-size: 14px; outline: none;
@@ -43,11 +46,17 @@
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
   .check { display: flex; align-items: center; gap: 6px; margin: 10px 0 4px; font-size: 13px; }
   .check input { width: 15px; height: 15px; accent-color: var(--accent); }
-  .range-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+  .range-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  /* Кнопки в строке не сжимаются: иначе подпись рвётся на две строки и
+     кнопки слипаются - ширина по содержимому, перенос целиком по строке */
+  .range-row button { flex: 0 0 auto; white-space: nowrap; }
   .range-row label { display: inline-block; margin: 0; min-width: 0; font-size: 13px; white-space: nowrap; }
   .range-row input[type=text], .range-row input[type=password], .range-row select { flex: 1 1 0; min-width: 0; }
   .row input { flex: 1 1 0; min-width: 0; }
   .note { margin-top: 6px; font-size: 12px; opacity: .7; }
+  /* пустое пояснение не рисуется вообще: иначе оно занимает место и
+     остаётся тёмным квадратом рядом с кнопками */
+  .note:empty { display: none; }
   #ftp-test-note.ok { color: var(--accent); opacity: 1; }
   #ftp-test-note.bad { color: var(--warn); opacity: 1; }
   #dpi-note.ok { color: var(--accent); opacity: 1; }

@@ -1125,6 +1125,10 @@
       else f.set(value === undefined || value === null ? (spec.default || "") : String(value));
       if (f.range) f.range.value = f.get();
     });
+    // get_initial асинхронен: ранний рендр списка стратегий мог подсветить не
+    // то значение, поэтому при каждом приходе настроек модал перерисовываем
+    var dlg = document.getElementById("bypass-dialog");
+    if (dlg && !dlg.hidden) renderStrategyRows();
   }
 
   // -- выбор обхода: пикер в панели, модал со списком и загрузкой версий ------
@@ -1148,6 +1152,29 @@
     fillSelectNode(sel, bypasses.map(function(b) { return [b.id, b.path]; }), bypassActive);
   }
 
+  // Текущая стратегия берётся из настройки, а не из самого селекта: до
+  // заполнения списка селект пуст и вернул бы первый попавшийся пункт.
+  function configuredStrategy(f) {
+    if (!f) return "";
+    var value = valueOf(f.spec);
+    if (value === undefined || value === null || value === "") value = f.get();
+    return String(value || "");
+  }
+
+  // Список стратегий активной установки. Свободный ввод заменён на выбор:
+  // значение настройки остаётся в списке даже если его там больше нет
+  // (иначе селект молча показал бы чужую строку).
+  function buildStrategyOptions() {
+    var f = panelFields["dpi.bat"];
+    if (!f || !f.input) return;
+    var active = activeInstall();
+    var list = ((active && active.strategies) || []).slice();
+    var current = configuredStrategy(f);
+    if (current && list.indexOf(current) === -1) list.unshift(current);
+    if (!list.length) return;   // установка без стратегий - значение не трогаем
+    fillSelectNode(f.input, list.map(function(name) { return [name, name]; }), current);
+  }
+
   // Пояснение под селектом: сколько установок, какая активна и есть ли у неё
   // проблемы (нет winws / нет стратегий / нет списков).
   function updateBypassNote(text) {
@@ -1169,8 +1196,10 @@
       bypassActive = (res && res.active) || null;
     } catch (e) { console.error("bypass list:", e); }
     buildBypassOptions();
+    buildStrategyOptions();
     updateBypassNote();
     renderInstallRows();
+    renderStrategyRows();
   }
 
   function renderInstallRows() {
@@ -1200,6 +1229,41 @@
       li.addEventListener("click", function() {
         pywebview.api.bypass_select(item.id).then(function(res) {
           if (res && res.ok) refreshBypasses();
+        });
+      });
+      list.appendChild(li);
+    });
+  }
+
+  // Стратегии активной установки прямо в диалоге: пользователь видит, сколько
+  // их доступно, и выбирает из них же - селект в панели показывает то же самое
+  function renderStrategyRows() {
+    var list = document.getElementById("bypass-strategy-list");
+    if (!list) return;
+    list.innerHTML = "";
+    var active = activeInstall();
+    var names = ((active && active.strategies) || []).slice();
+    if (!names.length) {
+      var empty = document.createElement("li");
+      empty.className = "bypass-row muted";
+      empty.textContent = active ? t("sheet.dpi.note.none") : "";
+      list.appendChild(empty);
+      return;
+    }
+    var field = panelFields["dpi.bat"];
+    var current = configuredStrategy(field);
+    names.forEach(function(name) {
+      var li = document.createElement("li");
+      li.className = "bypass-row" + (name === current ? " active" : "");
+      var label = document.createElement("span");
+      label.className = "bypass-row-name";
+      label.textContent = name;
+      li.appendChild(label);
+      li.addEventListener("click", function() {
+        pywebview.api.save_setting("dpi_bat", name).then(function() {
+          renderStrategyRows();
+          if (field) field.set(name);
+          updateBypassNote(t("sheet.dpi.strategy_picked").replace("{s}", name));
         });
       });
       list.appendChild(li);

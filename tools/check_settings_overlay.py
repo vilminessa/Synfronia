@@ -355,6 +355,27 @@ def main() -> int:
     ok("restore_builtin_themes" in inspect.getsource(gui.Api.download_themes),
        "команда зовёт восстановление из themes.py")
 
+    section("9. перенос staging в установку уважает занятые файлы")
+    stage = _iso / "stage" / "bundle"
+    (stage / "bin").mkdir(parents=True)
+    (stage / "bin" / "winws.exe").write_bytes(b"MZ-same")
+    (stage / "bin" / "WinDivert.dll").write_bytes(b"new-bytes")
+    (stage / "general.bat").write_text("@echo off", encoding="ascii")
+    target = _iso / "install"
+    (target / "bin").mkdir(parents=True)
+    # занятый, но идентичный: его как раз не надо трогать (это был баг)
+    (target / "bin" / "winws.exe").write_bytes(b"MZ-same")
+    # занятый и чужой: путь-каталог не даёт открыть файл на запись
+    (target / "bin" / "WinDivert.dll").mkdir()
+    locked = gui._merge_tree(stage, target)
+    ok((target / "general.bat").exists(), "новый файл перенесён")
+    ok((target / "bin" / "winws.exe").read_bytes() == b"MZ-same",
+       "идентичный занятый файл не перезаписывался")
+    ok(bool(locked) and locked[0].startswith("bin/WinDivert.dll"),
+       "занятый чужой файл собран в locked", str(locked))
+    ok((target / "bin" / "WinDivert.dll").is_dir(),
+       "занятый чужой файл остался как был")
+
     print(f"\nитог: {_checks - len(_fails)}/{_checks} ok")
     if _fails:
         print("провалено: " + ", ".join(_fails))

@@ -146,6 +146,33 @@ def _release_entries(payload: list, repo: str) -> list:
     return entries
 
 
+def _merge_tree(src: Path, dst: Path) -> list:
+    """Переносит содержимое src в dst (staging -> установка).
+
+    Идентичные файлы не трогаем (занятый winws.exe той же версии не мешает),
+    отличающиеся и занятые собираем в список - операция не роняется на
+    первом отказе. Возвращает занятые пути (через /, как в архиве).
+    """
+    locked = []
+    for child in sorted(src.rglob("*")):
+        rel = child.relative_to(src).as_posix()
+        target = dst / child.relative_to(src)
+        if child.is_dir():
+            try:
+                target.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                locked.append(rel)
+            continue
+        if target.exists() and dpi.files_identical(child, target):
+            continue
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(child, target)
+        except OSError:
+            locked.append(rel)
+    return locked
+
+
 class Api:
     def __init__(self) -> None:
         self.settings = load_settings()
@@ -859,7 +886,11 @@ class Api:
     def dpi_scan(self) -> dict:
         """Подбор рабочей стратегии по кнопке: полный перебор, одна UAC."""
         cfg = dpi.DpiConfig(self.settings, self._lang)
-        return dpi.scan(cfg, log=self._log)
+        res = dpi.scan(cfg, log=self._log)
+        if res.get("ok"):
+            # подбор пишет dpi_bat - без ui_rev карточка показала бы старое
+            self._bump_ui()
+        return res
 
     def dpi_stop(self) -> dict:
         """Остановка обхода по кнопке из карточки настроек."""
@@ -989,10 +1020,15 @@ class Api:
     def bypass_download(self, repo: str = "", tag: str = "") -> dict:
         """Скачивает версию, раскладывает в Bypass и регистрирует её.
 
-        Адрес берётся из списка версий (или собирается для zipball), а не
-        из запроса страницы: наружу уходят только два разрешённых
-        репозитория. Распаковка - через общий dpi._extract_zip, то есть
-        с защитой от zip-slip, и сразу с проверкой «есть ли обходники».
+        Адрес берётся из списка версий (или собирается для zipball), а не из
+        запроса страницы: наружу уходят только два разрешённых репозитория.
+
+        Распаковка идёт в staging и только потом переносится в установку:
+        неудача не оставляет полусобранную папку; идентичный файл не
+        перезаписывается, поэтому занятый winws.exe (работающий обход) не
+        роняет всё скачивание - это и была ошибка «Permission denied:
+        ...\\bin\\winws.exe»; занятый и отличающийся файл даёт точную
+        ошибку gh.locked вместо общей «не удалось скачать».
         """
         listed = self.bypass_releases(repo)
         if not listed.get("ok"):
@@ -1000,7 +1036,10 @@ class Api:
         entry = next((e for e in listed["entries"] if e.get("tag") == tag), None)
         if not entry or not entry.get("url"):
             return {"ok": False, "error": tr(self._lang, "sheet.dpi.gh.no_asset")}
-        tmp = dpi._probe_dir() / f"bypass-{re.sub(r'[^A-Za-z0-9._-]', '_', tag or 'x')}.zip"
+        safe = re.sub(r"[^A-Za-z0-9._-]", "_", tag or "x")
+        tmp = dpi._probe_dir() / f"bypass-{safe}.zip"
+        stage = dpi._probe_dir() / f"stage-{safe}"
+        install = None
         try:
             req = urllib.request.Request(entry["url"], headers={
                 "User-Agent": "Synfronia", "Accept": "application/octet-stream"})
@@ -1010,12 +1049,21 @@ class Api:
                     if not chunk:
                         break
                     fh.write(chunk)
+            shutil.rmtree(stage, ignore_errors=True)
+            stage.mkdir(parents=True, exist_ok=True)
             with zipfile.ZipFile(tmp) as zf:
                 tops = {i.filename.split("/")[0].split("\\")[0]
                         for i in zf.infolist() if i.filename}
                 top = next(iter(tops), "")
+                staged = stage / top if top else stage
                 install = dpi.bypass_root() / top if top else dpi.bypass_root()
-                dpi._extract_zip(zf, dpi.bypass_root())
+                dpi._extract_zip(zf, stage)
+            # сначала проверяем скачанное, и только потом трогаем установку
+            report = dpi.validate_install(staged)
+            if not report["ok"]:
+                return {"ok": False, "path": str(staged),
+                        "issues": self._bypass_issues(report, self._lang)}
+            locked = _merge_tree(staged, install)
             for license_file in dpi._bundled_dir().glob("LICENSE*"):
                 try:
                     shutil.copyfile(license_file, install / license_file.name)
@@ -1029,6 +1077,12 @@ class Api:
                 tmp.unlink()
             except OSError:
                 pass
+            shutil.rmtree(stage, ignore_errors=True)
+        if locked:
+            self._log("warning", f"github: {repo}@{tag}: заняты {', '.join(locked[:3])}")
+            return {"ok": False, "locked": locked,
+                    "error": tr(self._lang, "sheet.dpi.gh.locked")
+                              .replace("{f}", locked[0].split("/")[-1])}
         res = dpi.registry_add(install, source="github", repo=repo, tag=tag)
         if not res.get("ok"):
             return {"ok": False, "path": str(install),

@@ -55,6 +55,33 @@ STUB = """<script>
                bulkStatuses: [],
                settingsOpen: %(settings_open)s, saved: [], dest: "", logs: []};
   var settings = __SETTINGS__;
+  // Реалистичные данные обхода: список установок, стратегии активной и релизы -
+  // иначе селектор стратегий и диалог выбора в зонде пустуют, а проверки
+  // не находят своих элементов.
+  var STRATS = ["general (ALT).bat", "general (ALT2).bat", "general (ALT3).bat",
+                "general (ALT4).bat", "general (ALT5).bat", "general (ALT6).bat",
+                "general (ALT7).bat", "general (ALT8).bat", "general (ALT9).bat",
+                "general (ALT10).bat", "general (ALT11).bat", "general (ALT12).bat",
+                "general (ALT13).bat", "general (EXP).bat", "general (FAKE TLS AUTO).bat",
+                "general (SIMPLE FAKE ALT).bat", "general (SIMPLE FAKE).bat",
+                "general.bat", "preset1.cmd", "preset2.cmd"];
+  var BYPASSES = [
+    {id: "zapret-1-10-3", path: "C:\\\\Users\\\\me\\\\AppData\\\\Local\\\\Synfronia\\\\Bypass\\\\zapret-discord-youtube-1.10.3",
+     layout: "flowseal", source: "bundled", ok: true, issues: [], strategies: STRATS},
+    {id: "zapret-1-9-6", path: "C:\\\\zapret-discord-youtube-1.9.6",
+     layout: "flowseal", source: "local", ok: false, strategies: [],
+     issues: ["Не хватает файлов, которые требуются стратегиям (фейки или списки)."]}
+  ];
+  var RELEASES = [
+    {tag: "1.10.3", name: "1.10.3", url: "https://example.invalid/1.10.3.zip",
+     asset: "zapret-discord-youtube-1.10.3.zip", size: 1510219, branch: false},
+    {tag: "1.10.2", name: "1.10.2", url: "https://example.invalid/1.10.2.zip",
+     asset: "zapret-discord-youtube-1.10.2.zip", size: 1508077, branch: false},
+    {tag: "master", name: "master", url: "https://example.invalid/master.zip",
+     asset: "master.zip", size: 0, branch: true}
+  ];
+  state.bypasses = BYPASSES;
+  state.bypassActive = BYPASSES[0].id;
   function ok(r) { return Promise.resolve(r === undefined ? {} : r); }
   function uiState() {
     return {lang: state.lang, theme: settings.theme, ui_rev: 1, settings: settings,
@@ -63,6 +90,7 @@ STUB = """<script>
   window.pywebview = {api: {
     get_initial: function () { return Promise.resolve({settings: settings, ffmpeg: true,
       default_dir: settings.dest, transcoders: ["libx265", "nvenc"], fonts: FONTS,
+      bypasses: state.bypasses, bypass_active: state.bypassActive,
       settings_open: state.settingsOpen}); },
     poll: function () { return Promise.resolve(Object.assign({
       logs: state.logs, log_cursor: state.logs.length,
@@ -89,6 +117,7 @@ STUB = """<script>
       // его (иначе fillSettings() на поллу откатил бы переключатель назад)
       settings[key] = value; return ok(); },
     start_download: function () { return ok({}); },
+    start_ffmpeg_download: function () { return ok({}); },
     // как настоящий start_bulk: парсинг теми же правилами, busy и статус [i/N]
     start_bulk: function (cfg) {
       var lines = String((cfg && cfg.urls) || "").split("\\n")
@@ -109,7 +138,53 @@ STUB = """<script>
     browse_folder: function () { return ok("C:\\\\Downloads"); },
     test_ftp: function () { return ok({error: "test"}); },
     open_fonts_folder: function () { return ok(); },
-    open_themes_folder: function () { return ok(); }
+    open_themes_folder: function () { return ok(); },
+    // -- обход: панель, диалог выбора и загрузка версий ----------------------
+    dpi_probe: function () { return ok({reachable: true, web: true, media: true}); },
+    dpi_start: function () { return ok({ok: true}); },
+    dpi_stop: function () { return ok({ok: true}); },
+    dpi_scan: function () { return ok({ok: true, best: STRATS[0], results: []}); },
+    bypass_list: function () {
+      return ok({active: state.bypassActive, items: state.bypasses});
+    },
+    bypass_validate: function (path) {
+      var hit = state.bypasses.filter(function (b) { return b.path === path; })[0];
+      return ok(hit || {path: path, ok: false, layout: null, winws: "",
+                        strategies: [], issues: ["нет установки"]});
+    },
+    bypass_detect: function () { return ok({found: []}); },
+    bypass_add: function (path, select) {
+      var item = {id: "added-" + state.bypasses.length, path: path, layout: "flowseal",
+                  source: "local", ok: true, issues: [], strategies: STRATS};
+      state.bypasses.push(item);
+      if (select !== false) state.bypassActive = item.id;
+      return ok({ok: true, item: item, strategies: STRATS});
+    },
+    bypass_select: function (id) {
+      state.bypassActive = id;
+      return ok({ok: true, item: {id: id}});
+    },
+    bypass_remove: function (id) {
+      state.bypasses = state.bypasses.filter(function (b) { return b.id !== id; });
+      if (state.bypassActive === id && state.bypasses.length) {
+        state.bypassActive = state.bypasses[0].id;
+      }
+      return ok({ok: true});
+    },
+    bypass_repos: function () {
+      return ok({repos: ["Flowseal/zapret-discord-youtube", "bol-van/zapret-win-bundle"]});
+    },
+    bypass_releases: function (repo) {
+      return ok({ok: true, entries: RELEASES});
+    },
+    bypass_download: function (repo, tag) {
+      var item = {id: "dl-" + tag, path: "C:\\\\Synfronia\\\\Bypass\\\\zapret-" + tag,
+                  layout: "flowseal", source: "github", ok: true, issues: [],
+                  strategies: STRATS};
+      state.bypasses.push(item);
+      state.bypassActive = item.id;
+      return ok({ok: true, item: item, strategies: STRATS});
+    }
   }};
   window.__probe = state;
   // Этап5 (события + heartbeat): запись сценария в стаб - это «событие»
