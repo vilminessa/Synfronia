@@ -81,13 +81,18 @@ def resolve(data, reachable: bool) -> str:
     """Нужно ли поднимать обход перед загрузкой: "start" или "skip".
 
     Решалка отдельно от запуска, чтобы её можно было проверить без сети
-    и без прав: обход включается только при включённом флажке и закрытом
-    маршруте - никаких сюрпризов при работающем YouTube.
+    и без прав: вмешательство нужно только при включённой оркестрации и
+    закрытом маршруте - никаких сюрпризов при работающем YouTube.
     """
     cfg = data if isinstance(data, DpiConfig) else DpiConfig(data)
-    if not cfg.auto:
+    if cfg.orch == "off":
         return "skip"
     return "skip" if reachable else "start"
+
+
+def after_action(cfg) -> str:
+    """Что делать с обходом после загрузки: restore | keep | off."""
+    return cfg.after if cfg.after in ("restore", "keep", "off") else "restore"
 
 
 class DpiConfig:
@@ -96,8 +101,10 @@ class DpiConfig:
     def __init__(self, data: dict | None = None, lang: str = "ru") -> None:
         data = data or {}
         self.lang = lang
-        self.auto = bool(_value(data, "dpi.auto"))
-        self.stop_after = bool(_value(data, "dpi.stop_after"))
+        # оркестрация: off - не трогать, ask - спросить при закрытом
+        # маршруте, auto - поднимать молча; после загрузки: restore/keep/off
+        self.orch = str(_value(data, "dpi.orch"))
+        self.after = str(_value(data, "dpi.after"))
         self.dir = str(_value(data, "dpi.dir") or "")
         self.mode = str(_value(data, "dpi.mode"))
         self.bat = str(_value(data, "dpi.bat") or "")
@@ -608,6 +615,101 @@ function Test-One {
     return $ms
 }
 
+# -- состояние обхода: что запущено сейчас и как это вернуть ------------------
+$Record = Join-Path $Probe "orchestrator.json"
+
+function Read-Record {
+    try {
+        if (Test-Path $Record) {
+            return (Get-Content $Record -Raw -Encoding UTF8 | ConvertFrom-Json)
+        }
+    } catch { LG "record read failed: $($_.Exception.Message)" }
+    return $null
+}
+
+function Write-Record {
+    param($Rec)
+    try {
+        $Rec | ConvertTo-Json -Depth 5 | Set-Content -Path $Record -Encoding UTF8
+        LG "record saved kind=$($Rec.kind) services=$($Rec.services -join ',')"
+        return $true
+    } catch {
+        LG "record save failed: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+function Get-BypassServices {
+    # Службы, чей путь указывает на winws.exe. Имя НЕ захардкожено:
+    # service.bat и service*.cmd называют службу по-разному.
+    $found = @()
+    try {
+        foreach ($svc in (Get-CimInstance Win32_Service)) {
+            if ($svc.PathName -and ($svc.PathName -like "*winws.exe*")) {
+                $found += [PSCustomObject]@{
+                    name    = $svc.Name
+                    running = ($svc.State -eq "Running")
+                }
+            }
+        }
+    } catch { LG "service list failed: $($_.Exception.Message)" }
+    return $found
+}
+
+function Get-State {
+    $all = @(Get-BypassServices)
+    $running = @($all | Where-Object { $_.running })
+    $proc = Get-Process -Name "winws" -ErrorAction SilentlyContinue | Select-Object -First 1
+    $cmdline = $null
+    try {
+        $wmi = Get-CimInstance Win32_Process -Filter "Name='winws.exe'" | Select-Object -First 1
+        if ($wmi) { $cmdline = $wmi.CommandLine }
+    } catch { }
+    $exe = $null
+    $winArgs = ""
+    if ($cmdline) {
+        if ($cmdline -match '^\s*"([^"]+)"\s*(.*)$') {
+            $exe = $Matches[1]; $winArgs = $Matches[2]
+        } elseif ($cmdline -match '^\s*(\S*?winws\.exe)\s*(.*)$') {
+            $exe = $Matches[1]; $winArgs = $Matches[2]
+        }
+    }
+    $kind = "none"
+    if ($running.Count -gt 0) { $kind = "service" } elseif ($proc) { $kind = "process" }
+    $holder = 0
+    if ($proc) { $holder = $proc.Id }
+    return [PSCustomObject]@{
+        taken    = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+        kind     = $kind
+        services = @($running | ForEach-Object { $_.name })
+        exe      = $exe
+        args     = $winArgs
+        pid      = $holder
+        cmdline  = $cmdline
+    }
+}
+
+function Stop-All {
+    # Службу гасим через SCM (иначе она уйдёт в «прервана» и не стартанёт
+    # при восстановлении), процесс - силой; winws живёт с фильтром WinDivert,
+    # поэтому ждём, пока драйвер отпустит, а не убиваем мгновенно.
+    foreach ($svc in (Get-BypassServices)) {
+        if ($svc.running) {
+            try {
+                Stop-Service -Name $svc.name -Force -ErrorAction Stop
+                LG "stopped service $($svc.name)"
+            } catch { LG "stop-service $($svc.name) failed: $($_.Exception.Message)" }
+        }
+    }
+    $wait = [Diagnostics.Stopwatch]::StartNew()
+    while ($wait.ElapsedMilliseconds -lt 8000) {
+        if (-not (Get-Process -Name "winws" -ErrorAction SilentlyContinue)) { break }
+        Start-Sleep -Milliseconds 400
+    }
+    Get-Process -Name "winws" -ErrorAction SilentlyContinue | Stop-Process -Force
+    Start-Sleep -Milliseconds 700
+}
+
 try {
     LG "action=$action token=$token"
     switch ($action) {
@@ -621,6 +723,42 @@ try {
         "stop" {
             Stop-Winws
             Finish ([PSCustomObject]@{ ok = $true; action = "stop" })
+        }
+        "state" {
+            Finish ([PSCustomObject]@{ ok = $true; action = "state"; original = (Get-State) })
+        }
+        "suspend" {
+            # снимаем исходное состояние и гасим его: поднимать дальше
+            # будем выбранный обход, а прежний вернёт restore
+            $rec = Get-State
+            Stop-All
+            Write-Record $rec | Out-Null
+            Finish ([PSCustomObject]@{ ok = $true; action = "suspend"; original = $rec })
+        }
+        "restore" {
+            $rec = Read-Record
+            Stop-All
+            if ($rec) {
+                if ($rec.kind -eq "service") {
+                    foreach ($name in @($rec.services)) {
+                        if (-not $name) { continue }
+                        try { Start-Service -Name $name -ErrorAction Stop; LG "started service $name" }
+                        catch { LG "start-service $name failed: $($_.Exception.Message)" }
+                    }
+                } elseif ($rec.kind -eq "process" -and $rec.exe) {
+                    try {
+                        Start-Process -FilePath $rec.exe -ArgumentList $rec.args -WindowStyle Hidden | Out-Null
+                        LG "started $($rec.exe)"
+                    } catch { LG "start process failed: $($_.Exception.Message)" }
+                } else {
+                    LG "record says nothing was running - staying off"
+                }
+            } else {
+                LG "no record: stopping only"
+            }
+            Remove-Item -Path $Record -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Milliseconds 1500
+            Finish ([PSCustomObject]@{ ok = $true; action = "restore"; original = $rec; now = (Get-State) })
         }
         "scan" {
             $root = "$($req.root)"
@@ -782,16 +920,105 @@ def scan(cfg: DpiConfig, log=None, wait: float | None = None) -> dict:
     return {"ok": False, "error": err, "results": results}
 
 
-def auto(cfg: DpiConfig, log=None) -> dict:
-    """Обход перед загрузкой: маршрут -> свая стратегия -> полный подбор.
+def orchestrator_path() -> Path:
+    r"""Запись о снятом исходном состоянии: %LOCALAPPDATA%\Synfronia\probe."""
+    return _probe_dir() / "orchestrator.json"
 
-    {"ok": True, "started": False} - доступ уже есть, ничего не трогали;
-    {"ok": True, "started": True}  - стратегия поднята нами (гасим после);
-    {"ok": False, "error": ...}    - не удалось, причина готовым текстом.
+
+def pending_restore() -> bool:
+    """Остался ли хвост прерванной загрузки - тогда исходное пора вернуть."""
+    try:
+        return orchestrator_path().is_file()
+    except OSError:
+        return False
+
+
+def forget() -> None:
+    """Забыть исходное состояние: после keep/off восстанавливать нечего."""
+    try:
+        orchestrator_path().unlink()
+    except OSError:
+        pass
+
+
+def suspend(cfg: DpiConfig, log=None) -> dict:
+    """Снимает исходное состояние (службу или процесс) и останавливает его.
+
+    {"ok": True, "original": {...}} - запись сохранена: restore() вернёт
+    всё как было; {"ok": False, "error"} - не вышло (снимает помощник,
+    поэтому чужое в этом случае не трогалось).
     """
-    if resolve(cfg, False) != "start":
-        # обход выключен настройками: маршрут даже не проверяем (иначе каждый
-        # запуск без флажка опрашивал бы YouTube зря)
+    data = _run_action(cfg, "suspend", {}, wait=90, log=log)
+    if data is None:
+        err = cfg.t("sheet.dpi.no_uac")
+        if log:
+            log("error", err)
+        return {"ok": False, "error": err}
+    if not data.get("ok"):
+        err = cfg.t("sheet.dpi.stop_fail")
+        if log:
+            log("error", err)
+        return {"ok": False, "error": err}
+    original = data.get("original") or {}
+    if log:
+        log("info", cfg.t("sheet.dpi.log.suspend", kind=original.get("kind", "none")))
+    return {"ok": True, "original": original}
+
+
+def restore(cfg: DpiConfig, log=None) -> dict:
+    """Возвращает исходное состояние и убирает хвост прерванной загрузки."""
+    data = _run_action(cfg, "restore", {}, wait=120, log=log)
+    if data is None:
+        err = cfg.t("sheet.dpi.no_uac")
+        if log:
+            log("error", err)
+        return {"ok": False, "error": err}
+    if not data.get("ok"):
+        err = cfg.t("sheet.dpi.stop_fail")
+        if log:
+            log("error", err)
+        return {"ok": False, "error": err}
+    now = data.get("now") or {}
+    if log:
+        log("info", cfg.t("sheet.dpi.log.restore", kind=now.get("kind", "none")))
+    forget()
+    return {"ok": True, "original": data.get("original"), "now": now}
+
+
+def finish(cfg: DpiConfig, log=None) -> dict:
+    """Завершение оркестрации после загрузки - по настройке dpi_after.
+
+    restore - вернуть снятое состояние (службу запустить заново, ручной
+    запуск повторить с теми же аргументами), keep - оставить поднятую
+    стратегию и забыть о прежнем, off - погасить всё и ничего не возвращать.
+    """
+    after = after_action(cfg)
+    if after == "restore":
+        return restore(cfg, log=log)
+    if after == "off":
+        forget()
+        return stop(cfg, log=log)
+    forget()
+    if log:
+        log("info", cfg.t("sheet.dpi.log.keep"))
+    return {"ok": True, "action": "keep"}
+
+
+def auto(cfg: DpiConfig, log=None, force: bool = False) -> dict:
+    """Обход перед загрузкой: маршрут -> снятие исходного -> стратегия.
+
+    {"ok": True, "started": False} - обход не нужен или не разрешён;
+    {"ok": True, "started": True, "original": {...}, "strategy": имя} -
+    подняли выбранную стратегию, исходное состояние снято и сохранено;
+    {"ok": False, "error": ..., "restored": bool} - не вышло; если что-то
+    уже снимали, исходное возвращено обратно.
+
+    force=True - вмешаться, даже когда настройка говорит «выключено» или
+    «спрашивать» (явный выбор в диалоге либо флаг в CLI).
+    """
+    if not force and (resolve(cfg, False) != "start" or cfg.orch == "ask"):
+        # выключено или «спрашивать» без явного выбора: не трогаем и, что
+        # важнее, не опрашиваем YouTube при каждом запуске
         return {"ok": True, "started": False}
     if probe():
         if log:
@@ -803,22 +1030,34 @@ def auto(cfg: DpiConfig, log=None) -> dict:
         if log:
             log("error", err)
         return {"ok": False, "error": err}
+    # снимаем исходное ДО любых попыток: и подбор, и старт убивают winws,
+    # поэтому без сохранённой записи вернуть прежнее было бы нечем
+    sus = suspend(cfg, log=log)
+    if not sus.get("ok"):
+        return {"ok": False, "error": sus.get("error")}
+    original = sus.get("original") or {}
     cached = read_cache()
-    # кэш имеет смысл пробовать только в режиме bat и только когда сейчас
-    # ничего не запущено: чужой работающий процесс перебор всё равно заменит
-    if cfg.mode == "bat" and cached and cached in names and not status()["running"]:
+    if cfg.mode == "bat" and cached in names:
         if log:
             log("info", cfg.t("sheet.dpi.log.cache", name=cached))
         res = start(cfg, log=log, bat=cached)
         if res.get("ok") and probe():
-            return {"ok": True, "started": True, "strategy": cached}
+            return {"ok": True, "started": True, "strategy": cached,
+                    "original": original}
+        # кэш маршрут не открыл - идём в полный подбор по этой установке
     if log:
         log("warning", cfg.t("sheet.dpi.log.scan"))
     res = scan(cfg, log=log)
     if res.get("ok"):
         return {"ok": True, "started": True, "strategy": res.get("best"),
-                "results": res.get("results")}
-    return {"ok": False, "error": res.get("error") or cfg.t("sheet.dpi.scan_fail")}
+                "results": res.get("results"), "original": original}
+    # ничего не сработало: возвращаем то, что было, и говорим прямо
+    back = restore(cfg, log=log)
+    err = res.get("error") or cfg.t("sheet.dpi.scan_fail")
+    if log:
+        log("error", err)
+    return {"ok": False, "error": err, "restored": bool(back.get("ok")),
+            "original": original}
 
 
 # -- реестр установок: несколько версий и папок обхода -----------------------
@@ -1169,7 +1408,6 @@ def seed_bundled_bypass(on_log=None) -> dict:
 
 # Панель настроек модуля: порядок строк = порядок полей, у флажков и полей
 # условия видимости относительные (схема превращает их в абсолютные пути).
-_WHEN_AUTO = {"key": "auto", "equals": True}
 _WHEN_MODE_BAT = {"key": "mode", "equals": "bat"}
 _WHEN_MODE_ARGS = {"key": "mode", "equals": "args"}
 
@@ -1180,12 +1418,21 @@ SETTINGS = {
     "flat_prefix": "dpi_",
     "boxes": {"run": "sheet.dpi.run"},
     "fields": [
-        {"key": "auto", "type": "bool", "label": "sheet.dpi.auto",
-         "default": False, "check": True, "live": True,
-         "title": "sheet.dpi.auto.hint"},
-        {"key": "stop_after", "type": "bool", "label": "sheet.dpi.stop_after",
-         "default": True, "check": True, "live": True,
-         "visible_if": _WHEN_AUTO, "title": "sheet.dpi.stop_after.hint"},
+        {"key": "orch", "type": "choice_buttons", "label": "sheet.dpi.orch",
+         "default": "ask",
+         "option_hints": {"off": "sheet.dpi.orch.off.hint",
+                          "ask": "sheet.dpi.orch.ask.hint",
+                          "auto": "sheet.dpi.orch.auto.hint"},
+         "options": [["off", "sheet.dpi.orch.off"], ["ask", "sheet.dpi.orch.ask"],
+                     ["auto", "sheet.dpi.orch.auto"]]},
+        {"key": "after", "type": "choice_buttons", "label": "sheet.dpi.after",
+         "default": "restore",
+         "option_hints": {"restore": "sheet.dpi.after.restore.hint",
+                          "keep": "sheet.dpi.after.keep.hint",
+                          "off": "sheet.dpi.after.off.hint"},
+         "options": [["restore", "sheet.dpi.after.restore"],
+                     ["keep", "sheet.dpi.after.keep"],
+                     ["off", "sheet.dpi.after.off"]]},
         {"key": "dir", "type": "text", "label": "sheet.dpi.dir", "default": "",
          "placeholder": "C:\\zapret", "live": True, "title": "sheet.dpi.dir.hint"},
         {"key": "mode", "type": "choice_buttons", "label": "sheet.dpi.mode",

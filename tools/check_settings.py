@@ -78,7 +78,7 @@ LEGACY_DOM = {
     "ftp-dir-note", "ftp-template", "ftp-timeout", "ftp-retries",
     "ftp-test", "ftp-test-note",
     # раздел «Обход»
-    "dpi-auto", "dpi-stop-after", "dpi-dir", "dpi-mode", "dpi-bat", "dpi-args",
+    "dpi-orch", "dpi-after", "dpi-dir", "dpi-mode", "dpi-bat", "dpi-args",
     "dpi-timeout", "dpi-probe", "dpi-scan", "dpi-start", "dpi-stop", "dpi-note",
     # вне панели
     "group",
@@ -119,7 +119,10 @@ COERCE_CASES = [
     ("dpi_timeout", 1, 5),
     ("dpi_timeout", "300", 300),
     ("dpi_mode", "nope", "bat"),
-    ("dpi_auto", "true", True),
+    ("dpi_orch", "nope", "ask"),
+    ("dpi_orch", "auto", "auto"),
+    ("dpi_after", "nope", "restore"),
+    ("dpi_after", "keep", "keep"),
     ("dpi_dir", None, ""),
     ("some_garbage", "x", "x"),         # чужой ключ не трогаем
 ]
@@ -487,16 +490,23 @@ def main() -> int:
        "вкладка обхода между загрузчиком и выгрузкой", str(ids))
     ok(settings_schema.flat_prefix("dpi") == "dpi_", "у обхода префикс dpi_")
     d = dpi.DpiConfig({})
-    got = (d.auto, d.stop_after, d.dir, d.mode, d.bat, d.args, d.timeout)
-    ok(got == (False, True, "", "bat", "general.bat", "", 45),
+    got = (d.orch, d.after, d.dir, d.mode, d.bat, d.args, d.timeout)
+    ok(got == ("ask", "restore", "", "bat", "general.bat", "", 45),
        "DpiConfig без файла = умолчания схемы", str(got))
-    # решалка: обход включается только при включённом флажке И закрытом
-    # маршруте - две отрицательные ветки и не дают поднять zapret «просто так»
-    for auto, reachable, expected in ((False, False, "skip"), (False, True, "skip"),
-                                      (True, False, "start"), (True, True, "skip")):
-        got = dpi.resolve({"dpi_auto": auto}, reachable)
-        ok(got == expected, f"resolve(auto={auto}, reachable={reachable}) = {expected!r}",
+    # решалка: обход включается только при включённой оркестрации И закрытом
+    # маршруте - отрицательные ветки не дают поднять zapret «просто так»
+    for orch, reachable, expected in (("off", False, "skip"), ("off", True, "skip"),
+                                      ("ask", False, "start"), ("auto", False, "start"),
+                                      ("auto", True, "skip")):
+        got = dpi.resolve({"dpi_orch": orch}, reachable)
+        ok(got == expected, f"resolve(orch={orch!r}, reachable={reachable}) = {expected!r}",
            f"получилось {got!r}")
+    # что делать после загрузки: три режима и защита от битого значения
+    for after, expected in (("restore", "restore"), ("keep", "keep"),
+                            ("off", "off"), ("лишнее", "restore")):
+        ok(dpi.after_action(dpi.DpiConfig({"dpi_after": after})) == expected,
+           f"after_action({after!r}) = {expected!r}",
+           dpi.after_action(dpi.DpiConfig({"dpi_after": after})))
     # негатив: непригодная папка - отказ текстом, без запуска и без UAC
     for label, bad_dir in (("пустой папки", ""),
                            ("несуществующей папки",
@@ -550,10 +560,15 @@ def main() -> int:
         res = dpi.scan(missing)
         ok(res.get("ok") is False and bool(res.get("error")),
            "scan при непригодной папке -> отказ с текстом", str(res))
-        # негатив: выключенный флажок - auto не ходит в сеть и ничего не запускает
-        off = dpi.auto(dpi.DpiConfig({"dpi_auto": False, "dpi_dir": ""}))
+        # негатив: оркестрация выключена - auto не ходит в сеть и ничего не запускает
+        off = dpi.auto(dpi.DpiConfig({"dpi_orch": "off", "dpi_dir": ""}))
         ok(off == {"ok": True, "started": False},
-           "auto при выключенном флажке = ничего не делает", str(off))
+           "auto при выключенной оркестрации = ничего не делает", str(off))
+        # негатив: «спрашивать» без явного выбора тоже не трогает систему -
+        # решение принимает диалог в главном окне, а не воркер
+        ask = dpi.auto(dpi.DpiConfig({"dpi_orch": "ask", "dpi_dir": ""}))
+        ok(ask == {"ok": True, "started": False},
+           "auto в режиме «спрашивать» = ничего не делает", str(ask))
         # кэш: записал - прочитал; битый файл не роняет чтение
         dpi.write_cache("general (ALT).bat")
         ok(dpi.read_cache() == "general (ALT).bat", "кэш стратегии пишется и читается",
@@ -582,6 +597,45 @@ def main() -> int:
        "несуществующая задача не выдаётся за существующую")
     ok("_run_action" in (ROOT / "dpi.py").read_text(encoding="utf-8"),
        "все операции с правами идут через единый _run_action")
+    # оркестрация: помощник умеет снимать исходное состояние и возвращать его
+    for token in ('"suspend"', '"restore"', '"state"', "Stop-Service",
+                  "Start-Service", "orchestrator.json", "Get-CimInstance Win32_Service"):
+        ok(token in dpi._RUNNER_SOURCE, f"помощник знает про {token}")
+    ok("def finish(" in dpi_src, "завершение оркестрации - единая dpi.finish")
+    # переносы старых ключей: выбор пользователя не теряется при обновлении
+    migrations = {old: (new, mapper) for old, new, mapper in settings.MIGRATIONS}
+    ok(migrations.get("dpi_auto", ("", None))[0] == "dpi_orch"
+       and migrations["dpi_auto"][1](True) == "auto"
+       and migrations["dpi_auto"][1](False) == "off",
+       "dpi_auto переносится в dpi_orch (auto/off)")
+    ok(migrations.get("dpi_stop_after", ("", None))[0] == "dpi_after"
+       and migrations["dpi_stop_after"][1](True) == "restore"
+       and migrations["dpi_stop_after"][1](False) == "keep",
+       "dpi_stop_after переносится в dpi_after (restore/keep)")
+    # хвост прерванной загрузки: без записи восстанавливать нечего
+    orch_file = dpi.orchestrator_path()
+    try:
+        dpi.forget()
+        ok(dpi.pending_restore() is False, "без записи хвоста восстанавливать нечего")
+        orch_file.write_text('{"kind": "none"}', encoding="utf-8")
+        ok(dpi.pending_restore() is True, "запись на месте - хвост виден")
+        dpi.forget()
+        ok(dpi.pending_restore() is False, "forget убирает хвост")
+    finally:
+        dpi.forget()
+    # диалог «обход нужен» живёт в главном окне и продолжает тот же запуск
+    ok('id="bypass-overlay"' in main_html, "диалог обхода есть в главном окне")
+    for key in ("sheet.dpi.prompt.title", "sheet.dpi.prompt.text",
+                "sheet.dpi.prompt.on", "sheet.dpi.prompt.off"):
+        ok(f'data-i18n="{key}"' in main_html, f"диалог использует {key}")
+        ok(all(key in i18n.I18N.get(lang, {}) for lang in i18n.LANGUAGES),
+           f"{key} переведён")
+    ok("need_bypass" in app_js and "startJob" in app_js,
+       "app.js после ответа продолжает тот же запуск")
+    gui_src = (ROOT / "gui.py").read_text(encoding="utf-8")
+    ok("need_bypass" in gui_src and "_need_bypass_dialog" in gui_src,
+       "gui отдаёт need_bypass вместо старта в режиме «спрашивать»")
+    ok("pending_restore" in gui_src, "старт возвращает хвост прерванной загрузки")
     # кнопки и общее пояснение обхода обязаны жить в actions settings.js
     for ident in ('"dpi-probe":', '"dpi-scan":', '"dpi-start":', '"dpi-stop":',
                   'getElementById("dpi-note")'):

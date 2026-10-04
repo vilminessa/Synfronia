@@ -341,6 +341,39 @@
   }
   html.no-blur #ffmpeg-head { background: rgba(12, 16, 28, .78); }
 
+  /* ---- диалог «обход нужен» (режим «Спрашивать») ----
+     Простой вопрос поверх страницы: какая стратегия сейчас работает и что
+     делать. Стили на переменных темы, поэтому читается в любой из шести. */
+  #bypass-overlay {
+    position: fixed; inset: 0; z-index: 995;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(6, 8, 16, .62);
+    -webkit-backdrop-filter: blur(5px);
+    backdrop-filter: blur(5px);
+    font-family: var(--font-sans, "Segoe UI"), system-ui, sans-serif;
+  }
+  #bypass-overlay.bypass-hidden { display: none; }
+  #bypass-box {
+    max-width: 470px; padding: 22px 26px; border-radius: 18px;
+    background: var(--surface, #141830);
+    border: 1px solid var(--widget, rgba(255, 255, 255, .12));
+    color: var(--text, #eaf6ff);
+    box-shadow: 0 18px 50px rgba(0, 0, 0, .45);
+  }
+  #bypass-title { margin: 0 0 8px; font-size: 20px; font-weight: 700; }
+  #bypass-text { margin: 0 0 6px; font-size: 14px; line-height: 1.5; opacity: .92; }
+  #bypass-hint { font-size: 13px; opacity: .72; margin-bottom: 16px; min-height: 16px; }
+  #bypass-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+  #bypass-actions button {
+    cursor: pointer; padding: 10px 18px; border-radius: 10px; font-size: 14px;
+    border: 1px solid var(--widget, rgba(255, 255, 255, .14));
+    background: transparent; color: inherit;
+  }
+  #bypass-actions #bypass-on {
+    background: var(--accent, #4f8cff); border-color: transparent;
+    color: var(--on-accent, #fff); font-weight: 600;
+  }
+
   /* ---- ffmpeg bloom-оверлей: дождь поверх темы ---- */
   #ffmpeg-overlay {
     position: fixed; inset: 0; z-index: 999; overflow: hidden;

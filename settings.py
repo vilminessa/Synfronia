@@ -17,6 +17,10 @@ from version import __version__
 # Переносы старых ключей в новые: (старый, новый, значение по старому ключу).
 MIGRATIONS = (
     ("hevc", "transcode", lambda value: "libx265" if value else "none"),
+    # Оркестрация обхода вместо «вкл/выкл»: старое поведение сохраняется,
+    # но у новых установок уже спрашивают, а не вмешиваются молча.
+    ("dpi_auto", "dpi_orch", lambda value: "auto" if value else "off"),
+    ("dpi_stop_after", "dpi_after", lambda value: "restore" if value else "keep"),
 )
 
 

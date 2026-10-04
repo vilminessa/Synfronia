@@ -676,6 +676,55 @@
       // В конфиге загрузки только то, что выбирается в этом окне: папка,
       // субтитры, качество, кодек и сеть живут в настройках, и Python берёт
       // их сам - значения в обоих окнах не могут разойтись.
+      // Диалог «обход нужен»: Python в режиме «Спрашивать» возвращает
+      // need_bypass и НЕ стартует загрузку - решение принимает человек.
+      // pending держит сам запуск, чтобы после ответа продолжить ровно то же.
+      var pendingBypass = null;
+
+      function showBypassPrompt(running) {
+        var hint = document.getElementById("bypass-hint");
+        if (hint) hint.textContent = t(running ? "sheet.dpi.prompt.running"
+                                               : "sheet.dpi.prompt.none");
+        var overlay = document.getElementById("bypass-overlay");
+        if (overlay) overlay.classList.remove("bypass-hidden");
+      }
+
+      function hideBypassPrompt() {
+        var overlay = document.getElementById("bypass-overlay");
+        if (overlay) overlay.classList.add("bypass-hidden");
+      }
+
+      async function startJob(kind, cfg, list) {
+        var res = kind === "bulk" ? await pywebview.api.start_bulk(cfg)
+                                  : await pywebview.api.start_download(cfg);
+        if (res && res.need_bypass) {
+          pendingBypass = {kind: kind, cfg: cfg, list: list};
+          showBypassPrompt(!!res.running);
+          return;
+        }
+        if (res && res.error) {
+          document.getElementById("status").textContent = res.error;
+          return;
+        }
+        if (kind === "bulk" && list) {
+          // режим просмотра: список строк со статусами до самого итога;
+          // предыдущее предложение «неудавшихся» закрыто этой загрузкой
+          bulkFailedOffered = false;
+          var offer = document.getElementById("bulk-failed");
+          if (offer) offer.hidden = true;
+          showBulkView(list);
+        }
+      }
+
+      function answerBypass(choice) {
+        hideBypassPrompt();
+        var job = pendingBypass;
+        pendingBypass = null;
+        if (!job) return;
+        job.cfg.bypass = choice;
+        startJob(job.kind, job.cfg, job.list);
+      }
+
       document.getElementById("download").addEventListener("click", async function() {
         if (activeTab === "batch") {
           var text = document.getElementById("url-batch").value;
@@ -684,20 +733,10 @@
             document.getElementById("status").textContent = t("status.enter.bulk");
             return;
           }
-          var bulkRes = await pywebview.api.start_bulk({
+          await startJob("bulk", {
             urls: text,
             group: document.getElementById("group").checked,
-          });
-          if (bulkRes && bulkRes.error) {
-            document.getElementById("status").textContent = bulkRes.error;
-          } else {
-            // режим просмотра: список строк со статусами до самого итога;
-            // предыдущее предложение «неудавшихся» закрыто этой загрузкой
-            bulkFailedOffered = false;
-            var fbtn0 = document.getElementById("bulk-failed");
-            if (fbtn0) fbtn0.hidden = true;
-            showBulkView(list);
-          }
+          }, list);
           return;
         }
         var url = document.getElementById(activeTab === "video" ? "url-video" : "url-playlist").value.trim();
@@ -714,14 +753,19 @@
         if (!cfg.playlist && /[?&]list=/.test(cfg.url)) {
           document.getElementById("status").textContent = t("status.playlist.warning");
         }
-        var res = await pywebview.api.start_download(cfg);
-        if (res && res.error) document.getElementById("status").textContent = res.error;
+        await startJob("video", cfg);
       });
       document.getElementById("stop").addEventListener("click", function() {
         // yt-dlp ещё дорабатывает файл после запроса остановки, поэтому кнопку
         // блокируем до реального завершения: итог придёт в poll()
         this.disabled = true;
         pywebview.api.stop_download();
+      });
+      document.getElementById("bypass-on").addEventListener("click", function() {
+        answerBypass("on");
+      });
+      document.getElementById("bypass-off").addEventListener("click", function() {
+        answerBypass("off");
       });
       ffmpegRetry.addEventListener("click", function() {
         ffmpegRetry.style.display = "none";

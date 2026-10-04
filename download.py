@@ -19,28 +19,28 @@ from core import (
 
 
 def _raise_bypass(mode: str, settings: dict, lang: str, log):
-    """Поднимает обход по флагу --bypass. Возвращает конфиг для гашения или None.
+    """Оркестрация обхода по флагу --bypass. Возвращает контекст или None.
 
-    auto - по настройке dpi_auto: доступ -> сохранённая стратегия -> подбор
-    (тот же путь, что в gui._bypass_begin); on - включить явно; off - не
-    трогать. Ошибка запуска не роняет загрузку: причину пишем в журнал.
+    off - не трогать; on - включить явно; auto - по настройке dpi_orch;
+    ask - в терминале диалог невозможен, поэтому ведёт себя как on, но с
+    честной строкой в журнале. Что делать потом, решает dpi_after
+    (см. dpi.finish): как было / оставить / выключить.
     """
     cfg = dpi.DpiConfig(settings, lang)
     if mode == "off":
         return None
+    force = mode in ("on", "ask")
+    if mode == "ask":
+        log("warning", tr(lang, "sheet.dpi.log.cli_ask"))
     try:
-        if mode == "on":
-            res = dpi.start(cfg, log=log)
-            # чужой уже запущенный обход своим не считаем - гасить нечего
-            return cfg if res.get("ok") and not res.get("already") else None
-        res = dpi.auto(cfg, log=log)
+        res = dpi.auto(cfg, log=log, force=force)
     except Exception as exc:  # noqa: BLE001 - обход не должен ломать загрузку
         log("error", str(exc))
         return None
     if not res.get("ok"):
         log("error", res.get("error") or tr(lang, "sheet.dpi.start_fail"))
         return None
-    return cfg if res.get("started") else None
+    return {"cfg": cfg, "original": res.get("original") or {}} if res.get("started") else None
 
 
 def main() -> int:
@@ -56,9 +56,10 @@ def main() -> int:
     parser.add_argument("--lang", choices=LANGUAGES, default="en")
     parser.add_argument("--no-ftp", action="store_true",
                         help="не выгружать на FTP, даже если он включён в настройках")
-    parser.add_argument("--bypass", choices=("auto", "on", "off"), default="auto",
-                        help="обход блокировок: auto - по настройке dpi_auto и только "
-                             "когда YouTube закрыт, on - поднять явно, off - не трогать")
+    parser.add_argument("--bypass", choices=("auto", "ask", "on", "off"), default="auto",
+                        help="обход блокировок: auto - по настройке dpi_orch, "
+                             "ask - как auto, но с пометкой в журнале (в терминале "
+                             "диалога нет), on - включить явно, off - не трогать")
     args = parser.parse_args()
 
     playlist = args.playlist or is_playlist(args.url)
@@ -69,6 +70,10 @@ def main() -> int:
     dpi.registry_autofill(on_log=_log)   # свои установки (службы, типовые папки)
     dpi.seed_bundled_bypass(on_log=_log)   # вшитый обход доступен и без графики
     settings = load_settings()
+    if dpi.pending_restore():
+        # хвост от прерванной загрузки: возвращаем снятое состояние,
+        # иначе чужой обход останется выключенным
+        dpi.restore(dpi.DpiConfig(settings, args.lang), log=_log)
     ftp = None
     if not args.no_ftp:
         ftp = FtpConfig(settings, args.lang)
@@ -89,10 +94,11 @@ def main() -> int:
             ftp=ftp,
         )
     finally:
-        # обход гасим в любом исходе - и после ошибки, и после Ctrl+C,
-        # но только если гасить просили (dpi_stop_after, как в gui)
-        if bypass is not None and bypass.stop_after:
-            dpi.stop(bypass, log=_log)
+        # оркестрацию закрываем в любом исходе - и после ошибки, и после
+        # Ctrl+C: dpi_after решает, вернуть прежнее, оставить своё или
+        # погасить всё (тот же путь, что в gui._bypass_end)
+        if bypass is not None:
+            dpi.finish(bypass["cfg"], log=_log)
     return 0 if not dl.stopped else 1
 
 

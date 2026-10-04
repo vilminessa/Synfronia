@@ -50,6 +50,13 @@ load_languages()
 load_fonts()   # раньше load_themes: темы проверяют font/font_mono по списку семейств
 load_themes()
 _settings = load_settings()
+if dpi.pending_restore():
+    # Хвост от прерванной (убитой) загрузки: снятое состояние надо вернуть,
+    # иначе пользователь останется без своего обхода. В фоне - восстановление
+    # занимает пару секунд, а окно не должно ждать.
+    threading.Thread(target=dpi.restore,
+                     kwargs={"cfg": dpi.DpiConfig(_settings), "log": file_log},
+                     daemon=True, name="bypass-restore").start()
 HTML = build_page(_settings.get("theme", "scarred_mind"))
 
 # Сколько строк лога держим в памяти для JS. Буфер кольцевой: при переполнении
@@ -548,6 +555,11 @@ class Api:
         dest = self._dest or str(default_download_dir())
         if not url:
             return {"error": tr(self._lang, "p.enter_url")}
+        choice = cfg.get("bypass")   # явный выбор из диалога: "on" | "off" | None
+        if self._need_bypass_dialog(choice):
+            # режим «спрашивать»: спрашиваем ДО старта воркера, чтобы
+            # решение принималось по живому маршруту, а не по догадке
+            return {"need_bypass": True, "running": bool(dpi.status()["running"])}
         playlist = bool(cfg.get("playlist"))
         if not playlist and is_playlist(url):
             self._log("warning", tr(self._lang, "p.playlist_warn"))
@@ -566,11 +578,21 @@ class Api:
         threading.Thread(
             target=lambda: self._run(url, dest, playlist,
                                      bool(cfg.get("group", True)),
-                                     subtitles, quality, transcode, ftp),
+                                     subtitles, quality, transcode, ftp,
+                                     choice),
             daemon=True,
             name="yt-dlp",
         ).start()
         return {}
+
+    def _need_bypass_dialog(self, choice) -> bool:
+        """Режим «спрашивать» и закрытый маршрут -> пора спросить пользователя."""
+        if choice is not None:
+            return False   # выбор уже сделан (второй проход после диалога)
+        if str(settings_schema.value(self.settings, "dpi.orch") or "off") != "ask":
+            return False
+        # короткий таймаут: клик по кнопке не должен висеть минуту
+        return not dpi.probe(timeout=3)
 
     def start_bulk(self, cfg: dict) -> dict:
         """Массовая загрузка: список ссылок, каждая - отдельным запуском.
@@ -585,6 +607,9 @@ class Api:
             self._log("warning", tr(self._lang, "p.bulk_skip", n=skipped))
         if not urls:
             return {"error": tr(self._lang, "status.enter.bulk")}
+        choice = cfg.get("bypass")
+        if self._need_bypass_dialog(choice):
+            return {"need_bypass": True, "running": bool(dpi.status()["running"])}
         dest = self._dest or str(default_download_dir())
         subtitles = str(settings_schema.value(self.settings, "dl.subtitles") or "en")
         quality = str(settings_schema.value(self.settings, "dl.quality") or "lossless")
@@ -607,15 +632,16 @@ class Api:
         ftp = FtpConfig(self.settings, self._lang)
         threading.Thread(
             target=lambda: self._run_bulk(urls, dest, bool(cfg.get("group", True)),
-                                          subtitles, quality, transcode, ftp),
+                                          subtitles, quality, transcode, ftp, choice),
             daemon=True,
             name="yt-dlp-bulk",
         ).start()
         return {}
 
-    def _run(self, url, dest, playlist, group, subtitles, quality, transcode, ftp=None) -> None:
+    def _run(self, url, dest, playlist, group, subtitles, quality, transcode,
+             ftp=None, choice: str | None = None) -> None:
         crashed = False
-        bypass = self._bypass_begin()
+        ctx = self._bypass_begin(choice)
         try:
             self.dl.download(
                 url,
@@ -656,12 +682,13 @@ class Api:
                 self._progress = {"mode": "determinate", "value": 100.0}
             # обход гасим сразу после окончания - итоговая строка и подсветка
             # кнопки не должны ждать taskkill
-            self._bypass_end(bypass)
+            self._bypass_end(ctx)
         # итог загрузки (busy -> result/status) - будим сразу: кнопка и
         # статус не должны ждать heartbeat
         self._ping()
 
-    def _run_bulk(self, urls, dest, group, subtitles, quality, transcode, ftp=None) -> None:
+    def _run_bulk(self, urls, dest, group, subtitles, quality, transcode,
+                  ftp=None, choice: str | None = None) -> None:
         """Воркер массовой загрузки: последовательно, по ссылке на запуск.
 
         Ошибки ссылки не прерывают цикл: итог считается по каждой, детали - в
@@ -671,7 +698,7 @@ class Api:
         total = len(urls)
         done = failed = 0
         cancelled = False
-        bypass = self._bypass_begin()
+        ctx = self._bypass_begin(choice)
         try:
             for i, url in enumerate(urls, 1):
                 with self._lock:
@@ -733,41 +760,50 @@ class Api:
                     self._result = _RESULT_MODE.get("partial", "warn")
                     self._status = tr(self._lang, "p.done_partial",
                                       ok=done, total=total)
-            self._bypass_end(bypass)
+            self._bypass_end(ctx)
         # итог массовой: busy, result, финальные статусы строк
         self._ping()
 
-    def _bypass_begin(self):
-        """Поднимает обход перед загрузкой, если он нужен. Конфиг или None.
+    def _bypass_begin(self, bypass: str | None = None):
+        """Поднимает обход перед загрузкой. Контекст для _bypass_end или None.
 
-        Порядок, как в инструкции: сначала проверяем доступ к YouTube, при
-        закрытом маршруте пробуем сохранённую стратегию, а если и она не
-        открывает - прогоняем все стратегии и берём ту, где соединение
-        лучше (см. dpi.auto). Обход включается только при включённом
-        флажке dpi_auto. Любая ошибка здесь не должна ронять загрузку:
-        исключения глушим с записью в журнал, дальше идём как есть
-        (с закрытым маршрутом yt-dlp сам скажет).
+        Режим берётся из настройки dpi_orch: «выключено» и «спрашивать»
+        без явного выбора не трогают систему; «автоматически» и явный
+        выбор (bypass="on") снимают исходное состояние, поднимают
+        выбранную стратегию и сохраняют запись о прежнем - по ней
+        _bypass_end вернёт всё как было.
+
+        Любая ошибка здесь не должна ронять загрузку: исключения глушим
+        с записью в журнал, дальше идём как есть (с закрытым маршрутом
+        yt-dlp сам скажет).
         """
+        if bypass == "off":
+            return None   # явный выбор «продолжить без обхода»
         cfg = dpi.DpiConfig(self.settings, self._lang)
-        if not cfg.auto:   # без флажка маршрут даже не проверяем
-            return None
         try:
-            res = dpi.auto(cfg, log=self._log)
+            res = dpi.auto(cfg, log=self._log, force=(bypass == "on"))
         except Exception as exc:  # noqa: BLE001 - обход не должен ломать загрузку
             self._log("error", str(exc))
             return None
         if not res.get("ok"):
-            self._log("error", res.get("error") or tr(self._lang, "sheet.dpi.start_fail"))
+            if res.get("error"):
+                self._log("error", res["error"])
             return None
-        # started=False - доступ был и без нас: гасить в конце нечего
-        return cfg if res.get("started") else None
+        # started=False - обход не требуется или не разрешён: чинить нечего
+        if not res.get("started"):
+            return None
+        return {"cfg": cfg, "original": res.get("original") or {},
+                "strategy": res.get("strategy")}
 
-    def _bypass_end(self, cfg) -> None:
-        """Гасит обход, если поднимали сами и настройки об этом просят."""
-        if not cfg:
+    def _bypass_end(self, ctx) -> None:
+        """Что делать с обходом после загрузки - по настройке dpi_after."""
+        if not ctx:
+            return
+        cfg = ctx.get("cfg")
+        if cfg is None:
             return
         try:
-            dpi.stop(cfg, log=self._log)
+            dpi.finish(cfg, log=self._log)
         except Exception as exc:  # noqa: BLE001 - итог загрузки не должен упасть
             self._log("warning", str(exc))
 
