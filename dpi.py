@@ -28,7 +28,9 @@ import socket
 import ssl
 import subprocess
 import time
+import urllib.parse
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from ctypes import wintypes
 from pathlib import Path
 
@@ -79,49 +81,167 @@ def probe(host: str = PROBE_HOST, port: int = PROBE_PORT,
         (wrapped if wrapped is not None else raw).close()
 
 
-def probe_media(timeout: float = PROBE_TIMEOUT) -> bool:
-    """Проба googlevideo: идёт ли тело ответа, а не только рукопожатие.
+# Четыре цели компактного набора: сам YouTube, медиапоток, короткие ссылки
+# и обложки. Идея та же, что у tester из service.bat (12. Run Tests), только
+# без семнадцати целей и минут ожидания - четыре пробы идут параллельно и
+# по их составу рисуется состояние (зелёный/оранжевый/красный).
+PROBE_TARGETS = (
+    ("web", "https://www.youtube.com/"),
+    ("media", "https://redirector.googlevideo.com/videoplayback"),
+    ("short", "https://youtu.be/"),
+    ("thumb", "https://i.ytimg.com/"),
+)
 
-    Запрос делается на адрес videoplayback - тот самый, что тянет yt-dlp.
-    Сервер отвечает 404 без параметров (это успех: TLS и HTTP прошли),
-    а вот пустой ответ или таймаут означают, что CDN не отдаёт поток.
+
+def probe_url(url: str, timeout: float = PROBE_TIMEOUT) -> dict:
+    """{ok, ms, why} по одной цели: TLS-хендшейк и GET, успех = любой ответ.
+
+    Сертификат не проверяем (важен факт прохождения), код не разбираем:
+    404 на videoplayback - успех, ровно как в tester zapret. why - короткая
+    причина отказа (conn/tls/timeout/http/empty): для строки состояния и
+    журнала важнее того, ЧТО не ответило, - почему не ответило.
     """
-    host = "redirector.googlevideo.com"
+    started = time.time()
+
+    def out(ok: bool, why: str = "") -> dict:
+        return {"ok": bool(ok), "ms": int((time.time() - started) * 1000),
+                "why": why}
+
+    parts = urllib.parse.urlsplit(url)
+    host = parts.hostname or ""
+    path = parts.path or "/"
+    if parts.query:
+        path += "?" + parts.query
     try:
         raw = socket.create_connection((host, 443), timeout=timeout)
     except OSError:
-        return False
+        return out(False, "conn")
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
     wrapped = None
     try:
         wrapped = ctx.wrap_socket(raw, server_hostname=host)
-        wrapped.settimeout(timeout)
-        wrapped.sendall(
-            b"GET /videoplayback HTTP/1.1\r\n"
-            b"Host: " + host.encode("ascii") +
-            b"\r\nUser-Agent: Synfronia\r\nAccept: */*\r\nConnection: close\r\n\r\n")
-        answer = wrapped.recv(4096)
-        return bool(answer) and answer.startswith(b"HTTP/")
     except (OSError, ssl.SSLError):
-        return False
+        raw.close()
+        return out(False, "tls")
+    try:
+        wrapped.settimeout(timeout)
+        request = (f"GET {path} HTTP/1.1\r\nHost: {host}\r\n"
+                   f"User-Agent: Synfronia\r\nAccept: */*\r\n"
+                   f"Connection: close\r\n\r\n")
+        wrapped.sendall(request.encode("ascii", "ignore"))
+        answer = wrapped.recv(4096)
+        if not answer:
+            return out(False, "empty")
+        if not answer.startswith(b"HTTP/"):
+            return out(False, "http")
+        return out(True)
+    except TimeoutError:
+        return out(False, "timeout")
+    except OSError:
+        return out(False, "conn")
     finally:
-        (wrapped if wrapped is not None else raw).close()
+        wrapped.close()
+
+
+def probe_media(timeout: float = PROBE_TIMEOUT) -> bool:
+    """Проба googlevideo одной boolean-функцией (старый контракт вызовов)."""
+    return probe_url(PROBE_MEDIA, timeout)["ok"]
+
+
+def probe_targets(timeout: float = PROBE_TIMEOUT, names=None) -> dict:
+    """Все цели разом, параллельно: {state, ok, count, total, targets}.
+
+    Параллельно не ради спешки, а ради честности: закрытый маршрут раньше
+    обрывался на первой пробе, и кнопка не могла сказать, ЧТО именно не
+    ответило. state: full - все цели, partial - часть, none - ни одной.
+    """
+    chosen = [(n, u) for n, u in PROBE_TARGETS if names is None or n in names]
+    if not chosen:
+        return {"state": "none", "ok": False, "count": 0, "total": 0,
+                "targets": {}}
+    targets: dict = {}
+    with ThreadPoolExecutor(max_workers=len(chosen)) as pool:
+        futures = {pool.submit(probe_url, url, timeout): name
+                   for name, url in chosen}
+        for future in as_completed(futures):
+            name = futures[future]
+            try:
+                targets[name] = future.result()
+            except Exception as exc:  # noqa: BLE001 - сбой одной цели не валит пробу
+                targets[name] = {"ok": False, "ms": 0, "why": f"error:{exc}"[:40]}
+    count = sum(1 for target in targets.values() if target.get("ok"))
+    # порядок целей - как в PROBE_TARGETS: иначе строка журнала и карточка
+    # меняли бы вид при каждом замере (parallel as_completed)
+    order = {name: i for i, (name, _url) in enumerate(PROBE_TARGETS)}
+    targets = dict(sorted(targets.items(), key=lambda kv: order.get(kv[0], 99)))
+    if count == len(chosen):
+        state = "full"
+    elif count == 0:
+        state = "none"
+    else:
+        state = "partial"
+    return {"state": state, "ok": state == "full", "count": count,
+            "total": len(chosen), "targets": targets}
 
 
 def probe_all(timeout: float = PROBE_TIMEOUT) -> dict:
-    """Обе цели разом: веб (youtube) и медиапоток (googlevideo).
+    """Старый контракт (ok/web/media) плюс детали для журнала и статуса.
 
-    Веб проверяется первым и с тем же таймаутом: если он закрыт, вторую
-    пробу не тянем - на закрытом маршруте обе одинаково молчат, а клик
-    по кнопке не должен висеть по двойному таймауту.
+    ok = полный доступ (и веб, и поток, и остальное) - как раньше, только
+    теперь видно, при какой цели и с какой причиной случился отказ.
     """
-    web = probe(timeout=timeout)
-    if not web:
-        return {"ok": False, "web": False, "media": False}
-    media = probe_media(timeout=timeout)
-    return {"ok": media, "web": True, "media": media}
+    rep = probe_targets(timeout)
+    targets = rep["targets"]
+    return {"ok": rep["ok"], "web": bool(targets.get("web", {}).get("ok")),
+            "media": bool(targets.get("media", {}).get("ok")),
+            "state": rep["state"], "count": rep["count"],
+            "total": rep["total"], "targets": targets}
+
+
+def probe_line(report: dict) -> str:
+    """Строка журнала: маршрут одной строкой, без интерпретации.
+
+    Такое писание и делает расхождения видимыми: надпись в карточке и
+    запись в журнале складываются из одних и тех же ms и причин.
+    """
+    parts = []
+    for name, target in (report.get("targets") or {}).items():
+        if target.get("ok"):
+            parts.append(f"{name}=ok({int(target.get('ms') or 0)}ms)")
+        else:
+            parts.append(f"{name}=fail({target.get('why') or 'unknown'},"
+                         f"{int(target.get('ms') or 0)}ms)")
+    head = f"probe state={report.get('state', 'none')} {' '.join(parts)}".rstrip()
+    winws = "on" if report.get("running") else "off"
+    return (f"{head} winws={winws} pid={report.get('pid')}"
+            f" стратегия={report.get('strategy')!r}"
+            f" установка={report.get('install')!r}")
+
+
+def _status(cfg, st: dict, rep: dict) -> dict:
+    """Сводка для карточки и журнала: winws + свежая проба + что меряем."""
+    return {"running": bool(st.get("running")), "pid": st.get("pid"),
+            "strategy": cfg.bat, "install": cfg.dir,
+            "state": rep.get("state", "none"),
+            "count": int(rep.get("count") or 0),
+            "total": int(rep.get("total") or 0),
+            "targets": rep.get("targets") or {},
+            "checked_at": int(time.time())}
+
+
+def status_report(cfg, timeout: float = PROBE_TIMEOUT, log=None) -> dict:
+    """Одно место правды: свежая проба всех целей плюс состояние winws.
+
+    Каждое действие (проверка, включение, выключение, тест стратегии)
+    возвращает именно такой отчёт, поэтому строка в карточке не может
+    разойтись с тем, что реально ответило сети.
+    """
+    report = _status(cfg, status(), probe_targets(timeout))
+    if log:
+        log("info", probe_line(report))
+    return report
 
 
 def resolve(data, reachable: bool) -> str:
@@ -366,25 +486,43 @@ def _write_runner() -> Path:
     return runner
 
 
-def _wait_result(probe_dir: Path, token: str, wait: float) -> dict | None:
+def _wait_result(probe_dir: Path, token: str, wait: float,
+                 on_progress=None) -> dict | None:
     """Ждёт итог помощника: файл пишется атомарно (tmp -> move), поэтому
-    читабельный JSON уже готовый результат."""
+    читабельный JSON уже готовый результат.
+
+    Пока помощник работает, он кладёт промежуточные итоги в progress-<token>:
+    каждый новый отдаётся в on_progress - карточка рисует ход перебора, а
+    проверенные стратегии попадают в кэш цветов прямо по ходу (обрыв
+    прогона не теряет уже измеренное).
+    """
     path = probe_dir / f"result-{token}.json"
+    progress = probe_dir / f"progress-{token}.json"
     deadline = time.time() + max(5.0, wait)
+    last = None
     while time.time() < deadline:
         data = _read_json(path)
         if data is not None:
-            try:
-                path.unlink()
-            except OSError:
-                pass
+            for stale in (path, progress):
+                try:
+                    stale.unlink()
+                except OSError:
+                    pass
             return data
+        if on_progress is not None:
+            current = _read_json(progress)
+            if current is not None and current != last:
+                last = current
+                try:
+                    on_progress(current)
+                except Exception:  # noqa: BLE001 - прогресс не должен валить ожидание
+                    pass
         time.sleep(0.3)
     return None
 
 
 def _run_action(cfg: DpiConfig, action: str, payload: dict, wait: float,
-                log=None) -> dict | None:
+                log=None, on_progress=None) -> dict | None:
     """Одна операция, требующая прав. Итог придёт файлом result-<token>.json.
 
     Путь запуска: задача есть -> schtasks /Run (без UAC); нет -> регистрация
@@ -393,7 +531,12 @@ def _run_action(cfg: DpiConfig, action: str, payload: dict, wait: float,
     """
     runner = _write_runner()
     probe_dir = runner.parent
-    for stale in list(probe_dir.glob("result-*.json*")) + [probe_dir / "runner.log"]:
+    stale_files = (list(probe_dir.glob("result-*.json*"))
+                   + list(probe_dir.glob("progress-*.json*"))
+                   # хвост отмены убираем в первую очередь: оставшийся
+                   # cancel.flag убил бы уже следующий прогон
+                   + [probe_dir / "cancel.flag", probe_dir / "runner.log"])
+    for stale in stale_files:
         try:
             stale.unlink()
         except OSError:
@@ -434,7 +577,7 @@ def _run_action(cfg: DpiConfig, action: str, payload: dict, wait: float,
                              f'-File "{runner}" -Probe "{probe_dir}"')
     if not launched:
         return None
-    data = _wait_result(probe_dir, token, wait)
+    data = _wait_result(probe_dir, token, wait, on_progress=on_progress)
     # таймаут - отдельный ответ: вызывающий сам подбирает свой текст
     return data if data is not None else {"ok": False, "timeout": True}
 
@@ -456,14 +599,22 @@ def _runner_booted(timeout: float) -> bool:
 def start(cfg: DpiConfig, log=None, wait: bool = True, bat: str | None = None) -> dict:
     """Поднимает обход и ждёт, пока маршрут откроется. bat - своя стратегия.
 
-    {"ok": True} - обход работает (или уже был запущен);
-    {"ok": False, "error": ...} - не поднялось, причина готовым текстом.
+    {"ok": True, "report": ...} - обход работает и маршрут проверен;
+    {"ok": False, "error": ..., "report": ...} - причина готовым текстом.
+
+    Уже запущенный обход НЕ считается успехом без проверки: раньше такой
+    возврат отдавал «обход включён - YouTube отвечает», хотя никто ничего
+    не мерял, а маршрут мог быть закрыт - и кнопка «Проверить» тут же
+    опровергала кнопку «Включить». Теперь оба рисуют один и тот же отчёт.
     """
     st = status()
     if st["running"]:
+        report = _status(cfg, st, probe_targets())
         if log:
             log("info", cfg.t("sheet.dpi.log.already"))
-        return {"ok": True, "pid": st["pid"], "already": True}
+            log("info", probe_line(report))
+        return {"ok": report["state"] == "full", "pid": st["pid"],
+                "already": True, "report": report}
     try:
         # проверки папки и файла - ДО запроса прав: нечего поднимать ради отказа
         if cfg.mode == "args":
@@ -484,52 +635,75 @@ def start(cfg: DpiConfig, log=None, wait: bool = True, bat: str | None = None) -
             log("error", err)
         return {"ok": False, "error": err}
     if res.get("timeout"):
+        report = status_report(cfg, log=log)
         err = cfg.t("sheet.dpi.start_timeout")
         if log:
             log("error", err)
-        return {"ok": False, "error": err, "running": status()["running"]}
+        return {"ok": False, "error": err, "running": report["running"],
+                "report": report}
     if not res.get("ok"):
+        report = status_report(cfg, log=log)
         err = cfg.t("sheet.dpi.start_fail")
         if log:
             log("error", err)
-        return {"ok": False, "error": err}
+        return {"ok": False, "error": err, "running": report["running"],
+                "report": report}
     if not wait:
-        return {"ok": True, "pid": status()["pid"]}
+        report = status_report(cfg, log=log)
+        return {"ok": True, "pid": report["pid"], "report": report}
     # драйвер и ловушка поднимаются за доли секунды, но первый проб может
     # пройти мимо - ждём до cfg.timeout, проверяя маршрут каждые полсекунды
     deadline = time.time() + max(5, cfg.timeout)
+    last: dict = {}
     while time.time() < deadline:
-        # проверяем обе цели: веб может открыться раньше медиапотока, и
-        # тогда «успех» скрыл бы зависшую качку
-        if probe_all(timeout=4)["ok"]:
-            return {"ok": True, "pid": status()["pid"]}
+        # проверяем все цели: веб может открыться раньше потока, и тогда
+        # «успех» скрыл бы зависшую качку
+        last = probe_all(timeout=4)
+        if last["ok"]:
+            report = _status(cfg, status(), last)
+            if log:
+                log("info", probe_line(report))
+            return {"ok": True, "pid": status()["pid"], "report": report}
         time.sleep(0.5)
+    # таймаут: отчёт о том, что отвечало в последние полсекунды - по нему
+    # видно, открылся ли веб без потока или не открылось ничего
+    last = probe_all(timeout=4)
+    report = _status(cfg, status(), last)
     err = cfg.t("sheet.dpi.start_timeout")
     if log:
         log("error", err)
-    return {"ok": False, "error": err, "running": status()["running"]}
+        log("info", probe_line(report))
+    return {"ok": False, "error": err, "running": report["running"],
+            "report": report}
 
 
 def stop(cfg: DpiConfig, log=None) -> dict:
-    """Гасит обход: winws убивает помощник, права - задача планировщика."""
+    """Гасит обход: winws убивает помощник, права - задача планировщика.
+
+    И здесь возвращается отчёт маршрута: после выключения строка состояния
+    честно показывает, что осталось отвечать («выкл · маршрут открыт» или
+    «выкл · цели молчат»), а не просто «Обход выключен».
+    """
     st = status()
     if not st["running"]:
         if log:
             log("info", cfg.t("sheet.dpi.log.not_running"))
-        return {"ok": True, "running": False}
+        return {"ok": True, "running": False,
+                "report": status_report(cfg, log=log)}
     res = _run_action(cfg, "stop", {}, wait=45, log=log)
     if res is None or not res.get("ok"):
         err = cfg.t("sheet.dpi.no_uac") if res is None else cfg.t("sheet.dpi.stop_fail")
         if log:
             log("error", err)
-        return {"ok": False, "error": err}
+        return {"ok": False, "error": err, "report": status_report(cfg, log=log)}
     if log:
         log("info", cfg.t("sheet.dpi.log.stop"))
     for _ in range(10):   # процесс умирает почти сразу, но не обещаем
         if not status()["running"]:
             break
         time.sleep(0.3)
-    return {"ok": True, "running": status()["running"]}
+    return {"ok": True, "running": status()["running"],
+            "report": status_report(cfg, log=log)}
 
 
 # -- подбор рабочей стратегии ----------------------------------------------
@@ -603,14 +777,35 @@ try {
     LG "request read failed: $($_.Exception.Message)"
 }
 $outPath = Join-Path $Probe ("result-" + $token + ".json")
+# Живой ход перебора и кнопка «Прервать»: карточка читает прогресс через
+# Python (опрос идёт каждые 300 мс), а отмена - обычный файл, который
+# помощник замечает между стратегиями и честно доходит до Finish.
+$ProgressPath = Join-Path $Probe ("progress-" + $token + ".json")
+$CancelPath = Join-Path $Probe "cancel.flag"
 
 function Finish($Payload) {
     try {
         $tmp = "$outPath.tmp"
-        $Payload | ConvertTo-Json -Depth 6 | Set-Content -Path $tmp -Encoding UTF8
+        $Payload | ConvertTo-Json -Depth 8 | Set-Content -Path $tmp -Encoding UTF8
         Move-Item -Path $tmp -Destination $outPath -Force
         LG "result written action=$action"
     } catch { LG "result write failed: $($_.Exception.Message)" }
+}
+
+function Write-Progress {
+    # Промежуточный итог после каждой стратегии: тот же атомарный приём,
+    # что у Finish, - Python читает только целый JSON. Карточка по нему
+    # рисует «12/22», полоску и точки стратегий прямо во время прогона
+    param($Payload)
+    try {
+        $tmp = "$ProgressPath.tmp"
+        $Payload | ConvertTo-Json -Depth 8 | Set-Content -Path $tmp -Encoding UTF8
+        Move-Item -Path $tmp -Destination $ProgressPath -Force
+    } catch { LG "progress write failed: $($_.Exception.Message)" }
+}
+
+function Test-Cancel {
+    return (Test-Path $CancelPath)
 }
 
 function Stop-Winws {
@@ -663,19 +858,37 @@ function Test-Http {
     return $null
 }
 
-function Test-Targets {
-    # Both targets must answer: the web can open while the CDN does not give
-    # the stream (exactly how the third test download hung on zero bytes) -
-    # such a strategy must not be counted as working.
-    $web = Test-Http ("https://$Target/") 6
-    if ($null -eq $web) { return $null }
-    $media = Test-Http $MediaTarget 6
-    if ($null -eq $media) { return $null }
-    return ($web + $media)
+function New-TargetResult {
+    param($Ms)
+    if ($null -eq $Ms) { return [PSCustomObject]@{ ok = $false; ms = 0; why = "timeout" } }
+    return [PSCustomObject]@{ ok = $true; ms = [int]$Ms; why = "" }
+}
+
+function Measure-Targets {
+    # Компактный набор из четырёх целей - по образцу «12. Run Tests» из
+    # service.bat, но быстрее: веб, медиапоток, короткие ссылки, обложки.
+    # Веб открывается раньше потока, поэтому успехом считается только ответ
+    # ВСЕХ четырёх: частичный ответ - это оранжевый, а не «работает».
+    param([int]$Timeout = 4)
+    $web   = Test-Http ("https://$Target/") $Timeout
+    $media = Test-Http $MediaTarget $Timeout
+    $short = Test-Http "https://youtu.be/" $Timeout
+    $thumb = Test-Http "https://i.ytimg.com/" $Timeout
+    $targets = [PSCustomObject]@{
+        web   = (New-TargetResult $web)
+        media = (New-TargetResult $media)
+        short = (New-TargetResult $short)
+        thumb = (New-TargetResult $thumb)
+    }
+    $good = 0
+    foreach ($p in $targets.PSObject.Properties) { if ($p.Value.ok) { $good++ } }
+    $state = "partial"
+    if ($good -eq 4) { $state = "full" } elseif ($good -eq 0) { $state = "none" }
+    return [PSCustomObject]@{ state = $state; ok = ($state -eq "full"); count = $good; targets = $targets }
 }
 
 function Test-One {
-    # start one strategy by name and probe it: returns ms or $null
+    # start one strategy by name and probe it: measurement or $null
     param($Root, $Name)
     Stop-Winws
     Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$(Join-Path $Root $Name)`"" -WorkingDirectory $Root -WindowStyle Hidden | Out-Null
@@ -683,9 +896,11 @@ function Test-One {
     if ($up) { Hide-Winws }
     if (-not $up) { return $null }
     Start-Sleep -Milliseconds 700
-    $ms = Test-Targets
-    if ($null -eq $ms) { Start-Sleep -Milliseconds 500; $ms = Test-Targets }
-    return $ms
+    $m = Measure-Targets 4
+    # первый замер сразу после старта бывает мимо (маршрут ещё поднимается):
+    # повторяем только полный отказ, частичный ответ - честный результат
+    if ($m.state -eq "none") { Start-Sleep -Milliseconds 500; $m = Measure-Targets 4 }
+    return $m
 }
 
 # -- состояние обхода: что запущено сейчас и как это вернуть ------------------
@@ -838,12 +1053,36 @@ try {
             $results = New-Object System.Collections.Generic.List[object]
             $bestName = $null
             $bestMs = 2147483647
-            foreach ($name in @($req.configs)) {
-                $ms = Test-One $root "$name"
-                $ok = ($null -ne $ms)
-                $results.Add([PSCustomObject]@{ name = "$name"; ok = $ok; ms = $ms })
-                LG ("  {0} ms={1}" -f $name, $ms)
+            $configs = @($req.configs)
+            $total = $configs.Count
+            $i = 0
+            foreach ($name in $configs) {
+                # «Прервать»: помощник замечает файл между стратегиями и
+                # доходит до Finish с тем, что успел - проверенное не теряется
+                if (Test-Cancel) { LG "scan cancelled at $i of $total"; break }
+                $i++
+                $m = Test-One $root "$name"
+                $state = "none"
+                $ok = $false
+                $ms = $null
+                $targets = $null
+                if ($m) {
+                    $state = "$($m.state)"
+                    $ok = [bool]$m.ok
+                    $targets = $m.targets
+                    if ($ok) {
+                        $sum = 0
+                        foreach ($p in $m.targets.PSObject.Properties) { $sum += [int]$p.Value.ms }
+                        $ms = $sum
+                    }
+                }
+                $results.Add([PSCustomObject]@{ name = "$name"; ok = $ok; ms = $ms; state = $state; targets = $targets })
+                LG ("  {0} state={1} ms={2}" -f $name, $state, $ms)
                 if ($ok -and ([int]$ms -lt $bestMs)) { $bestMs = [int]$ms; $bestName = "$name" }
+                Write-Progress ([PSCustomObject]@{
+                    i = $i; n = $total; name = "$name"; state = $state
+                    results = @($results.ToArray())
+                })
             }
             # the winner stays running until the app stops it
             if ($bestName) {
@@ -854,7 +1093,7 @@ try {
             } else {
                 Stop-Winws
             }
-            Finish ([PSCustomObject]@{ ok = [bool]$bestName; action = "scan"; best = $bestName; results = @($results.ToArray()) })
+            Finish ([PSCustomObject]@{ ok = [bool]$bestName; action = "scan"; best = $bestName; cancelled = (Test-Cancel); results = @($results.ToArray()) })
         }
         default {
             Finish ([PSCustomObject]@{ ok = $false; action = $action; error = "unknown action" })
@@ -946,6 +1185,110 @@ def write_cache(name: str, install: str | None = None, ms: int = 0) -> None:
         pass
 
 
+# -- кэш проверок стратегий: цвета в списке выбора -------------------------
+# Отдельный файл от кэша подбора: подбор помнит одну лучшую стратегию,
+# здесь - результат каждой проверенной (полный/частичный/нет доступа) со
+# временем, чтобы в списке горели точки, а не догадки.
+TESTS_TTL = 24 * 3600   # возраст проверки: и маршрут, и стратегии меняются
+
+
+def _tests_path() -> Path:
+    return _probe_dir() / "strategy_tests.json"
+
+
+def _count_from_targets(targets) -> int:
+    """Сколько целей ответило в словаре {имя: {ok, ms, why}}."""
+    if not isinstance(targets, dict):
+        return 0
+    return sum(1 for target in targets.values()
+               if isinstance(target, dict) and target.get("ok"))
+
+
+def _sum_ok(targets) -> int:
+    """Сумма мс по ответившим целям - рейтинг для выбора лучшей."""
+    if not isinstance(targets, dict):
+        return 0
+    return sum(int(target.get("ms") or 0) for target in targets.values()
+               if isinstance(target, dict) and target.get("ok"))
+
+
+def tally(results) -> dict:
+    """{n, full, partial, none} - строка «✓ 12 · △ 6 · ✗ 4 из 22»."""
+    out = {"n": len(results or []), "full": 0, "partial": 0, "none": 0}
+    for record in results or []:
+        state = str((record or {}).get("state") or "none")
+        if state not in ("full", "partial"):
+            state = "none"
+        out[state] += 1
+    return out
+
+
+def tests_load(install: str | None = None) -> dict:
+    """{стратегия: {state, ts, count, ms}} одной установки - для цветов.
+
+    Ключ - путь установки (как в кэше подбора: стратегии у версий свои),
+    протухшие записи старше TESTS_TTL выкидываются при чтении.
+    """
+    try:
+        data = json.loads(_tests_path().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    own = data.get(_cache_key(install))
+    if not isinstance(own, dict):
+        return {}
+    now = time.time()
+    fresh = {str(name): record for name, record in own.items()
+             if isinstance(record, dict)
+             and now - float(record.get("ts") or 0) <= TESTS_TTL}
+    if fresh != own:
+        data[_cache_key(install)] = fresh
+        try:
+            _tests_path().write_text(json.dumps(data, ensure_ascii=False, indent=2),
+                                     encoding="utf-8")
+        except OSError:
+            pass
+    return fresh
+
+
+def tests_record(install, name, state, targets=None, ms=None) -> dict:
+    """Помечает стратегию результатом проверки (сразу после замера)."""
+    state = state if state in ("full", "partial", "none") else "none"
+    record = {"state": state, "ts": int(time.time()),
+              "count": _count_from_targets(targets), "ms": int(ms or 0)}
+    try:
+        data = json.loads(_tests_path().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    key = _cache_key(install)
+    own = dict(data.get(key) or {}) if isinstance(data.get(key), dict) else {}
+    own[str(name)] = record
+    data[key] = own
+    try:
+        _tests_path().write_text(json.dumps(data, ensure_ascii=False, indent=2),
+                                 encoding="utf-8")
+    except OSError:
+        pass
+    return record
+
+
+def cancel_scan() -> dict:
+    """Просит помощник остановить перебор после текущей стратегии.
+
+    Отмена - обычный файл: помощник замечает его между стратегиями и всё
+    равно доходит до Finish, поэтому проверенное не теряется, а окна и
+    лишних запросов прав не появляется.
+    """
+    try:
+        (_probe_dir() / "cancel.flag").write_text("1", encoding="ascii")
+    except OSError as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True}
+
+
 def _remember_strategy(name: str) -> None:
     """Записывает подобранную стратегию в настройку dpi_bat.
 
@@ -980,35 +1323,64 @@ def _runner_tail(limit: int = 8) -> list[str]:
     return [ln for ln in text.splitlines() if ln.strip()][-limit:]
 
 
-def scan(cfg: DpiConfig, log=None, wait: float | None = None) -> dict:
-    """Прогоняет все стратегии и оставляет включённой ту, где соединение лучше.
+def scan(cfg: DpiConfig, log=None, wait: float | None = None,
+         progress=None) -> dict:
+    """Прогоняет все стратегии и оставляет включённой ту, где доступ полный.
 
-    Весь перебор - одна операция с правами: помощник по очереди запускает
-    general*.bat, по каждой меряет ответ YouTube (две пробы), пишет итог в
-    JSON и не гасит победителя. Кэш обновляется.
-    {"ok": True, "best": имя, "results": [...]} либо
-    {"ok": False, "error": текст, "results": [...]}.
+    Это и есть кнопка «Проверить все»: помощник по очереди запускает
+    стратегии, меряет четыре цели, пишет ход в progress-файл и итог в JSON,
+    победителя не гасит. Каждый результат сразу уходит в кэш цветов, а
+    callback progress получает промежуточные итоги - карточка рисует
+    «12/22», полоску и точки стратегий, пока перебор идёт.
+    {"ok": True, "best": имя, "results": [...], "tally": {...}} либо
+    {"ok": False, "error": текст, "results": [...], "tally": {...}}.
     """
     names = strategies(cfg)
     if not names:
         err = cfg.t("sheet.dpi.scan_none")
         if log:
             log("error", err)
-        return {"ok": False, "error": err, "results": []}
+        return {"ok": False, "error": err, "results": [], "tally": tally([])}
+
+    def _tick(payload: dict) -> None:
+        # каждая измеренная стратегия сразу в кэш и в журнал: обрыв
+        # прогона не должен стирать уже проверенное
+        results = payload.get("results") or []
+        for record in results:
+            tests_record(cfg.dir, record.get("name"), record.get("state"),
+                         record.get("targets"), ms=record.get("ms"))
+        if log and results:
+            last = results[-1]
+            log("info", f"test [{payload.get('i')}/{payload.get('n')}] "
+                        f"{last.get('name')!r} state={last.get('state')} "
+                        f"ms={last.get('ms')}")
+        if progress:
+            progress(payload)
+
     if log:
         log("info", cfg.t("sheet.dpi.scanning"))
-    # на стратегию уходит до ~15с (старт, две пробы, спрятать окно); запас
+    # на стратегию уходит до ~20с (старт, четыре пробы, спрятать окно); запас
     # даётся с учётом всего списка и старта задачи планировщика
     data = _run_action(cfg, "scan", {"configs": names},
-                       wait=wait or (60 + 25 * len(names)), log=log)
+                       wait=wait or (90 + 30 * len(names)), log=log,
+                       on_progress=_tick)
     if data is None:
         err = cfg.t("sheet.dpi.no_uac")
         if log:
             log("error", err)
             for line in _runner_tail():
                 log("warning", f"scan: {line}")
-        return {"ok": False, "error": err, "results": []}
+        return {"ok": False, "error": err, "results": [], "tally": tally([])}
     results = data.get("results") or []
+    for record in results:
+        tests_record(cfg.dir, record.get("name"), record.get("state"),
+                     record.get("targets"), ms=record.get("ms"))
+    summary = tally(results)
+    cancelled = bool(data.get("cancelled"))
+    if log:
+        log("info", f"test done: full={summary['full']} "
+                    f"partial={summary['partial']} none={summary['none']} "
+                    f"of {summary['n']}" + (" cancelled" if cancelled else ""))
     best = data.get("best")
     if data.get("ok") and best and probe_all(timeout=4)["ok"]:
         best_ms = next((int(r.get("ms") or 0) for r in results if r.get("name") == best), 0)
@@ -1018,7 +1390,8 @@ def scan(cfg: DpiConfig, log=None, wait: float | None = None) -> dict:
         _remember_strategy(best)
         if log:
             log("info", cfg.t("sheet.dpi.log.scanned", name=best))
-        return {"ok": True, "best": str(best), "results": results}
+        return {"ok": True, "best": str(best), "results": results,
+                "tally": summary, "cancelled": cancelled}
     err = cfg.t("sheet.dpi.scan_fail")
     if data.get("error"):
         err = f"{err} ({data['error']})"
@@ -1026,7 +1399,42 @@ def scan(cfg: DpiConfig, log=None, wait: float | None = None) -> dict:
         log("error", err)
         for line in _runner_tail():
             log("warning", f"scan: {line}")
-    return {"ok": False, "error": err, "results": results}
+    return {"ok": False, "error": err, "results": results,
+            "tally": summary, "cancelled": cancelled}
+
+
+def test_one(cfg: DpiConfig, name: str = "", log=None) -> dict:
+    """Проверка одной выбранной стратегии - цвет для неё в списке.
+
+    Если обход уже работает, мерится живой маршрут: процесс трогать незачем,
+    а важнее знать, отвечает ли то, что запущено прямо сейчас. Если обхода
+    нет - выбранная стратегия поднимается и после замера остаётся
+    включённой (выключается той же кнопкой «Выключить обход»).
+    {"ok", "state", "report", "strategy", "started"} либо
+    {"ok": False, "error", "report"}.
+    """
+    name = str(name or cfg.bat)
+    st = status()
+    started = False
+    if not st["running"]:
+        res = start(cfg, log=log, wait=True, bat=name)
+        if not res.get("ok"):
+            report = res.get("report") or status_report(cfg, log=log)
+            tests_record(cfg.dir, name, "none", report.get("targets"))
+            return {"ok": False,
+                    "error": res.get("error") or cfg.t("sheet.dpi.start_fail"),
+                    "report": report, "strategy": name}
+        started = True
+        # отчёт start - свежий замер (не старше секунды), второй не нужен
+        report = res.get("report") or status_report(cfg, log=log)
+    else:
+        report = status_report(cfg, log=log)
+    tests_record(cfg.dir, name, report.get("state"), report.get("targets"),
+                 ms=_sum_ok(report.get("targets")))
+    if log:
+        log("info", f"test one {name!r} started={started}")
+    return {"ok": report.get("state") == "full", "state": report.get("state"),
+            "report": report, "strategy": name, "started": started}
 
 
 def orchestrator_path() -> Path:
@@ -1724,6 +2132,11 @@ SETTINGS = {
          # файл и узнать об этом лишь при старте
          "default": "general.bat", "options_source": "strategies", "live": True,
          "visible_if": _WHEN_MODE_BAT, "title": "sheet.dpi.bat.hint"},
+        # бейдж состояния выбранной стратегии: цвет и когда проверяли.
+        # Отдельным полем, а не внутри селекта: нативный select пункты
+        # не красит
+        {"type": "note", "transient": True, "dom": "dpi-bat-note",
+         "hidden": True, "visible_if": _WHEN_MODE_BAT},
         {"key": "args", "type": "text", "label": "sheet.dpi.args", "default": "",
          "placeholder": "--wf-tcp=80,443 --filter-udp=443 ...", "live": True,
          "visible_if": _WHEN_MODE_ARGS, "title": "sheet.dpi.args.hint"},
@@ -1733,10 +2146,16 @@ SETTINGS = {
         {"type": "actions", "transient": True, "box": "run", "row": 2,
          "buttons": [
              {"dom": "dpi-probe", "label": "sheet.dpi.probe"},
-             {"dom": "dpi-scan", "label": "sheet.dpi.scan"},
+             # «Подобрать» разменян на две проверки: выбранную стратегию
+             # (цвет для неё) и весь список (цвета для всех + лучшая)
+             {"dom": "dpi-test-one", "label": "sheet.dpi.test_one"},
+             {"dom": "dpi-test-all", "label": "sheet.dpi.test_all"},
              {"dom": "dpi-start", "label": "sheet.dpi.start"},
              {"dom": "dpi-stop", "label": "sheet.dpi.stop"},
          ]},
+        # полоса хода перебора: скрыта, пока проверка не запущена
+        {"type": "note", "transient": True, "dom": "dpi-progress", "box": "run",
+         "row": 2, "inline": True, "hidden": True},
         {"type": "note", "transient": True, "dom": "dpi-note", "box": "run",
          "row": 2, "inline": True},
     ],

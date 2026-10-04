@@ -507,6 +507,10 @@
     root.setProperty("--text", pick(c.text, "#dcdedd"));
     root.setProperty("--accent", pick(c.accent, "#628d7c"));
     root.setProperty("--warn", pick(c.warn, "#ffb454"));
+    // цвета состояний - тоже из темы: точки стратегий и строка статуса
+    // обязаны следовать за палитрой, а не гореть дефолтным зелёным
+    root.setProperty("--ok", pick(c.ok, "#3fbf6b"));
+    root.setProperty("--err", pick(c.err, "#e0554f"));
     root.setProperty("--radius-s", pick(c.radius_s, 6) + "px");
     root.setProperty("--radius-m", pick(c.radius_m, 8) + "px");
     root.setProperty("--radius-l", pick(c.radius_l, 12) + "px");

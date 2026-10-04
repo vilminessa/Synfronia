@@ -55,12 +55,36 @@
   .row input { flex: 1 1 0; min-width: 0; }
   .note { margin-top: 6px; font-size: 12px; opacity: .7; }
   /* пустое пояснение не рисуется вообще: иначе оно занимает место и
-     остаётся тёмным квадратом рядом с кнопками */
-  .note:empty { display: none; }
-  #ftp-test-note.ok { color: var(--accent); opacity: 1; }
-  #ftp-test-note.bad { color: var(--warn); opacity: 1; }
-  #dpi-note.ok { color: var(--accent); opacity: 1; }
-  #dpi-note.bad { color: var(--warn); opacity: 1; }
+     остаётся тёмным квадратом рядом с кнопками. Полоса прогресса текста
+     не содержит вовсе - для неё исключение, иначе она не появится */
+  .note:empty:not(#dpi-progress) { display: none; }
+  #ftp-test-note.ok { color: var(--ok); opacity: 1; }
+  #ftp-test-note.bad { color: var(--err); opacity: 1; }
+  /* три состояния маршрута цветами темы: полный доступ - зелёный,
+     частичный - оранжевый, нет доступа - красный. Строку состояния и
+     бейдж под селектом красит одно и то же правило */
+  #dpi-note.ok, #dpi-bat-note.ok { color: var(--ok); opacity: 1; }
+  #dpi-note.warn, #dpi-bat-note.warn { color: var(--warn); opacity: 1; }
+  #dpi-note.bad, #dpi-bat-note.bad { color: var(--err); opacity: 1; }
+  /* полоса хода проверки стратегий: ширину заливки задаёт --p из JS,
+     элемент - поле note из схемы, поэтому снимаем его «боксовость» */
+  #dpi-progress {
+    display: none;
+    width: 132px; height: 8px;
+    padding: 0;
+    background: var(--widget);
+    border-left: 0;
+    border-radius: 4px;
+    overflow: hidden;
+    opacity: 1;
+  }
+  #dpi-progress:not([hidden]) { display: inline-block; }
+  #dpi-progress::after {
+    content: ""; display: block; height: 100%;
+    width: var(--p, 0%);
+    background: var(--accent);
+    transition: width .3s ease;
+  }
 
   /* ---- подсказки ----
      Один элемент на страницу (см. initTooltips в common.js): показывается с

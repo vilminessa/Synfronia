@@ -79,8 +79,9 @@ LEGACY_DOM = {
     "ftp-test", "ftp-test-note",
     # раздел «Обход»
     "dpi-orch", "dpi-after", "dpi-install", "dpi-install-note", "dpi-dir",
-    "dpi-mode", "dpi-bat", "dpi-args", "dpi-timeout", "dpi-probe", "dpi-scan",
-    "dpi-start", "dpi-stop", "dpi-note",
+    "dpi-mode", "dpi-bat", "dpi-bat-note", "dpi-args", "dpi-timeout",
+    "dpi-probe", "dpi-test-one", "dpi-test-all",
+    "dpi-start", "dpi-stop", "dpi-progress", "dpi-note",
     "bypass-choose", "bypass-add", "bypass-detect", "bypass-remove",
     # вне панели
     "group",
@@ -523,21 +524,55 @@ def main() -> int:
     st_before = dpi.status()
     ok(dpi.probe(host="127.0.0.1", port=1, timeout=0.3) is False,
        "probe по закрытому порту = False")
-    # обе цели: на закрытом маршруте обе молчат, и молчат быстро (без сети)
+    # обе цели: на закрытом маршруте обе главные цели молчат, и молчат быстро
+    # (без сети) - но теперь с полным составом отчёта
     both = dpi.probe_all(timeout=0.001)
-    ok(both == {"ok": False, "web": False, "media": False},
+    ok(both.get("ok") is False and both.get("web") is False
+       and both.get("media") is False,
        "probe_all: закрытый маршрут даёт обе цели False", str(both))
+    ok(both.get("state") == "none" and both.get("total") == 4
+       and set(both.get("targets") or {}) == {"web", "media", "short", "thumb"},
+       "probe_all: все четыре цели в отчёте, состояние none", str(both.get("state")))
+    fails = [t for t in (both.get("targets") or {}).values() if not t.get("ok")]
+    ok(bool(fails) and all(t.get("why") and "ms" in t for t in fails),
+       "каждый отказ несёт причину и мс (для строки состояния и журнала)",
+       str(fails[:2]))
     ok(dpi.probe_media(timeout=0.001) is False,
        "проба googlevideo по недоступному адресу = False")
     ok(dpi.status() == st_before, "probe не трогает процессы", str(dpi.status()))
     # старт при непригодной папке не доходит до запроса прав администратора
     res = dpi.start(dpi.DpiConfig({"dpi_dir": ""}))
     if st_before["running"]:
-        ok(res.get("ok") is True and res.get("already") is True,
-           "start при запущенном winws = already", str(res))
+        ok(res.get("already") is True and isinstance(res.get("report"), dict),
+           "start при запущенном winws = already + отчёт маршрута", str(res))
     else:
         ok(res.get("ok") is False and bool(res.get("error")),
            "start без папки -> отказ с текстом", str(res))
+    # негатив честности: уже запущенный обход обязан пройти пробу - раньше
+    # здесь возвращался ok без проверки, и карточка писала «YouTube отвечает»
+    if st_before["running"]:
+        calls = {"n": 0}
+        real_status, real_probe = dpi.status, dpi.probe_targets
+
+        def _fake_status():
+            return {"running": True, "pid": 4242}
+
+        def _fake_probe(timeout=0, names=None):
+            calls["n"] += 1
+            return {"state": "none", "ok": False, "count": 0, "total": 4,
+                    "targets": {n: {"ok": False, "ms": 1, "why": "timeout"}
+                                for n, _ in dpi.PROBE_TARGETS}}
+
+        try:
+            dpi.status, dpi.probe_targets = _fake_status, _fake_probe
+            lied = dpi.start(dpi.DpiConfig({"dpi_dir": ""}))
+        finally:
+            dpi.status, dpi.probe_targets = real_status, real_probe
+        ok(calls["n"] >= 1, "start при already всё равно меряет маршрут",
+           f"проб {calls['n']}")
+        ok(lied.get("already") is True and lied.get("ok") is False
+           and lied.get("report", {}).get("state") == "none",
+           "закрытый маршрут при already не выдаётся за успех", str(lied))
     ok(dpi.status() == st_before, "start при отказе не трогает процессы",
        str(dpi.status()))
     # все ключи, которые модуль спрашивает у i18n, есть во всех 6 языках
@@ -661,12 +696,21 @@ def main() -> int:
     for token in ('"suspend"', '"restore"', '"state"', "Stop-Service",
                   "Start-Service", "orchestrator.json", "Get-CimInstance Win32_Service"):
         ok(token in dpi._RUNNER_SOURCE, f"помощник знает про {token}")
-    # подбор обязан мерить обе цели: веб открывается раньше потока, и стратегия
-    # «веб есть, видео нет» не должна считаться рабочей
-    ok("function Test-Targets" in dpi._RUNNER_SOURCE,
-       "помощник проверяет и youtube, и googlevideo")
-    ok("$req.media" in dpi._RUNNER_SOURCE and "$MediaTarget" in dpi._RUNNER_SOURCE,
+    # подбор обязан мерить все четыре цели: веб открывается раньше потока,
+    # и стратегия «веб есть, видео нет» не должна считаться рабочей
+    ok("function Measure-Targets" in dpi._RUNNER_SOURCE,
+       "помощник меряет компактный набор целей")
+    for host in ("$MediaTarget", "youtu.be", "i.ytimg.com"):
+        ok(host in dpi._RUNNER_SOURCE, f"помощник знает цель {host}")
+    ok("$req.media" in dpi._RUNNER_SOURCE,
        "цель медиапотока приходит из запроса")
+    # живой ход перебора и отмена: карточка рисует прогресс, кнопка
+    # «Прервать» оставляет уже проверенное
+    for token in ("Write-Progress", "Test-Cancel", "$ProgressPath",
+                  "$CancelPath"):
+        ok(token in dpi._RUNNER_SOURCE, f"помощник знает про {token}")
+    ok("progress" in dpi_src and "on_progress" in dpi_src,
+       "Python слушает промежуточные итоги помощника")
     ok('"media": PROBE_MEDIA' in dpi_src,
        "run_action кладёт цель медиапотока в запрос помощнику")
     # политика задачи читается из её же XML: маркер-файл обнуляла любая
@@ -745,14 +789,32 @@ def main() -> int:
         src = (ROOT / rel).read_text(encoding="utf-8")
         used |= set(re.findall(r'["\'](sheet\.dpi\.[\w.]+)["\']', src))
         used |= set(re.findall(r'data-i18n="(sheet\.dpi\.[\w.]+)"', src))
+    # «sheet.dpi.badge." (с точкой на конце) - начало составного ключа,
+    # самим ключом не является: t("sheet.dpi.badge." + state) собирает его
+    # из состояния, поэтому здесь проверяем семейства по частям
+    prefixes = {k for k in used if k.endswith(".")}
+    used -= prefixes
     missing = {lang: sorted(k for k in used if k not in i18n.I18N.get(lang, {}))
                for lang in i18n.LANGUAGES}
     missing = {lang: ks for lang, ks in missing.items() if ks}
     ok(not missing, f"все {len(used)} ключей обхода переведены во всех языках",
        str(missing))
+    # составные ключи: состояния, цели и причины отказов обязаны быть в каждом
+    families = {
+        "sheet.dpi.badge.": ["full", "partial", "none", "unknown"],
+        "sheet.dpi.t.": ["web", "media", "short", "thumb"],
+        "sheet.dpi.why.": ["timeout", "conn", "tls", "http", "empty"],
+    }
+    for prefix, suffixes in families.items():
+        ok(prefix in prefixes, f"составной ключ {prefix} используется в JS")
+        for lang in i18n.LANGUAGES:
+            absent = [prefix + s for s in suffixes
+                      if prefix + s not in i18n.I18N.get(lang, {})]
+            ok(not absent, f"{prefix}* переведены для {lang}", str(absent))
     # кнопки и общее пояснение обхода обязаны жить в actions settings.js
-    for ident in ('"dpi-probe":', '"dpi-scan":', '"dpi-start":', '"dpi-stop":',
-                  'getElementById("dpi-note")'):
+    for ident in ('"dpi-probe":', '"dpi-test-one":', '"dpi-test-all":',
+                  '"dpi-start":', '"dpi-stop":', "dpi_cancel()",
+                  'getElementById("dpi-note")', 'getElementById("dpi-progress")'):
         ok(ident in settings_js, f"settings.js использует {ident}")
     # выбор стратегии списком, а не свободным текстом (текст позволял указать
     # несуществующий файл и узнавать об этом лишь при старте обхода)
@@ -787,6 +849,48 @@ def main() -> int:
     ok(not missing_api,
        f"стаб пробника покрывает все {len(calls)} вызовов api из JS",
        str(missing_api))
+
+    # строка состояния и прогресс: одно место правды для всех кнопок,
+    # ход перебора - через poll(), цвета - из палитры темы
+    for ident in ("function renderDpiReport", "function updateStrategyBadge",
+                  "window.__synfDpiProgress", "function setDpiProgress",
+                  "function setDpiTestButton"):
+        ok(ident in settings_js, f"settings.js знает {ident}")
+    gui_now = (ROOT / "gui.py").read_text(encoding="utf-8")
+    ok('"dpi_progress"' in gui_now, "poll несёт ход проверки стратегий")
+    ok('"tests": dpi.tests_load' in gui_now,
+       "bypass_list отдаёт цвета проверок активной установки")
+    ok("def dpi_test_one" in gui_now and "def dpi_cancel" in gui_now,
+       "Api.dpi_test_one и Api.dpi_cancel существуют")
+    # схема: две проверки вместо «Подобрать», полоса хода и бейдж состояния
+    dpi_src_now = (ROOT / "dpi.py").read_text(encoding="utf-8")
+    for dom in ("dpi-test-one", "dpi-test-all", "dpi-progress", "dpi-bat-note"):
+        ok(f'"dom": "{dom}"' in dpi_src_now, f"в схеме обхода есть поле {dom}")
+    ok('"dpi-scan"' not in dpi_src_now,
+       "старая кнопка «Подобрать» убрана из схемы")
+    # цвета состояний - из палитры темы (а не из дефолта index.html)
+    common_js = (ROOT / "ui_src" / "common.js").read_text(encoding="utf-8")
+    ok('setProperty("--ok"' in common_js and 'setProperty("--err"' in common_js,
+       "applyTheme выводит --ok и --err из темы")
+    app_css = (ROOT / "ui_src" / "app.css").read_text(encoding="utf-8")
+    ok("#dpi-note.ok" in app_css and "var(--ok)" in app_css,
+       "полный доступ - зелёным цветом темы")
+    ok("#dpi-note.warn" in app_css and "var(--warn)" in app_css,
+       "частичный доступ - цветом предупреждения темы")
+    ok("#dpi-note.bad" in app_css and "var(--err)" in app_css
+       and "#dpi-bat-note.bad" in app_css,
+       "нет доступа - цветом ошибки темы, строка и бейдж вместе")
+    ok("#dpi-progress" in app_css and "var(--p" in app_css,
+       "полоса хода проверки существует и красится --p из JS")
+    settings_css = (ROOT / "ui_src" / "settings.css").read_text(encoding="utf-8")
+    ok(all(f".bypass-row .dot.{state}" in settings_css
+           for state in ("full", "partial", "none")),
+       "в списке стратегий три цвета состояния")
+    # i18n: подписи новых кнопок и все шесть языков
+    for key in ("sheet.dpi.test_one", "sheet.dpi.test_all", "sheet.dpi.cancel",
+                "sheet.dpi.progress", "sheet.dpi.tally", "sheet.dpi.st.on"):
+        ok(all(key in i18n.I18N.get(lang, {}) for lang in i18n.LANGUAGES),
+           f"{key} переведён на все языки")
 
     # 12. выгрузка на FTP: канал данных с возобновлением TLS-сессии
     section("12. выгрузка на FTP")
@@ -968,6 +1072,46 @@ def main() -> int:
            "новый файл записан несмотря на занятый сосед")
         ok((lock_dir / "same.txt").read_text(encoding="utf-8") == "same",
            "идентичный файл пропущен без перезаписи")
+
+        # кэш проверок стратегий: цвета живут отдельно от кэша подбора,
+        # ключ - установка, чужая папка и протухшие записи не показываются
+        dpi.tests_record(str(installed), "general (ALT9).bat", "full",
+                         {"web": {"ok": True, "ms": 10},
+                          "media": {"ok": True, "ms": 20},
+                          "short": {"ok": True, "ms": 5},
+                          "thumb": {"ok": False, "ms": 0}})
+        dpi.tests_record(str(installed), "general (ALT).bat", "partial",
+                         {"web": {"ok": True, "ms": 1},
+                          "media": {"ok": False, "ms": 0}})
+        dpi.tests_record(str(installed), "general (ALT2).bat", "none", {})
+        loaded = dpi.tests_load(str(installed))
+        ok({"general (ALT9).bat", "general (ALT).bat"} <= set(loaded),
+           "результаты проверок читаются обратно", str(sorted(loaded)))
+        ok(loaded["general (ALT9).bat"]["state"] == "full"
+           and loaded["general (ALT9).bat"]["count"] == 3,
+           "состояние и число ответивших целей записаны",
+           str(loaded["general (ALT9).bat"]))
+        ok(loaded["general (ALT).bat"]["state"] == "partial",
+           "частичный доступ отличим от полного")
+        ok(dpi.tally([{"state": "full"}, {"state": "partial"},
+                      {"state": "none"}, {"state": "?"}])
+           == {"n": 4, "full": 1, "partial": 1, "none": 2},
+           "сводка для строки «✓ … · △ … · ✗ …»",
+           str(dpi.tally([{"state": "?"}])))
+        ok(dpi.tests_load(iso / "some-other-install") == {},
+           "чужая установка своих проверок не видит")
+        # протухание: запись старше TESTS_TTL не отдаётся
+        data = json.loads(dpi._tests_path().read_text(encoding="utf-8"))
+        data[dpi._cache_key(str(installed))]["general (ALT9).bat"]["ts"] = 0
+        dpi._tests_path().write_text(json.dumps(data), encoding="utf-8")
+        ok("general (ALT9).bat" not in dpi.tests_load(str(installed)),
+           "проверка старше суток не показывается", str(dpi.tests_load(str(installed))))
+        # отмена перебора - обычный файл, который помощник замечает между
+        # стратегиями; убраться он должен при следующем запуске
+        ok(dpi.cancel_scan().get("ok") is True, "отмена пишет файл")
+        ok((dpi._probe_dir() / "cancel.flag").is_file(), "cancel.flag на месте")
+        ok('"cancel.flag"' in (ROOT / "dpi.py").read_text(encoding="utf-8"),
+           "cancel.flag убирается перед новым запуском помощника")
 
         # реестр: снятие активной установки переносит выбор, чужой id - отказ
         active = dpi.registry_load()["active"]

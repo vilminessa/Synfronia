@@ -921,39 +921,74 @@
         note.textContent = (res && res.error) || t("sheet.ftp.test_fail");
       }
     },
-    // обход блокировок: три команды делят одно пояснение (dpi-note) -
-    // каждая тут же пишет в него свой исход, как это делает ftp-test
+    // обход блокировок: каждая команда пишет в dpi-note ОДИН и тот же отчёт
+    // (вкл/выкл, сколько целей ответило, почему остальные молчат, время) -
+    // строка строится из свежего замера, а не из заготовки, иначе
+    // «Включить» похвалит маршрут, который «Проверить» опровергает
     "dpi-probe": async function() {
       var note = document.getElementById("dpi-note");
       note.className = "note";
       note.textContent = t("sheet.dpi.testing");
       var res = await pywebview.api.dpi_probe();
-      if (res && res.reachable) {
-        note.className = "note ok";
-        note.textContent = t("sheet.dpi.test_ok");
-      } else if (res && res.web && !res.media) {
-        // веб есть, а поток не идёт - это ровно та поломка, из-за которой
-        // обычная проверка «YouTube отвечает» выглядела успешной
-        note.className = "note bad";
-        note.textContent = t("sheet.dpi.test_media");
-      } else {
-        note.className = "note bad";
-        note.textContent = t("sheet.dpi.test_fail");
-      }
+      renderDpiReport(note, res && res.report);
     },
-    // полный перебор стратегий: работает минуты, поэтому пояснение сразу
-    // говорит об этом и не даёт выглядеть как зависший клик
-    "dpi-scan": async function() {
+    // одна выбранная стратегия: её цвет в списке и бейдж под селектом
+    "dpi-test-one": async function() {
       var note = document.getElementById("dpi-note");
       note.className = "note";
+      var name = configuredStrategy(panelFields["dpi.bat"]);
+      note.textContent = t("sheet.dpi.testing_one").replace("{name}", name);
+      var res = await pywebview.api.dpi_test_one(name);
+      if (res && res.error && !res.report) {
+        note.className = "note bad";
+        note.textContent = res.error;
+      } else {
+        renderDpiReport(note, res && res.report, name);
+      }
+      refreshBypasses();   // цвет точки в списке и бейдж под селектом
+    },
+    // все стратегии: идёт минуты, поэтому кнопка превращается в «Прервать»,
+    // а пока помощник меряет - poll() двигает полоску и строки через
+    // __synfDpiProgress (ниже). Отмена не теряет проверенное.
+    "dpi-test-all": async function() {
+      var note = document.getElementById("dpi-note");
+      if (dpiTestRunning) {
+        note.textContent = t("sheet.dpi.cancelling");
+        await pywebview.api.dpi_cancel();
+        return;
+      }
+      dpiTestRunning = true;
+      setDpiTestButton(true);
+      note.className = "note";
       note.textContent = t("sheet.dpi.scanning");
+      setDpiProgress({running: true, i: 0, n: 0, name: ""});
       var res = await pywebview.api.dpi_scan();
-      if (res && res.ok) {
+      dpiTestRunning = false;
+      setDpiTestButton(false);
+      setDpiProgress(null);
+      refreshBypasses();   // итоговые цвета точек и бейдж
+      var tally = (res && res.tally) || {};
+      var line = t("sheet.dpi.tally")
+        .replace("{n}", String(tally.n || 0))
+        .replace("{full}", String(tally.full || 0))
+        .replace("{partial}", String(tally.partial || 0))
+        .replace("{none}", String(tally.none || 0));
+      if (res && res.cancelled) {
+        line = t("sheet.dpi.cancelled") + " " + line;
+      }
+      if (res && res.ok && res.best) {
         note.className = "note ok";
-        note.textContent = t("sheet.dpi.scan_ok").replace("{name}", res.best || "");
+        note.textContent = line + " " +
+          t("sheet.dpi.scan_ok").replace("{name}", res.best);
+      } else if (tally.partial) {
+        // полного доступа нет, но что-то отвечает - оранжевым, не красным
+        note.className = "note warn";
+        note.textContent = line + " " +
+          ((res && res.error) || t("sheet.dpi.scan_fail"));
       } else {
         note.className = "note bad";
-        note.textContent = (res && res.error) || t("sheet.dpi.scan_fail");
+        note.textContent = line + " " +
+          ((res && res.error) || t("sheet.dpi.scan_fail"));
       }
     },
     "dpi-start": async function() {
@@ -961,9 +996,10 @@
       note.className = "note";
       note.textContent = t("sheet.dpi.starting");
       var res = await pywebview.api.dpi_start();
-      if (res && res.ok) {
-        note.className = "note ok";
-        note.textContent = t("sheet.dpi.start_ok");
+      // отчёт есть даже при «уже работало»: раньше в этом случае печаталась
+      // заготовка «YouTube отвечает» безо всякой проверки
+      if (res && res.report) {
+        renderDpiReport(note, res.report);
       } else {
         note.className = "note bad";
         note.textContent = (res && res.error) || t("sheet.dpi.start_fail");
@@ -973,9 +1009,8 @@
       var note = document.getElementById("dpi-note");
       note.className = "note";
       var res = await pywebview.api.dpi_stop();
-      if (res && res.ok) {
-        note.className = "note ok";
-        note.textContent = t("sheet.dpi.stop_ok");
+      if (res && res.report) {
+        renderDpiReport(note, res.report);
       } else {
         note.className = "note bad";
         note.textContent = (res && res.error) || t("sheet.dpi.stop_fail");
@@ -1107,6 +1142,8 @@
     if (spec.setting) pywebview.api.save_setting(spec.setting, value);
     // папка загрузки - не настройка: Python помнит её до конца сеанса
     if (spec.path === "dl.dest") pywebview.api.set_dest(value);
+    // смена стратегии меняет, чей цвет показывает бейдж под селектом
+    if (key === "dpi.bat") updateStrategyBadge();
     syncTipForces();
     applyVisibility();
     refreshNotes();
@@ -1129,6 +1166,8 @@
     // то значение, поэтому при каждом приходе настроек модал перерисовываем
     var dlg = document.getElementById("bypass-dialog");
     if (dlg && !dlg.hidden) renderStrategyRows();
+    // и бейдж под селектом - он показывает цвет стратегии из той же настройки
+    updateStrategyBadge();
   }
 
   // -- выбор обхода: пикер в панели, модал со списком и загрузкой версий ------
@@ -1138,6 +1177,11 @@
   var bypassActive = null;
   var bypassRepos = [];
   var bypassRepo = "";
+  // цвета проверок стратегий {имя: {state, ts, ms}}: приходят из
+  // bypass_list() и подклеиваются по ходу «Проверить все»
+  var bypassTests = {};
+  // идёт ли перебор: кнопка в этом состоянии просит «Прервать»
+  var dpiTestRunning = false;
 
   function activeInstall() {
     for (var i = 0; i < bypasses.length; i++) {
@@ -1194,12 +1238,14 @@
       var res = await pywebview.api.bypass_list();
       bypasses = (res && res.items) || [];
       bypassActive = (res && res.active) || null;
+      bypassTests = (res && res.tests) || {};
     } catch (e) { console.error("bypass list:", e); }
     buildBypassOptions();
     buildStrategyOptions();
     updateBypassNote();
     renderInstallRows();
     renderStrategyRows();
+    updateStrategyBadge();
   }
 
   function renderInstallRows() {
@@ -1255,6 +1301,18 @@
     names.forEach(function(name) {
       var li = document.createElement("li");
       li.className = "bypass-row" + (name === current ? " active" : "");
+      var rec = bypassTests[name];
+      // точка состояния: зелёный/оранжевый/красный из цветов темы,
+      // серый - ещё не проверяли; подсказка своя (data-tip), нативный
+      // title в карточке запрещён - он спорит с движком подсказок
+      var dot = document.createElement("span");
+      dot.className = "dot" + (rec ? " " + rec.state : "");
+      setTip(dot, rec
+        ? t("sheet.dpi.badge." + (rec.state === "full" ? "full"
+                                  : rec.state === "partial" ? "partial" : "none")) +
+          " · " + new Date((rec.ts || 0) * 1000).toLocaleString()
+        : t("sheet.dpi.badge.unknown"));
+      li.appendChild(dot);
       var label = document.createElement("span");
       label.className = "bypass-row-name";
       label.textContent = name;
@@ -1268,6 +1326,124 @@
       });
       list.appendChild(li);
     });
+  }
+
+  // -- строка состояния маршрута: один отчёт для всех кнопок ---------------
+  // Формат: «обход вкл (pid N) · 3/4 целей · поток: таймаут · 14:22:07».
+  // Цвет строки берётся из состояния темы (--ok/--warn/--err), поэтому
+  // «полный/частичный/нет доступа» читается и без слов.
+  function renderDpiReport(note, report, prefix) {
+    if (!note) return;
+    if (!report) {
+      note.className = "note bad";
+      return;
+    }
+    var head = report.running
+      ? t("sheet.dpi.st.on").replace("{pid}", String(report.pid || "?"))
+      : t("sheet.dpi.st.off");
+    var line = t("sheet.dpi.st.count")
+      .replace("{ok}", String(report.count || 0))
+      .replace("{n}", String(report.total || 0));
+    var bad = [];
+    var knownWhy = {timeout: 1, conn: 1, tls: 1, http: 1, empty: 1};
+    var targets = report.targets || {};
+    Object.keys(targets).forEach(function(name) {
+      var one = targets[name];
+      if (one && one.ok) return;
+      var why = (one && one.why) ? String(one.why) : "unknown";
+      // известные причины - переводом, остальное (включая error:...) как есть
+      var whyText = knownWhy[why] ? t("sheet.dpi.why." + why) : why;
+      bad.push(t("sheet.dpi.t." + name) + ": " + whyText);
+    });
+    if (bad.length) line += " · " + bad.join(", ");
+    var parts = [];
+    if (prefix) parts.push(prefix);
+    parts.push(head, line);
+    if (report.checked_at) {
+      parts.push(new Date(report.checked_at * 1000).toLocaleTimeString());
+    }
+    note.textContent = parts.join(" · ");
+    note.className = "note " + (report.state === "full" ? "ok"
+                                : report.state === "partial" ? "warn" : "bad");
+  }
+
+  // Полоса хода перебора: ширину задаёт CSS-переменная --p, сам элемент -
+  // та же пояснительная строка, что и dpi-note (поле из схемы)
+  function setDpiProgress(p) {
+    var bar = document.getElementById("dpi-progress");
+    if (!bar) return;
+    if (!p || !p.running) { bar.hidden = true; return; }
+    var pct = p.n ? Math.min(100, Math.round(100 * p.i / p.n)) : 0;
+    bar.hidden = false;
+    bar.style.setProperty("--p", pct + "%");
+    bar.setAttribute("role", "progressbar");
+    bar.setAttribute("aria-valuenow", String(pct));
+    bar.setAttribute("aria-valuemin", "0");
+    bar.setAttribute("aria-valuemax", "100");
+  }
+
+  function setDpiTestButton(running) {
+    var btn = panelButtons["dpi-test-all"];
+    if (!btn) return;
+    var cap = btn.querySelector("label") || btn;
+    cap.textContent = t(running ? "sheet.dpi.cancel" : "sheet.dpi.test_all");
+    btn.classList.toggle("busy", running);
+  }
+
+  // Пока помощник меряет, poll() присылает ход сюда: строка показывает
+  // текущую стратегию и её цвет, точки в модале загораются по мере
+  // проверки. null не обрабатывается - итогом занимается сама кнопка,
+  // чтобы не дублировать текст.
+  window.__synfDpiProgress = function(p) {
+    if (!p || !p.running) return;
+    dpiTestRunning = true;
+    setDpiProgress(p);
+    var results = p.results || [];
+    var last = results[results.length - 1];
+    var note = document.getElementById("dpi-note");
+    if (note) {
+      var line = t("sheet.dpi.progress")
+        .replace("{i}", String(p.i || 0))
+        .replace("{n}", String(p.n || 0))
+        .replace("{name}", p.name || "");
+      if (last) {
+        line += " · " + (last.state === "full" ? "✓"
+                         : last.state === "partial" ? "△" : "✗");
+      }
+      note.className = "note";
+      note.textContent = line;
+    }
+    if (results.length) {
+      var now = Math.floor(Date.now() / 1000);
+      results.forEach(function(r) {
+        if (r && r.name) {
+          bypassTests[r.name] = {state: r.state || "none", ts: now,
+                                 ms: r.ms || 0};
+        }
+      });
+      var dlg = document.getElementById("bypass-dialog");
+      if (dlg && !dlg.hidden) renderStrategyRows();
+    }
+  };
+
+  // Бейдж под селектом «Файл стратегии»: цвет и когда проверяли.
+  // Нативный select пункты не красит, поэтому состояние - отдельной строкой
+  function updateStrategyBadge() {
+    var note = document.getElementById("dpi-bat-note");
+    if (!note) return;
+    var name = configuredStrategy(panelFields["dpi.bat"]);
+    var rec = name ? bypassTests[name] : null;
+    if (!rec) {
+      note.className = "note";
+      note.textContent = t("sheet.dpi.badge.unknown");
+      return;
+    }
+    var key = rec.state === "full" ? "full" : rec.state === "partial"
+      ? "partial" : "none";
+    note.className = "note " + (rec.state === "full" ? "ok"
+                                : rec.state === "partial" ? "warn" : "bad");
+    note.textContent = t("sheet.dpi.badge." + key) + " · " +
+      new Date((rec.ts || 0) * 1000).toLocaleString();
   }
 
   function openBypassDialog() {

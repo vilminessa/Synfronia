@@ -82,6 +82,38 @@ STUB = """<script>
   ];
   state.bypasses = BYPASSES;
   state.bypassActive = BYPASSES[0].id;
+  // Отчёт пробы для заглушек: форма ответа - как у настоящего status_report
+  function makeReport(stateName, running) {
+    var marks = {web: true, media: true, short: true, thumb: true};
+    if (stateName === "partial") marks.media = false;
+    if (stateName === "none") marks = {web: false, media: false, short: false, thumb: false};
+    var targets = {}, count = 0;
+    Object.keys(marks).forEach(function(k) {
+      targets[k] = {ok: marks[k], ms: marks[k] ? 240 + k.length * 27 : 6000,
+                    why: marks[k] ? "" : "timeout"};
+      if (marks[k]) count++;
+    });
+    return {running: running !== false, pid: 4242, strategy: "general (ALT9).bat",
+            install: BYPASSES[0].path, state: stateName, count: count, total: 4,
+            targets: targets, checked_at: Math.floor(Date.now() / 1000)};
+  }
+  // Цвета для списка: часть стратегий уже «проверена» (точки и бейдж),
+  // одна специально остаётся непроверенной - её серый вид тоже надо уметь
+  var TESTS = {};
+  STRATS.forEach(function(name, idx) {
+    if (idx === 18) return;
+    var stateName = idx < 12 ? "full" : (idx < 17 ? "partial" : "none");
+    TESTS[name] = {state: stateName,
+                   ts: Math.floor(Date.now() / 1000) - idx * 600,
+                   count: stateName === "full" ? 4 : (stateName === "partial" ? 3 : 0),
+                   ms: 900 + idx * 13};
+  });
+  var SCAN_RESULTS = STRATS.map(function(name) {
+    var rec = TESTS[name];
+    return {name: name, ok: !!rec && rec.state === "full",
+            ms: rec ? rec.ms : null, state: rec ? rec.state : "none",
+            targets: null};
+  });
   function ok(r) { return Promise.resolve(r === undefined ? {} : r); }
   function uiState() {
     return {lang: state.lang, theme: settings.theme, ui_rev: 1, settings: settings,
@@ -118,6 +150,15 @@ STUB = """<script>
       settings[key] = value; return ok(); },
     start_download: function () { return ok({}); },
     start_ffmpeg_download: function () { return ok({}); },
+    // обход: одна стратегия и «Прервать» перебора - заглушка формы ответа,
+    // сеть в зонде не меряется
+    dpi_test_one: function (name) {
+      var report = makeReport("full");
+      report.strategy = name || report.strategy;
+      return ok({ok: true, state: "full", strategy: report.strategy,
+                 started: false, report: report});
+    },
+    dpi_cancel: function () { return ok({ok: true}); },
     // как настоящий start_bulk: парсинг теми же правилами, busy и статус [i/N]
     start_bulk: function (cfg) {
       var lines = String((cfg && cfg.urls) || "").split("\\n")
@@ -140,12 +181,21 @@ STUB = """<script>
     open_fonts_folder: function () { return ok(); },
     open_themes_folder: function () { return ok(); },
     // -- обход: панель, диалог выбора и загрузка версий ----------------------
-    dpi_probe: function () { return ok({reachable: true, web: true, media: true}); },
-    dpi_start: function () { return ok({ok: true}); },
-    dpi_stop: function () { return ok({ok: true}); },
-    dpi_scan: function () { return ok({ok: true, best: STRATS[0], results: []}); },
+    dpi_probe: function () { return ok({ok: true, report: makeReport("full")}); },
+    dpi_start: function () {
+      return ok({ok: true, already: true, pid: 4242, report: makeReport("full")});
+    },
+    dpi_stop: function () { return ok({ok: true, running: false, report: makeReport("full", false)}); },
+    dpi_scan: function () {
+      var tally = {n: SCAN_RESULTS.length, full: 0, partial: 0, none: 0};
+      SCAN_RESULTS.forEach(function(r) {
+        tally[r.state === "full" ? "full" : (r.state === "partial" ? "partial" : "none")]++;
+      });
+      return ok({ok: tally.full > 0, best: tally.full ? "general (ALT9).bat" : null,
+                 results: SCAN_RESULTS, tally: tally, cancelled: false});
+    },
     bypass_list: function () {
-      return ok({active: state.bypassActive, items: state.bypasses});
+      return ok({active: state.bypassActive, items: state.bypasses, tests: TESTS});
     },
     bypass_validate: function (path) {
       var hit = state.bypasses.filter(function (b) { return b.path === path; })[0];

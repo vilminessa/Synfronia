@@ -189,6 +189,10 @@ class Api:
         self._cancel = False
         # массовая загрузка: None вне цикла, иначе счётчики для poll()
         self._bulk: dict | None = None
+        # ход проверки стратегий («Проверить все»): None вне прогона, иначе
+        # {running, i, n, name, state, results} - им карточка рисует полоску,
+        # «12/22» и точки стратегий, пока помощник меряет
+        self._dpi_progress: dict | None = None
         # упавшие ссылки прошлой массовой загрузки — их подставляет кнопка
         # «Оставить неудавшиеся» (сбрасывается при следующем старте)
         self._bulk_failed: list[str] = []
@@ -340,6 +344,9 @@ class Api:
                 "fonts_rev": self._fonts_rev,
                 # массовая: None вне цикла, иначе {total,index,done,failed}
                 "bulk": dict(self._bulk) if self._bulk else None,
+                # ход проверки стратегий: None, пока перебор не запущен
+                "dpi_progress": (dict(self._dpi_progress)
+                                 if self._dpi_progress else None),
                 # упавшие ссылки прошлой массовой (для «Оставить неудавшиеся»)
                 "bulk_failed": list(self._bulk_failed),
                 # финальные построчные статусы последней массовой: воркер уже
@@ -869,28 +876,68 @@ class Api:
             self._log("warning", str(exc))
 
     def dpi_probe(self) -> dict:
-        """Проверка маршрута по кнопке: веб и медиапоток раздельно.
+        """«Проверить маршрут»: отчёт по всем четырём целям.
 
-        Раздельно не просто так: веб открывается раньше потока, и без
-        второй пробы кнопка «Проверить» врала бы про здоровье качки.
+        Отчёт, а не «да/нет»: строка состояния показывает, что именно
+        ответило, с какими мс, почему остальные молчат и в какую секунду
+        это было замечено. Тот же отчёт возвращают включение и выключение,
+        поэтому надписи не могут разойтись с журналом.
         """
-        res = dpi.probe_all(timeout=6)
-        return {"ok": True, "reachable": res["ok"], "web": res["web"],
-                "media": res["media"]}
+        cfg = dpi.DpiConfig(self.settings, self._lang)
+        return {"ok": True, "report": dpi.status_report(cfg, log=self._log)}
 
     def dpi_start(self) -> dict:
-        """Запуск обхода по кнопке из карточки настроек."""
+        """Запуск обхода по кнопке: в ответ - тот же отчёт, что у проверки."""
         cfg = dpi.DpiConfig(self.settings, self._lang)
         return dpi.start(cfg, log=self._log)
 
     def dpi_scan(self) -> dict:
-        """Подбор рабочей стратегии по кнопке: полный перебор, одна UAC."""
+        """«Проверить все»: перебор стратегий с живым ходом в poll().
+
+        Пока помощник меряет, dpi_progress несёт текущую стратегию и уже
+        проверенные - карточка рисует полоску, «12/22» и точки; после
+        итога поле обнуляется, и JS понимает, что пора перечитать кэш.
+        """
         cfg = dpi.DpiConfig(self.settings, self._lang)
-        res = dpi.scan(cfg, log=self._log)
+        names = dpi.strategies(cfg)
+        with self._lock:
+            self._dpi_progress = {"running": True, "i": 0, "n": len(names),
+                                  "name": "", "state": "", "results": []}
+
+        def _progress(payload: dict) -> None:
+            rows = [{"name": str(r.get("name") or ""),
+                     "state": str(r.get("state") or "none"),
+                     "ms": int(r.get("ms") or 0)}
+                    for r in (payload.get("results") or [])]
+            with self._lock:
+                self._dpi_progress = {
+                    "running": True,
+                    "i": int(payload.get("i") or 0),
+                    "n": int(payload.get("n") or len(names)),
+                    "name": str(payload.get("name") or ""),
+                    "state": str(payload.get("state") or ""),
+                    "results": rows,
+                }
+
+        try:
+            res = dpi.scan(cfg, log=self._log, progress=_progress)
+        finally:
+            with self._lock:
+                self._dpi_progress = None
         if res.get("ok"):
             # подбор пишет dpi_bat - без ui_rev карточка показала бы старое
             self._bump_ui()
+        # цвета уже в кэше: scan кладёт их по ходу, JS перечитает сам
         return res
+
+    def dpi_test_one(self, name: str = "") -> dict:
+        """«Проверить выбранную»: одна стратегия, тот же отчёт и цвет."""
+        cfg = dpi.DpiConfig(self.settings, self._lang)
+        return dpi.test_one(cfg, name=name or cfg.bat, log=self._log)
+
+    def dpi_cancel(self) -> dict:
+        """«Прервать» перебор: помощник доедет до конца текущей стратегии."""
+        return dpi.cancel_scan()
 
     def dpi_stop(self) -> dict:
         """Остановка обхода по кнопке из карточки настроек."""
@@ -911,6 +958,7 @@ class Api:
         """
         data = dpi.registry_load()
         items = []
+        active_path = None
         for item in data["items"]:
             report = dpi.validate_install(item["path"])
             entry = dict(item)
@@ -918,8 +966,13 @@ class Api:
             entry["layout"] = report["layout"]
             entry["strategies"] = report["strategies"]
             entry["issues"] = self._bypass_issues(report, self._lang)
+            if item.get("id") == data["active"]:
+                active_path = item["path"]
             items.append(entry)
-        return {"active": data["active"], "items": items}
+        return {"active": data["active"], "items": items,
+                # цвета проверок - только у активной установки: стратегии
+                # у папок свои, чужие результаты рядом показывать нельзя
+                "tests": dpi.tests_load(active_path)}
 
     def bypass_validate(self, path: str = "") -> dict:
         """«Есть ли обходники в папке» - проверка для поля выбора."""

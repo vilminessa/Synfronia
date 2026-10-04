@@ -530,6 +530,15 @@
   .bypass-row.muted { opacity: .7; cursor: default; }
   .bypass-row.muted:hover { border-color: var(--widget); }
   .bypass-row-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* точка состояния стратегии: цвета темы, серый - ещё не проверяли.
+     В подсказке - статус и время (см. renderStrategyRows) */
+  .bypass-row .dot {
+    flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%;
+    background: var(--widget);
+  }
+  .bypass-row .dot.full { background: var(--ok); }
+  .bypass-row .dot.partial { background: var(--warn); }
+  .bypass-row .dot.none { background: var(--err); }
   .bypass-row-mark { flex: 0 1 auto; font-size: 12px; opacity: .75; text-align: right; }
   .bypass-dialog-row, .bypass-repo-row { display: flex; flex-wrap: wrap; gap: 8px; }
   .bypass-dialog-row button, .bypass-repo, .bypass-row-btn, .bypass-done {

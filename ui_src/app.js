@@ -512,6 +512,9 @@
     try {
       var st = await pywebview.api.poll(since);
       if (typeof st.log_cursor === "number") since = st.log_cursor;
+      // ход проверки стратегий в карточке настроек (кнопка «Проверить все»):
+      // карточка - часть этой же страницы, поэтому полоску двигает тот же опрос
+      if (window.__synfDpiProgress) window.__synfDpiProgress(st.dpi_progress);
       if (st.logs && st.logs.length) {
         var box = document.getElementById("log");
         box.value += st.logs.join("\n") + "\n";
