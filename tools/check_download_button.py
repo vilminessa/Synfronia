@@ -105,6 +105,11 @@ def run(api, dl) -> None:
 def main() -> int:
     gui.threading.Thread = FakeThread          # type: ignore[assignment]
     api = gui.Api()
+    # Кнопку «Скачать» проверяем отдельно от обхода: режим «Спрашивать»
+    # пингует маршрут и меняет поведение старта (need_bypass), а здесь
+    # важен только сам факт busy/progress - иначе результат проверки
+    # зависел бы от того, доступен ли YouTube в момент прогона.
+    api.settings["dpi_orch"] = "off"
 
     # 1. контракт poll()
     section("1. poll() отдаёт result")
@@ -314,6 +319,44 @@ def main() -> int:
     run(api, FakeDownloader(failed=True, mode="partial", ok=3, total=5))
     ok(api.poll()["status"] == "Done with errors - downloaded 3 of 5.",
        "статус со своим файлом перевода показывает счётчики", repr(api.poll()["status"]))
+
+    # 9. режим оркестрации: диалог не должен зависеть от сети и портить кнопку
+    section("9. need_bypass в режиме «спрашивать»")
+    original_probe = gui.dpi.probe_all
+    saved_orch = api.settings.get("dpi_orch")
+
+    def start_case(orch, probe, bypass=None):
+        """Старт с подменённым пингом маршрута: сеть не участвует."""
+        gui.dpi.probe_all = lambda timeout=0: dict(probe)
+        api.settings["dpi_orch"] = orch
+        api._busy = False
+        api._result = None
+        cfg = {"url": "https://youtu.be/x", "dest": str(_ISO)}
+        if bypass is not None:
+            cfg["bypass"] = bypass
+        res = api.start_download(cfg)
+        return res, api.poll()["busy"]
+
+    try:
+        closed = {"ok": False, "web": False, "media": False}
+        opened = {"ok": True, "web": True, "media": True}
+        res, busy = start_case("ask", closed)
+        ok(res.get("need_bypass") is True,
+           "спрашивать + закрытый маршрут = need_bypass", repr(res))
+        ok(busy is False, "до ответа в диалоге загрузка не стартует", repr(busy))
+        res, busy = start_case("ask", closed, bypass="off")
+        ok("need_bypass" not in res and busy is True,
+           "явный выбор «без обхода» - старт идёт", repr(res))
+        res, busy = start_case("ask", opened)
+        ok("need_bypass" not in res and busy is True,
+           "спрашивать + открытый маршрут = старт без диалога", repr(res))
+        # негатив: выключенный обход вообще не спрашивает, даже при закрытом
+        res, busy = start_case("off", closed)
+        ok("need_bypass" not in res and busy is True,
+           "выключенный обход не спрашивает даже без сети", repr(res))
+    finally:
+        gui.dpi.probe_all = original_probe
+        api.settings["dpi_orch"] = saved_orch or "off"
 
     print(f"\nитог: {_checks - len(_fails)}/{_checks} ok")
     if _fails:

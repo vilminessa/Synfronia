@@ -627,6 +627,11 @@ def main() -> int:
        "цель медиапотока приходит из запроса")
     ok('"media": PROBE_MEDIA' in dpi_src,
        "run_action кладёт цель медиапотока в запрос помощнику")
+    # политика задачи читается из её же XML: маркер-файл обнуляла любая
+    # чистка probe/, после чего каждый запуск требовал прав администратора
+    ok("MultipleInstancesPolicy" in dpi_src,
+       "политика задачи читается из её XML, а не из файла-маркера")
+    ok("task.policy" not in dpi_src, "хрупкий маркер политики убран")
     ok("def finish(" in dpi_src, "завершение оркестрации - единая dpi.finish")
     # переносы старых ключей: выбор пользователя не теряется при обновлении
     migrations = {old: (new, mapper) for old, new, mapper in settings.MIGRATIONS}

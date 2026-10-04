@@ -44,8 +44,8 @@ from core import (
 from core import _file_log as file_log
 from core import _fonts_root as fonts_root
 from core import _themes_root as themes_root
-from paths import crash_evidence, logs_dir, minidump_fault, newest_crash_dump, \
-    webview_child_running
+from paths import crash_evidence, kill_orphan_webviews, logs_dir, \
+    minidump_fault, newest_crash_dump, webview_child_running
 
 seed_bundled_fonts()   # вшитые шрифты в папку шрифтов: первый запуск работает без сети
 dpi.registry_autofill(on_log=file_log)   # свои установки (службы, типовые папки)
@@ -1213,6 +1213,14 @@ def guard_webview(alive, closing, on_dead, *, sleep=time.sleep, tick=0.5,
 
 
 def main() -> None:
+    # Сироты WebView2 от прошлых падений окна: родитель у живых процессов
+    # существует (в том числе у компонентов Windows вроде SearchHost - их
+    # не трогаем), поэтому остаются только настоящие сироты после краша.
+    # Гасим до создания окна, чтобы новые и старые не смешивались.
+    try:
+        kill_orphan_webviews(log=file_log)
+    except Exception:  # noqa: BLE001 - уборка не должна мешать запуску
+        pass
     apply_render_env(_settings)
     api = Api()
     api.bind_main_window(webview.create_window(

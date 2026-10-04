@@ -97,6 +97,85 @@ def webview_child_running(pid: int) -> bool:
         k32.CloseHandle(snap)
 
 
+def _orphan_pids(rows) -> list[int]:
+    """PID msedgewebview2, чей родитель уже не существует.
+
+    rows - [(pid, ppid, exe), ...] по снапшоту процессов. Правило «родитель
+    мёртв» принципиально: у компонентов Windows (SearchHost) на WebView2
+    родитель жив, и убивать их нельзя - они просто перезапустятся; остаются
+    только настоящие сироты после падения нашего окна.
+    """
+    live = {pid for pid, _ppid, _name in rows}
+    return sorted(pid for pid, ppid, name in rows
+                  if str(name).lower() == "msedgewebview2.exe"
+                  and ppid > 0 and ppid not in live)
+
+
+def orphan_webviews() -> list[int]:
+    """Сироты WebView2: PID процессов, чей родитель уже умер."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+    except ImportError:
+        return []
+
+    class _Entry(ctypes.Structure):
+        _fields_ = [
+            ("dwSize", wintypes.DWORD),
+            ("cntUsage", wintypes.DWORD),
+            ("th32ProcessID", wintypes.DWORD),
+            ("th32DefaultHeapID", ctypes.c_size_t),
+            ("th32ModuleID", wintypes.DWORD),
+            ("cntThreads", wintypes.DWORD),
+            ("th32ParentProcessID", wintypes.DWORD),
+            ("pcPriClassBase", ctypes.c_long),
+            ("dwFlags", wintypes.DWORD),
+            ("szExeFile", ctypes.c_wchar * 260),
+        ]
+
+    k32 = ctypes.windll.kernel32
+    k32.CreateToolhelp32Snapshot.restype = ctypes.c_void_p
+    snap = k32.CreateToolhelp32Snapshot(0x00000002, 0)  # TH32CS_SNAPPROCESS
+    if not snap or snap == 0xFFFFFFFFFFFFFFFF:
+        return []
+    rows = []
+    try:
+        entry = _Entry()
+        entry.dwSize = ctypes.sizeof(_Entry)
+        if not k32.Process32FirstW(snap, ctypes.byref(entry)):
+            return []
+        while True:
+            rows.append((int(entry.th32ProcessID),
+                         int(entry.th32ParentProcessID), entry.szExeFile))
+            if not k32.Process32NextW(snap, ctypes.byref(entry)):
+                break
+    finally:
+        k32.CloseHandle(snap)
+    return _orphan_pids(rows)
+
+
+def kill_orphan_webviews(log=None) -> int:
+    """Гасит сироты WebView2. Возвращает, сколько убило.
+
+    Вызывается при старте приложения: после падения окна процесс WebView2
+    может пережить родителя и висеть впустую (десятки мегабайт и следы в
+    журнале). taskkill не требует прав: все эти процессы - наши, тот же
+    пользователь.
+    """
+    killed = 0
+    for pid in orphan_webviews():
+        try:
+            result = subprocess.run(["taskkill", "/PID", str(pid), "/F"],
+                                    capture_output=True, timeout=15)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if result.returncode == 0:
+            killed += 1
+            if log:
+                log("info", f"webview: убита сирота (pid {pid})")
+    return killed
+
+
 def crash_evidence() -> str:
     r"""Следы падения WebView2 одной строкой - для gui_diag.log.
 

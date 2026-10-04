@@ -47,7 +47,7 @@ _ISO = Path(tempfile.mkdtemp(prefix="synf-check-guard-"))
 os.environ["LOCALAPPDATA"] = str(_ISO)
 
 import gui  # noqa: E402
-from paths import crash_evidence, minidump_fault  # noqa: E402
+from paths import _orphan_pids, crash_evidence, minidump_fault  # noqa: E402
 
 
 def write_minidump(path, *, base=0x180000000, size=0x267000, off=0x1490af,
@@ -258,6 +258,23 @@ def main() -> int:
        "решение принимается по номеру попытки")
     ok("os._exit(0)" in src, "после перезапуска процесс уходит (тёмное окно не висит)")
     ok("closing=lambda:" in src, "надзор слушает закрытие окна")
+
+    section("10. уборка сирот WebView2")
+    ok("kill_orphan_webviews" in src, "main() убирает сирот до создания окна")
+    ok("_orphan_pids" in (ROOT / "paths.py").read_text(encoding="utf-8"),
+       "правило сироты живёт в paths.py (рядом с надзором за потомками)")
+    rows = [(100, 50, "msedgewebview2.exe"),    # родитель (50) жив - не трогаем
+            (50, 1, "python.exe"),
+            (200, 999, "msedgewebview2.exe"),   # родитель умер - сирота
+            (300, 999, "SearchHost.exe"),       # чужой процесс не берём
+            (400, 0, "msedgewebview2.exe")]     # без родителя - не наш случай
+    ok(_orphan_pids(rows) == [200], "сирота только с мёртвым родителем",
+       str(_orphan_pids(rows)))
+    # негатив главный: у WebView2 компонентов Windows родитель жив - их убивать
+    # нельзя, они просто перезапустятся (так было с процессами SearchHost)
+    search = [(501, 500, "msedgewebview2.exe"), (500, 1, "SearchHost.exe")]
+    ok(_orphan_pids(search) == [], "процесс с живым родителем не трогаем")
+    ok(_orphan_pids([]) == [], "пустой снапшот - пусто")
 
     print(f"\nитог: {_checks - len(_fails)}/{_checks} ok")
     if _fails:

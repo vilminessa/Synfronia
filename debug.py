@@ -80,34 +80,61 @@ def human_size(n: int) -> str:
     return f"{n:.1f} ГБ"
 
 
+# Что очистка не трогает НИКОГДА: пакеты обхода. Их не восстановить без
+# сети (в отличие от настроек и страницы пробника, которые собираются сами),
+# а удаление означает, что базовый обход не включится офлайн.
+ALWAYS_KEEP = ("Bypass",)
+# При обычной очистке (пункт меню 2) дополнительно живут бинарники ffmpeg и
+# журналы: без логов разбирать будущие сбои не на чем - именно из-за
+# одного такого случая пришлось восстанавливать настройки и логи вручную.
+KEEP_WITH_BIN = ("bin", "logs")
+
+
+def kept_names(keep_bin: bool) -> set:
+    """Имена, которые очистка пропускает для выбранного режима."""
+    names = set(ALWAYS_KEEP)
+    if keep_bin:
+        names.update(KEEP_WITH_BIN)
+    return names
+
+
 def preview(root: Path, keep_bin: bool) -> list[str]:
     """Строки «что будет удалено»: папки с суммарным размером и файлы."""
     if not root.is_dir():
         return [f"папки нет: {root}"]
+    keep = kept_names(keep_bin)
     out: list[str] = []
     for child in sorted(root.iterdir()):
-        if keep_bin and child.name == "bin":
-            out.append(f"  {child.name}\\  -  оставляется (--keep-bin)")
+        if child.name in keep:
+            note = "оставляется (--keep-bin)" if child.name in KEEP_WITH_BIN \
+                else "оставляется (пакеты обхода)"
+            out.append(f"  {child.name}\\  -  {note}")
             continue
         if child.is_dir():
             total = sum(f.stat().st_size for f in child.rglob("*") if f.is_file())
             out.append(f"  {child.name}\\  -  {human_size(total)}")
         else:
             out.append(f"  {child.name}  -  {human_size(child.stat().st_size)}")
+    # решения принимаются не вслепую: показываем, что именно не восстановится
+    lost = ["настройки", "реестр обхода", "кэш стратегий"]
+    if not keep_bin:
+        lost.append("журналы")
+    out.append(f"  внимание: удалятся {', '.join(lost)}")
     return out
 
 
 def clean_root(root: Path, keep_bin: bool) -> tuple[int, list[str]]:
-    """Удалить содержимое root; при keep_bin папка bin сохраняется.
+    """Удалить содержимое root; набор сохраняемого задаёт kept_names().
 
     Возвращает (сколько удалено, список ошибок). Сама папка остаётся:
     её создаёт приложение при старте.
     """
     if not root.is_dir():
         return 0, [f"папки нет: {root}"]
+    keep = kept_names(keep_bin)
     removed, errors = 0, []
     for child in sorted(root.iterdir()):
-        if keep_bin and child.name == "bin":
+        if child.name in keep:
             continue
         try:
             if child.is_dir():

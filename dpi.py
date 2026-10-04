@@ -46,11 +46,9 @@ PROBE_MEDIA = "https://redirector.googlevideo.com/videoplayback"
 WINWS_IMAGE = "winws.exe"
 # Служебная задача планировщика: её регистрация - единственный запрос прав,
 # дальше помощник поднимается через schtasks /Run без диалога UAC.
+# Политику инстансов читаем из XML самой задачи (см. _task_policy_ok).
 TASK_NAME = "SynfroniaBypass"
 RUNNER_NAME = "bypass_runner.ps1"
-# MultipleInstances, которым зарегистрирована задача; маркер лежит рядом с
-# кэшем - при смене политики задача перерегистрировывается (один запрос прав)
-TASK_POLICY = "parallel"
 
 
 # -- проверка маршрута ----------------------------------------------------
@@ -300,8 +298,7 @@ def _register_task(runner: Path) -> bool:
     False, и вызывающий уходит на запасной путь runas (как до задачи).
     """
     params = (f'-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden '
-              f'-File "{runner}" -Probe "{runner.parent}" -Register '
-              f'-Policy "{TASK_POLICY}"')
+              f'-File "{runner}" -Probe "{runner.parent}" -Register')
     if not _elevated(_powershell(), params):
         return False
     for _ in range(30):   # регистрация быстрая, но ждём с запасом
@@ -312,12 +309,26 @@ def _register_task(runner: Path) -> bool:
 
 
 def _task_policy_ok() -> bool:
-    """Задача зарегистрирована текущей политикой инстансов (см. TASK_POLICY)."""
+    """Политика инстансов задачи - читаем её из самой задачи, а не из файла.
+
+    Маркер-файл оказался хрупким: любая чистка папки probe обнуляла его, и
+    приложение начинало спрашивать права администратора на каждый запуск
+    вместо тихого срабатывания. XML задачи читается без прав и всегда
+    отражает факт. Важна одна строчка: Queue (политика старых регистраций)
+    означает, что запуск застрянет за «висячим» экземпляром.
+    """
     try:
-        text = (_probe_dir() / "task.policy").read_text(encoding="ascii")
-    except OSError:
+        out = subprocess.run([_schtasks(), "/Query", "/TN", TASK_NAME, "/XML"],
+                             capture_output=True, timeout=25)
+    except (OSError, subprocess.SubprocessError):
         return False
-    return text.strip() == TASK_POLICY
+    if out.returncode != 0:
+        return False
+    text = (out.stdout or b"").decode("utf-8", "replace")
+    found = re.search(r"<MultipleInstancesPolicy>([^<]+)</MultipleInstancesPolicy>", text)
+    if not found:   # в этом XML настройки нет - считаем политику не мешающей
+        return True
+    return found.group(1).strip() != "Queue"
 
 
 def _trigger() -> bool:
@@ -534,7 +545,6 @@ def stop(cfg: DpiConfig, log=None) -> dict:
 _RUNNER_SOURCE = r'''
 param(
     [Parameter(Mandatory = $true)][string]$Probe,
-    [string]$Policy = "",
     [switch]$Register
 )
 $ErrorActionPreference = "SilentlyContinue"
@@ -571,10 +581,7 @@ if ($Register) {
         # IgnoreNew/Queue следующий запуск ушёл бы в очередь и не стартовал
         $settings = New-ScheduledTaskSettingsSet -MultipleInstances Parallel -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
         Register-ScheduledTask -TaskName "SynfroniaBypass" -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
-        # маркер пишет сам регистрационный запуск: приложение сверяет его с
-        # текущей политикой и перерегистрирует задачу только при её смене
-        if ($Policy) { try { Set-Content -Path (Join-Path $Probe "task.policy") -Value $Policy -Encoding ASCII } catch { } }
-        LG "task registered policy=$Policy"
+        LG "task registered (MultipleInstances=Parallel)"
     } catch {
         LG "register failed: $($_.Exception.Message)"
         exit 1

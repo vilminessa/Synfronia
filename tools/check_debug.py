@@ -45,10 +45,15 @@ def make_tree(root: Path) -> None:
     (root / "bin").mkdir(parents=True)
     (root / "fonts").mkdir()
     (root / "logs").mkdir()
+    # пакет обхода - то, чего нельзя восстановить без сети: очистка его
+    # бережёт, и тест это обязан зафиксировать (так 1.10.1 была вычищена)
+    (root / "Bypass" / "zapret-x").mkdir(parents=True)
     (root / "bin" / "ffmpeg.exe").write_bytes(b"FF" * 100)
     (root / "fonts" / "MyFont.ttf").write_bytes(b"F" * 50)
     (root / "logs" / "app.log").write_text("строка\n", encoding="utf-8")
+    (root / "Bypass" / "zapret-x" / "winws.exe").write_bytes(b"MZ")
     (root / "settings.json").write_text("{}", encoding="utf-8")
+    (root / "bypasses.json").write_text("{}", encoding="utf-8")
 
 
 def main() -> int:
@@ -59,16 +64,28 @@ def main() -> int:
         preview = debug.preview(root, keep_bin=True)
         ok(any("оставляется" in l for l in preview), "preview помечает bin как сохраняемый")
         ok(any("settings.json" in l for l in preview), "preview показывает settings.json")
+        ok(any("Bypass" in l and "пакеты обхода" in l for l in preview),
+           "preview показывает сохраняемый пакет обхода", str([l for l in preview if "Bypass" in l]))
+        ok(any("внимание" in l for l in preview),
+           "preview предупреждает, что удалятся настройки/реестр/кэш")
         removed, errors = debug.clean_root(root, keep_bin=True)
         ok(not errors, "очистка с keep-bin без ошибок", str(errors))
         left = sorted(p.name for p in root.iterdir())
-        ok(left == ["bin"] and (root / "bin" / "ffmpeg.exe").is_file(),
-           "keep-bin: осталась только папка bin с ffmpeg", str(left))
-        ok(removed == 3, "keep-bin: удалено 3 элемента (fonts, logs, settings.json)",
+        ok(left == ["Bypass", "bin", "logs"]
+           and (root / "bin" / "ffmpeg.exe").is_file()
+           and (root / "logs" / "app.log").is_file(),
+           "keep-bin: остаются bin, logs и пакет обхода", str(left))
+        ok((root / "Bypass" / "zapret-x" / "winws.exe").is_file(),
+           "негатив: пакет обхода не вычищен (именно из-за этого теряли 1.10.1)")
+        ok(removed == 3, "keep-bin: удалено 3 элемента (fonts, settings.json, bypasses.json)",
            str(removed))
         removed, errors = debug.clean_root(root, keep_bin=False)
-        ok(not errors and removed == 1 and not list(root.iterdir()),
-           "полная очистка: bin удалён, папка пуста", f"{removed} {errors}")
+        after_full = sorted(p.name for p in root.iterdir())
+        # уже почищено keep-bin: из оставшегося (bin, logs) полная удаляет
+        # два элемента, а пакет обхода бережёт всегда
+        ok(not errors and removed == 2 and after_full == ["Bypass"],
+           "полная очистка: всё удалено, кроме пакета обхода",
+           f"{removed} {errors} {after_full}")
         ok(root.is_dir(), "сама папка после очистки остаётся")
         missing, errors = debug.clean_root(Path(tmp) / "нет-папки", keep_bin=False)
         ok(missing == 0 and errors, "несуществующая папка - ошибка, не исключение")
