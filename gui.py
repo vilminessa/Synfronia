@@ -624,8 +624,9 @@ class Api:
             return False   # выбор уже сделан (второй проход после диалога)
         if str(settings_schema.value(self.settings, "dpi.orch") or "off") != "ask":
             return False
-        # короткий таймаут: клик по кнопке не должен висеть минуту
-        return not dpi.probe(timeout=3)
+        # короткий таймаут: клик по кнопке не должен висеть; обе цели, иначе
+        # «веб открыт, а видео не отдаётся» выглядело бы как успех
+        return not dpi.probe_all(timeout=3)["ok"]
 
     def start_bulk(self, cfg: dict) -> dict:
         """Массовая загрузка: список ссылок, каждая - отдельным запуском.
@@ -841,8 +842,14 @@ class Api:
             self._log("warning", str(exc))
 
     def dpi_probe(self) -> dict:
-        """Проверка маршрута по кнопке: YouTube отвечает или нет."""
-        return {"ok": True, "reachable": dpi.probe()}
+        """Проверка маршрута по кнопке: веб и медиапоток раздельно.
+
+        Раздельно не просто так: веб открывается раньше потока, и без
+        второй пробы кнопка «Проверить» врала бы про здоровье качки.
+        """
+        res = dpi.probe_all(timeout=6)
+        return {"ok": True, "reachable": res["ok"], "web": res["web"],
+                "media": res["media"]}
 
     def dpi_start(self) -> dict:
         """Запуск обхода по кнопке из карточки настроек."""

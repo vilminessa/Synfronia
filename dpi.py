@@ -39,6 +39,10 @@ from settings_schema import value as _value
 PROBE_HOST = "www.youtube.com"
 PROBE_PORT = 443
 PROBE_TIMEOUT = 6.0
+# Веб может открываться, пока CDN не отдаёт видео (ровно так зависала
+# третья тестовая качка: TLS до googlevideo проходил, тело не шло).
+# Пустой ответ по этому адресу = медиапоток закрыт.
+PROBE_MEDIA = "https://redirector.googlevideo.com/videoplayback"
 WINWS_IMAGE = "winws.exe"
 # Служебная задача планировщика: её регистрация - единственный запрос прав,
 # дальше помощник поднимается через schtasks /Run без диалога UAC.
@@ -75,6 +79,51 @@ def probe(host: str = PROBE_HOST, port: int = PROBE_PORT,
         # закрытие обёртки закрывает и нижний сокет, поэтому вторую закрываем
         # только если рукопожатие не состоялось
         (wrapped if wrapped is not None else raw).close()
+
+
+def probe_media(timeout: float = PROBE_TIMEOUT) -> bool:
+    """Проба googlevideo: идёт ли тело ответа, а не только рукопожатие.
+
+    Запрос делается на адрес videoplayback - тот самый, что тянет yt-dlp.
+    Сервер отвечает 404 без параметров (это успех: TLS и HTTP прошли),
+    а вот пустой ответ или таймаут означают, что CDN не отдаёт поток.
+    """
+    host = "redirector.googlevideo.com"
+    try:
+        raw = socket.create_connection((host, 443), timeout=timeout)
+    except OSError:
+        return False
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    wrapped = None
+    try:
+        wrapped = ctx.wrap_socket(raw, server_hostname=host)
+        wrapped.settimeout(timeout)
+        wrapped.sendall(
+            b"GET /videoplayback HTTP/1.1\r\n"
+            b"Host: " + host.encode("ascii") +
+            b"\r\nUser-Agent: Synfronia\r\nAccept: */*\r\nConnection: close\r\n\r\n")
+        answer = wrapped.recv(4096)
+        return bool(answer) and answer.startswith(b"HTTP/")
+    except (OSError, ssl.SSLError):
+        return False
+    finally:
+        (wrapped if wrapped is not None else raw).close()
+
+
+def probe_all(timeout: float = PROBE_TIMEOUT) -> dict:
+    """Обе цели разом: веб (youtube) и медиапоток (googlevideo).
+
+    Веб проверяется первым и с тем же таймаутом: если он закрыт, вторую
+    пробу не тянем - на закрытом маршруте обе одинаково молчат, а клик
+    по кнопке не должен висеть по двойному таймауту.
+    """
+    web = probe(timeout=timeout)
+    if not web:
+        return {"ok": False, "web": False, "media": False}
+    media = probe_media(timeout=timeout)
+    return {"ok": media, "web": True, "media": media}
 
 
 def resolve(data, reachable: bool) -> str:
@@ -340,7 +389,7 @@ def _run_action(cfg: DpiConfig, action: str, payload: dict, wait: float,
             pass
     token = str(int(time.time() * 1000))
     req = {"action": action, "token": token, "root": cfg.dir, "target": PROBE_HOST,
-           "bat": "", "exe": "", "args": "", "configs": []}
+           "media": PROBE_MEDIA, "bat": "", "exe": "", "args": "", "configs": []}
     req.update(payload)
     try:
         (probe_dir / "request.json").write_text(
@@ -439,7 +488,9 @@ def start(cfg: DpiConfig, log=None, wait: bool = True, bat: str | None = None) -
     # пройти мимо - ждём до cfg.timeout, проверяя маршрут каждые полсекунды
     deadline = time.time() + max(5, cfg.timeout)
     while time.time() < deadline:
-        if probe():
+        # проверяем обе цели: веб может открыться раньше медиапотока, и
+        # тогда «успех» скрыл бы зависшую качку
+        if probe_all(timeout=4)["ok"]:
             return {"ok": True, "pid": status()["pid"]}
         time.sleep(0.5)
     err = cfg.t("sheet.dpi.start_timeout")
@@ -504,6 +555,7 @@ LG "addtype ok"
 $Curl = "$env:SystemRoot\System32\curl.exe"
 if (-not (Test-Path $Curl)) { $Curl = "curl.exe" }
 $Target = "www.youtube.com"
+$MediaTarget = "https://redirector.googlevideo.com/videoplayback"
 
 if ($Register) {
     # One-time task registration: afterwards the app fires schtasks /Run and
@@ -538,6 +590,7 @@ try {
     $token = "$($req.token)"
     $action = "$($req.action)"
     if ($req.target) { $Target = "$($req.target)" }
+    if ($req.media) { $MediaTarget = "$($req.media)" }
     LG "req action=$action token=$token"
 } catch {
     LG "request read failed: $($_.Exception.Message)"
@@ -590,15 +643,28 @@ function Wait-Winws {
 
 function Test-Http {
     # curl (schannel) - the same way the stock zapret tester probes: .NET
-    # SslStream answered "not-authenticated" even on a healthy host here
-    param([int]$Timeout = 6)
+    # SslStream answered "not-authenticated" even on a healthy host here.
+    # Both targets answer with a status code when the route is open: youtube
+    # gives 200, the media endpoint gives 404 without query parameters.
+    param([string]$Url, [int]$Timeout = 6)
     $sw = [Diagnostics.Stopwatch]::StartNew()
-    $code = & $Curl -sS -o NUL -m $Timeout --connect-timeout $Timeout --ssl-no-revoke -w "%{http_code}" "https://$Target/" 2>$null
+    $code = & $Curl -sS -o NUL -m $Timeout --connect-timeout $Timeout --ssl-no-revoke -w "%{http_code}" $Url 2>$null
     $exit = $LASTEXITCODE
     $ms = [int]$sw.ElapsedMilliseconds
     $code = ("$code").Trim()
     if (($exit -eq 0) -and $code -and ($code -ne "000")) { return $ms }
     return $null
+}
+
+function Test-Targets {
+    # Both targets must answer: the web can open while the CDN does not give
+    # the stream (exactly how the third test download hung on zero bytes) -
+    # such a strategy must not be counted as working.
+    $web = Test-Http ("https://$Target/") 6
+    if ($null -eq $web) { return $null }
+    $media = Test-Http $MediaTarget 6
+    if ($null -eq $media) { return $null }
+    return ($web + $media)
 }
 
 function Test-One {
@@ -610,8 +676,8 @@ function Test-One {
     if ($up) { Hide-Winws }
     if (-not $up) { return $null }
     Start-Sleep -Milliseconds 700
-    $ms = Test-Http 6
-    if ($null -eq $ms) { Start-Sleep -Milliseconds 500; $ms = Test-Http 6 }
+    $ms = Test-Targets
+    if ($null -eq $ms) { Start-Sleep -Milliseconds 500; $ms = Test-Targets }
     return $ms
 }
 
@@ -820,20 +886,55 @@ def strategies(cfg: DpiConfig) -> list[str]:
     return strategies_in(cfg.dir)
 
 
-def read_cache() -> str | None:
-    """Имя стратегии, которая последней открыла YouTube (None - не подбиралась)."""
+def _cache_path() -> Path:
+    return _probe_dir() / "strategy.json"
+
+
+def _cache_key(install: str | None) -> str:
+    """Ключ кэша - путь установки.
+
+    Стратегии у версий разные (1.9.x и 1.10.x набирают по-своему), поэтому
+    один общий кэш на все папки врал бы: выигравшая стратегия действительна
+    только внутри своей установки.
+    """
+    if install:
+        return str(install)
+    data = registry_load()
+    item = next((i for i in data["items"] if i.get("id") == data.get("active")), None)
+    return str(item.get("path") or "") if item else ""
+
+
+def read_cache(install: str | None = None) -> str | None:
+    """Стратегия, которая последней открыла YouTube для этой установки."""
     try:
-        data = json.loads((_probe_dir() / "strategy.json").read_text(encoding="utf-8"))
+        data = json.loads(_cache_path().read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-    name = data.get("best") if isinstance(data, dict) else None
-    return str(name) if name else None
+    if not isinstance(data, dict):
+        return None
+    legacy = data.get("best")
+    if legacy:   # старый общий кэш - берём и вытесняем при следующей записи
+        return str(legacy)
+    entry = data.get(_cache_key(install))
+    if isinstance(entry, dict) and entry.get("strategy"):
+        return str(entry["strategy"])
+    return None
 
 
-def write_cache(name: str) -> None:
+def write_cache(name: str, install: str | None = None, ms: int = 0) -> None:
+    """Запоминает выигравшую стратегию для конкретной установки."""
     try:
-        (_probe_dir() / "strategy.json").write_text(
-            json.dumps({"best": name}, ensure_ascii=False), encoding="utf-8")
+        data = json.loads(_cache_path().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        data = None
+    if not isinstance(data, dict):
+        data = {}
+    data.pop("best", None)   # старый формат вытесняется записью по установке
+    data[_cache_key(install)] = {"strategy": str(name), "ms": int(ms or 0),
+                                 "checked": int(time.time())}
+    try:
+        _cache_path().write_text(json.dumps(data, ensure_ascii=False, indent=2),
+                                 encoding="utf-8")
     except OSError:
         pass
 
@@ -902,8 +1003,9 @@ def scan(cfg: DpiConfig, log=None, wait: float | None = None) -> dict:
         return {"ok": False, "error": err, "results": []}
     results = data.get("results") or []
     best = data.get("best")
-    if data.get("ok") and best and probe():
-        write_cache(best)
+    if data.get("ok") and best and probe_all(timeout=4)["ok"]:
+        best_ms = next((int(r.get("ms") or 0) for r in results if r.get("name") == best), 0)
+        write_cache(best, install=cfg.dir, ms=best_ms)
         # найденная стратегия становится настроенной: кнопка «Включить обход»
         # и режим без кэша должны работать так же, как только что подобранный
         _remember_strategy(best)
@@ -1020,7 +1122,7 @@ def auto(cfg: DpiConfig, log=None, force: bool = False) -> dict:
         # выключено или «спрашивать» без явного выбора: не трогаем и, что
         # важнее, не опрашиваем YouTube при каждом запуске
         return {"ok": True, "started": False}
-    if probe():
+    if probe_all(timeout=4)["ok"]:
         if log:
             log("info", cfg.t("sheet.dpi.log.ok"))
         return {"ok": True, "started": False}
@@ -1036,12 +1138,12 @@ def auto(cfg: DpiConfig, log=None, force: bool = False) -> dict:
     if not sus.get("ok"):
         return {"ok": False, "error": sus.get("error")}
     original = sus.get("original") or {}
-    cached = read_cache()
+    cached = read_cache(install=cfg.dir)
     if cfg.mode == "bat" and cached in names:
         if log:
             log("info", cfg.t("sheet.dpi.log.cache", name=cached))
         res = start(cfg, log=log, bat=cached)
-        if res.get("ok") and probe():
+        if res.get("ok") and probe_all(timeout=4)["ok"]:
             return {"ok": True, "started": True, "strategy": cached,
                     "original": original}
         # кэш маршрут не открыл - идём в полный подбор по этой установке

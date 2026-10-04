@@ -523,6 +523,12 @@ def main() -> int:
     st_before = dpi.status()
     ok(dpi.probe(host="127.0.0.1", port=1, timeout=0.3) is False,
        "probe по закрытому порту = False")
+    # обе цели: на закрытом маршруте обе молчат, и молчат быстро (без сети)
+    both = dpi.probe_all(timeout=0.001)
+    ok(both == {"ok": False, "web": False, "media": False},
+       "probe_all: закрытый маршрут даёт обе цели False", str(both))
+    ok(dpi.probe_media(timeout=0.001) is False,
+       "проба googlevideo по недоступному адресу = False")
     ok(dpi.status() == st_before, "probe не трогает процессы", str(dpi.status()))
     # старт при непригодной папке не доходит до запроса прав администратора
     res = dpi.start(dpi.DpiConfig({"dpi_dir": ""}))
@@ -582,6 +588,16 @@ def main() -> int:
             cache_file.unlink()
         except OSError:
             pass
+        # кэш стратегий раздельный по установкам: выигравшая стратегия одной
+        # папки не обязана работать в другой (1.9.x и 1.10.x набирают по-своему)
+        other = tmpdir / "other-install"
+        other.mkdir(exist_ok=True)
+        dpi.write_cache("general (ALT9).bat", install=str(tmpdir), ms=613)
+        ok(dpi.read_cache(install=str(tmpdir)) == "general (ALT9).bat",
+           "кэш читается для своей установки", str(dpi.read_cache(install=str(tmpdir))))
+        ok(dpi.read_cache(install=str(other)) is None,
+           "кэш чужой установки не подхватывается",
+           str(dpi.read_cache(install=str(other))))
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
     # невидимость работы: помощник глушит проверку обновлений zapret (иначе
@@ -603,6 +619,14 @@ def main() -> int:
     for token in ('"suspend"', '"restore"', '"state"', "Stop-Service",
                   "Start-Service", "orchestrator.json", "Get-CimInstance Win32_Service"):
         ok(token in dpi._RUNNER_SOURCE, f"помощник знает про {token}")
+    # подбор обязан мерить обе цели: веб открывается раньше потока, и стратегия
+    # «веб есть, видео нет» не должна считаться рабочей
+    ok("function Test-Targets" in dpi._RUNNER_SOURCE,
+       "помощник проверяет и youtube, и googlevideo")
+    ok("$req.media" in dpi._RUNNER_SOURCE and "$MediaTarget" in dpi._RUNNER_SOURCE,
+       "цель медиапотока приходит из запроса")
+    ok('"media": PROBE_MEDIA' in dpi_src,
+       "run_action кладёт цель медиапотока в запрос помощнику")
     ok("def finish(" in dpi_src, "завершение оркестрации - единая dpi.finish")
     # переносы старых ключей: выбор пользователя не теряется при обновлении
     migrations = {old: (new, mapper) for old, new, mapper in settings.MIGRATIONS}

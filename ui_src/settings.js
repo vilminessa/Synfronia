@@ -931,6 +931,11 @@
       if (res && res.reachable) {
         note.className = "note ok";
         note.textContent = t("sheet.dpi.test_ok");
+      } else if (res && res.web && !res.media) {
+        // веб есть, а поток не идёт - это ровно та поломка, из-за которой
+        // обычная проверка «YouTube отвечает» выглядела успешной
+        note.className = "note bad";
+        note.textContent = t("sheet.dpi.test_media");
       } else {
         note.className = "note bad";
         note.textContent = t("sheet.dpi.test_fail");
