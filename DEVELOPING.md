@@ -141,11 +141,11 @@ downloader.py      - загрузка через yt-dlp, постпроцесс�
 download.py        - CLI-обёртка
 ui_src/            - исходники интерфейса (html/css/js)
 ui.py              - сгенерированный из ui_src/ интерфейс (в репозитории)
-tools/             - сборщик ui.py, зонды и проверки
+tools/             - сборщик ui.py, стамп версии из тега, зонды и проверки
 assets/fonts/      - вшитые тестовые шрифты (OFL 1.1) и их лицензии
 assets/bypass/     - вшитый пакет обхода (MIT) и его лицензия
 based_settings.json- настройки по умолчанию
-version.py         - версия приложения (единственный источник)
+version.py         - версия (__version__) и подпись сборки (BUILD_LABEL)
 Synfronia.spec     - конфиг сборки exe
 LICENSE            - PolyForm Noncommercial 1.0.0
 THIRD_PARTY_NOTICES.md - источники и лицензии компонентов
@@ -162,22 +162,54 @@ python -m PyInstaller Synfronia.spec --distpath . --workpath build --noconfirm
 
 ## Выпуск версии
 
-Версия живёт в одном месте — `version.py` (`__version__`). От неё питаются:
-подпись «Synfronia by Vilminessa - vX.Y.Z» в главном окне, ключ
-`app_version` (`based_settings.json`), VersionInfo в свойствах exe и сверка
-тега в CI.
+Версия берётся **из тега при сборке** — коммитов с бампом больше не нужно.
+Два значения в `version.py`:
 
-1. поднять `__version__` в `version.py` и `app_version` в
-   `based_settings.json` (проверки не дают забыть);
-2. закоммитить;
-3. поставить тег `vX.Y.Z` (допускается `X.Y.Z.N`, например `v1.2.7.4`) и
-   запушить — workflow **release** сверит тег с версией и выпустит релиз.
+- `__version__` — числовая версия (`X.Y.Z[.N]`): её читают `Synfronia.spec`
+  (VersionInfo exe), `settings_schema` (дефолт `app_version`) и проверки
+  (пара `version.py` ↔ `based_settings.json` должна совпадать);
+- `BUILD_LABEL` — подпись интерфейса (полный тег сборки); пустая строка =
+  собрано не из тега, и футер показывает **`unreleased`**.
 
-**Релиз по тегу.** Push тега `v*` запускает `.github/workflows/release.yml`:
-проверки и пробники вёрстки → сборка exe → публикация в GitHub Release →
-**SLSA-провенанс** (`Synfronia.exe.intoto.jsonl`, slsa-github-generator,
-keyless-подпись через OIDC) → `gh attestation verify`. Ручной запуск
-(workflow_dispatch) проходит тот же путь без публикации. Линт workflow:
+Перед PyInstaller workflow зовёт `python tools/stamp_version.py <тег>`: он
+вписывает оба значения прямо в рабочее дерево CI (в git ничего не попадает).
+Локально та же утилита пригодится перед ручной сборкой exe из тега.
+
+### Две полосы
+
+| | тег | откуда собирается | что выходит |
+| --- | --- | --- | --- |
+| **бета** | `b<номер>` (напр. `b1.2.7.41`) | `dev` | GitHub Release с пометкой **Pre-release** |
+| **релиз** | `v<номер>` (напр. `v1.2.7.5`) | `main` | обычный релиз + SLSA-провенанс |
+
+Гарды в `release.yml`: `v`-тег обязан входить в `main`, `b`-тег — в `dev`
+(`git merge-base --is-ancestor`, у checkout `fetch-depth: 0` — иначе у
+shallow-клона нет общей истории). Формат тега — `[vb]X.Y.Z[.N]`, максимум
+четыре компонента (Windows VersionInfo не принимает больше, поэтому
+«промежуточность» несёт префикс `b`, а не пятый разряд версии).
+
+### Порядок
+
+1. коммит с изменениями (версию не трогаем);
+2. запушить ветку, поставить тег и запушить его:
+   - **бета**: тег ставится прямо на коммит из `dev`;
+   - **релиз**: сначала поднять `main` до `dev` и запушить обе,
+     потом ставить тег:
+     ```bat
+     git push forgejo dev
+     git branch -f main dev
+     git push origin main forgejo/main
+     git tag v1.2.7.5
+     git push origin v1.2.7.5
+     ```
+3. workflow **release**: проверки и гарды → стамп версии из тега → сборка
+   exe → публикация (`--prerelease` для `b*`) → **SLSA-провенанс**
+   (`Synfronia.exe.intoto.jsonl`, keyless-подпись через OIDC) →
+   `gh attestation verify`.
+
+Неверный формат тега, тег вне своей ветки или расхождение пары версий валятся
+**до** сборки exe и публикации. Ручной запуск (`workflow_dispatch`) проходит
+тот же путь без публикации и стампа (сборка «как есть»). Линт workflow:
 `python tools/check_release_yml.py`.
 
 ## Ссылочная справка

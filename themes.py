@@ -19,7 +19,7 @@ from pathlib import Path
 
 import settings_schema
 import ui as _ui
-from version import __version__
+from version import BUILD_LABEL, __version__
 
 from i18n import I18N
 from fonts import _clean_family, families as _loaded_families, font_css, font_vars, load_fonts
@@ -1249,7 +1249,9 @@ def _fill_placeholders(template: str, theme: dict, picked: dict) -> str:
     page = page.replace("__SETTINGS_HTML__", _ui.SETTINGS_HTML)
     page = page.replace("__I18N__", _js_json(I18N))
     page = page.replace("__THEMES__", _js_json(themes_embed()))
-    page = page.replace("__APP_VERSION__", __version__)
+    # подпись версии: BUILD_LABEL (тег сборки, проставлен stamp_version.py)
+    # либо «unreleased» - коммитов с бампом версии больше не нужно
+    page = page.replace("__APP_VERSION__", BUILD_LABEL or "unreleased")
     # __SETTINGS_SCHEMA__ лежит внутри settings.js, поэтому подменяем после него
     page = page.replace("__SETTINGS_SCHEMA__", _js_json(settings_schema.schema_json()))
     return page

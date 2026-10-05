@@ -1,7 +1,9 @@
 """Линт release.yml: ловит ошибки CI до пуша (их видно только на раннере).
 
 Что проверяем (.github/workflows/release.yml):
-  1. YAML валиден, есть все джобы и оба триггера (теги v* и dispatch);
+  1. YAML валиден, есть все джобы и все триггера (теги v* и b*, dispatch),
+     а сам тег обязан быть [vb]X.Y.Z[.N] (четыре компонента - предел
+     Windows VersionInfo);
   2. внешние uses запинены: SHA (40 hex) или версионный тег - ветки (@main)
      запрещены;
   3. permissions джоба generator-generic-ossf-slsa3-publish покрывают
@@ -17,7 +19,11 @@
      уже собранный артефакт;
   6. зонд ui_fonts_probe эмулирует prefers-reduced-motion: no-preference -
      раннеры Windows отдают reduce и гасят CSS-анимации, из-за чего падали
-     проверки кнопки «Скачать» и хвоста подсказки.
+     проверки кнопки «Скачать» и хвоста подсказки;
+  7. две полосы: v-тег обязан входить в main, b-тег - в dev (merge-base на
+     полной истории), версия вписывается в рабочее дерево CI
+     tools/stamp_version.py до PyInstaller (коммитов с бампом не нужно),
+     b-релизы публикуются как Pre-release.
 
 Запуск:  python tools/check_release_yml.py
 """
@@ -69,22 +75,27 @@ def main() -> int:
     ok(not missing, "все джобы на месте", str(missing))
     trig = data.get("on", data.get(True))  # YAML 1.1 превращает ключ on в True
     tags = ((trig or {}).get("push") or {}).get("tags") or []
-    ok("v*" in tags, "триггер по тегам v*", str(tags))
+    ok("v*" in tags and "b*" in tags, "триггеры по тегам v* и b*", str(tags))
     ok("workflow_dispatch" in (trig or {}), "триггер workflow_dispatch (проба без публикации)")
 
     ver_file = ROOT / "version.py"
-    ok(ver_file.is_file(), "version.py существует (единственный источник версии)")
+    ok(ver_file.is_file(), "version.py существует (числовой источник версии)")
     if ver_file.is_file():
-        # версия — X.Y.Z или четырёхкомпонентная X.Y.Z.N (v1.2.8)
+        # версия — X.Y.Z или четырёхкомпонентная X.Y.Z.N (предел VersionInfo)
         m = re.search(r'__version__\s*=\s*"(\d+)\.(\d+)\.(\d+)(?:\.(\d+))?"',
                       ver_file.read_text(encoding="utf-8"))
         ok(m is not None, "__version__ в формате X.Y.Z[.N]", str(m))
+        ok('BUILD_LABEL = ""' in ver_file.read_text(encoding="utf-8"),
+           "BUILD_LABEL есть (его заполняет stamp_version при сборке из тега)")
     steps = jobs.get("verify", {}).get("steps") or []
-    vsteps = [s for s in steps if "Версия совпадает с тегом" in str(s.get("name", ""))]
-    ok(bool(vsteps), "в verify есть шаг сверки версии с тегом")
+    vsteps = [s for s in steps if "Формат тега" in str(s.get("name", ""))]
+    ok(bool(vsteps), "в verify есть шаг проверки формата тега")
     if vsteps:
         ok("refs/tags/" in str(vsteps[0].get("if", "")),
-           "сверка версии выполняется только на тегах", str(vsteps[0].get("if", "")))
+           "проверка формата выполняется только на тегах", str(vsteps[0].get("if", "")))
+        vrun = str(vsteps[0].get("run", ""))
+        ok("[vb]" in vrun and "{2,3}" in vrun,
+           "формат: префикс v или b и до четырёх компонентов", vrun[:100])
 
     section("2. пиннинг внешних экшенов")
     bad: list[str] = []
@@ -151,6 +162,51 @@ def main() -> int:
        and "prefers-reduced-motion" in probe
        and "no-preference" in probe,
        "ui_fonts_probe эмулирует no-preference (CSS-анимации не погашены)")
+
+    section("7. полосы: v->main, b->dev, версия из тега без коммитов")
+    checkouts = [s for s in steps if "actions/checkout@" in str(s.get("uses", ""))]
+    ok(bool(checkouts)
+       and (checkouts[0].get("with") or {}).get("fetch-depth") == 0,
+       "verify: checkout с fetch-depth 0 (иначе merge-base не видит историю)",
+       str(checkouts[0].get("with") if checkouts else None))
+    main_step = next((s for s in steps if "origin/main" in str(s.get("run", ""))), None)
+    dev_step = next((s for s in steps if "origin/dev" in str(s.get("run", ""))), None)
+    ok(main_step is not None and dev_step is not None,
+       "оба гарда на месте: тег v -> main, тег b -> dev")
+    if main_step is not None:
+        ok("refs/tags/v" in str(main_step.get("if", ""))
+           and "origin/dev" not in str(main_step.get("run", "")),
+           "v-гард смотрит только в main", str(main_step.get("if", "")))
+    if dev_step is not None:
+        ok("refs/tags/b" in str(dev_step.get("if", ""))
+           and "origin/main" not in str(dev_step.get("run", "")),
+           "b-гард смотрит только в dev", str(dev_step.get("if", "")))
+    ok("merge-base --is-ancestor" in str(main_step.get("run", ""))
+       and "merge-base --is-ancestor" in str(dev_step.get("run", "")),
+       "гарды используют merge-base --is-ancestor")
+
+    all_runs = [str(s.get("run", "")) for j in jobs.values()
+                for s in j.get("steps", [])]
+    ok(not any('test "$ver"' in r for r in all_runs),
+       "равенство тега и version.py убрано (версию вписывает stamp)")
+    build_steps = jobs.get("build", {}).get("steps") or []
+    stamp_idx = next((i for i, s in enumerate(build_steps)
+                      if "stamp_version.py" in str(s.get("run", ""))), None)
+    pyi_idx = next((i for i, s in enumerate(build_steps)
+                    if "PyInstaller" in str(s.get("run", ""))), None)
+    ok(stamp_idx is not None, "в build есть шаг «Версия из тега» (stamp_version.py)")
+    ok(stamp_idx is not None and pyi_idx is not None and stamp_idx < pyi_idx,
+       "стамп идёт ДО PyInstaller (spec читает version.py при сборке)",
+       f"stamp={stamp_idx} pyinstaller={pyi_idx}")
+    if stamp_idx is not None:
+        ok("refs/tags/" in str(build_steps[stamp_idx].get("if", "")),
+           "стамп только на тегах (dispatch собирается как есть)",
+           str(build_steps[stamp_idx].get("if", "")))
+    pub_steps = jobs.get("python-publish", {}).get("steps") or []
+    pub_run = str((pub_steps[-1] if pub_steps else {}).get("run", ""))
+    ok('[[ "$GITHUB_REF_NAME" == b* ]]' in pub_run
+       and "extra+=(--prerelease)" in pub_run,
+       "b-теги публикуются как Pre-release, v-теги - обычным релизом")
 
     print()
     if _fails:
