@@ -371,6 +371,70 @@ def main() -> int:
         api.settings["dpi_orch"] = saved_orch or "off"
         fixture["dpi_orch"] = saved_orch or "off"
 
+    # 10. массовая: отмена не оставляет строку в состоянии «качается»
+    section("10. массовая: отмена гасит спиннер строки")
+    created = []
+
+    class CaptureThread(FakeThread):
+        """Ловим цель воркера, чтобы гонять его синхронно."""
+
+        def start(self):
+            created.append(self.target)
+
+    bulk_cfg = {"urls": "https://youtu.be/a\nhttps://youtu.be/b",
+                "dest": str(_ISO)}
+    try:
+        gui.threading.Thread = CaptureThread
+        res = api.start_bulk(bulk_cfg)
+    finally:
+        gui.threading.Thread = FakeThread
+    ok(res == {}, "старт массовой принят", repr(res))
+
+    class CancellingDownloader(FakeDownloader):
+        """Первый же вызов - пользователь жмёт «Отмена»."""
+
+        def download(self, url, dest, **kwargs):
+            api.stop_download()
+            return super().download(url, dest, **kwargs)
+
+    api.dl = CancellingDownloader()
+    created[-1]()                       # воркер синхронно, вместо потока
+    final = api.poll()["bulk_statuses"]
+    ok(api._bulk is None, "bulk погашен после отмены")
+    ok(final == ["c", "p"],
+       "прерванная строка - «c», остаток очереди - «p»", str(final))
+    ok("l" not in final,
+       "ни одна строка не осталась «качается» (баг п.110)", str(final))
+    ok(api._bulk_failed == [],
+       "отменённое не предлагается как упавшая (п.103)", str(api._bulk_failed))
+    ok(api.poll()["result"] == "cancelled", "итог отмены - cancelled",
+       str(api.poll()["result"]))
+
+    # обычный прогон без отмены - регрессия: терминальные отметки и «ok»
+    try:
+        gui.threading.Thread = CaptureThread
+        api.start_bulk(bulk_cfg)
+    finally:
+        gui.threading.Thread = FakeThread
+    api.dl = FakeDownloader()
+    created[-1]()
+    plain = api.poll()["bulk_statuses"]
+    ok(plain == ["o", "o"], "обычный прогон: обе строки скачаны", str(plain))
+    ok("l" not in plain and "c" not in plain,
+       "без отмены нет ни спиннеров, ни «прервано»", str(plain))
+    ok(api.poll()["result"] == "ok", "итог обычного прогона - ok",
+       str(api.poll()["result"]))
+    # исходники: воркер пишет «c», а окно знает и класс, и иконку
+    gui_src = (ROOT / "gui.py").read_text(encoding="utf-8")
+    app_src = (ROOT / "ui_src" / "app.js").read_text(encoding="utf-8")
+    main_css = (ROOT / "ui_src" / "main.css").read_text(encoding="utf-8")
+    ok('self._bulk["statuses"][i - 1] = "c"' in gui_src,
+       "воркер помечает рваную строку «c»")
+    ok('" is-cancel"' in app_src and "ico-cancel" in app_src,
+       "app.js красит «прервана» и рисует свою иконку")
+    ok(".bulk-item.is-cancel" in main_css and ".ico-cancel" in main_css,
+       "у «прервана» есть свой стиль и скрытие по умолчанию")
+
     print(f"\nитог: {_checks - len(_fails)}/{_checks} ok")
     if _fails:
         print("провалено: " + ", ".join(_fails))

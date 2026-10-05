@@ -2077,6 +2077,7 @@ async function waitForPage() {
       return {view: !view.hidden, rows: view.children.length, boxHidden: box.hidden,
               icons: !!view.querySelector("svg.bulk-ico path.ico-ok") &&
                      !!view.querySelector("svg.bulk-ico path.ico-fail") &&
+                     !!view.querySelector("svg.bulk-ico path.ico-cancel") &&
                      !!view.querySelector("svg.bulk-ico g.ico-load")};
     })()`);
     if (!(swap.view && swap.rows === 3 && swap.boxHidden)) {
@@ -2103,7 +2104,10 @@ async function waitForPage() {
     // «неудавшихся» видна, возврат к полю - кнопкой «К списку ссылок»
     await evaluate(`(function () {
       window.__probe.bulkFailed = ["https://youtu.fail/b", "https://youtu.fail/c"];
-      window.__probe.bulkStatuses = ["o", "f", "f"];
+      // как после отмены (п.110): средняя строка рвалась посреди качки -
+      // воркер помечает её «c», и она обязана уйти из «качается», а не
+      // крутить спиннер вечно
+      window.__probe.bulkStatuses = ["o", "c", "f"];
       // как в приложении: воркер в finally гасит bulk вместе с busy, в том же
       // тике poll отдаёт bulk=null - итог рисуется только по bulk_statuses
       window.__probe.bulk = null;
@@ -2128,9 +2132,13 @@ async function waitForPage() {
       fail("итог не остался на экране с кнопкой возврата: " + JSON.stringify(afterBulk));
     }
     if (!(afterBulk.colors[0].indexOf("is-ok") >= 0 &&
-          afterBulk.colors[1].indexOf("is-fail") >= 0 &&
+          afterBulk.colors[1].indexOf("is-cancel") >= 0 &&
           afterBulk.colors[2].indexOf("is-fail") >= 0)) {
       fail("финальные статусы не покрасили строки: " + JSON.stringify(afterBulk.colors));
+    }
+    if (afterBulk.colors[1].indexOf("is-load") >= 0) {
+      fail("прерванная строка осталась в «качается» (баг п.110): " +
+           JSON.stringify(afterBulk.colors));
     }
     // клик по кнопке подставляет только упавшие ссылки и закрывает список
     await evaluate('document.getElementById("bulk-failed").click(); true');

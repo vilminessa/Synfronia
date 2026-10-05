@@ -703,7 +703,8 @@ class Api:
             self._bulk = {"total": len(urls), "index": 0,
                           "done": 0, "failed": 0, "current": "",
                           # построчные состояния для подсветки в окне:
-                          # p=endings(ожидают), l= качается, o=ok, f=fail
+                          # p=ожидают, l=качается, o=ok, f=fail,
+                          # c=прервана отменой (качалась в момент «Отмена»)
                           "statuses": ["p"] * len(urls)}
             self._bulk_failed = []
             self._bulk_statuses = []
@@ -800,6 +801,11 @@ class Api:
                     self._log("error", str(exc))
                 if self._cancel or (self.dl and self.dl.stopped):
                     cancelled = True
+                    with self._lock:
+                        # строку рвали посреди качки: она «прервана», а не
+                        # «качается» (спиннер крутился бы вечно) и не «упала»
+                        # (в «неудавшиеся» отменённое предлагать нельзя)
+                        self._bulk["statuses"][i - 1] = "c"
                     break
                 mode, _got, _all = _summary(self.dl)
                 if mode == "ok":

@@ -356,14 +356,16 @@
       var row = document.createElement("div");
       row.className = "bulk-item";
       row.setAttribute("x-motion", '{"opacity":[0,1],"x":[-8,0]}');
-      // SVG-значок состояния вместо эмодзи: спиннер дуги ( качается),
-      // галочка и крест рисуются штрихом; нужную группу включает класс
-      // строки (is-load / is-ok / is-fail), цвета - из палитры темы
+      // SVG-значок состояния вместо эмодзи: спиннер дуги (качается),
+      // галочка, крест и черта (прервана отменой) рисуются штрихом; нужную
+      // группу включает класс строки (is-load / is-ok / is-fail / is-cancel),
+      // цвета - из палитры темы
       row.innerHTML =
         '<svg class="bulk-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
         '<g class="ico-load"><path class="spin-arc" d="M12 3a9 9 0 0 1 9 9"/></g>' +
         '<path class="ico-ok" d="M5 12.5l4.5 4.5L19 7.5"/>' +
         '<path class="ico-fail" d="M6 6L18 18M18 6L6 18"/>' +
+        '<path class="ico-cancel" d="M6 12h12"/>' +
         "</svg>";
       row.appendChild(document.createTextNode(url));
       view.appendChild(row);
@@ -388,7 +390,8 @@
     for (var i = 0; i < rows.length && i < statuses.length; i++) {
       var s = statuses[i];
       rows[i].className = "bulk-item"
-        + (s === "l" ? " is-load" : s === "o" ? " is-ok" : s === "f" ? " is-fail" : "");
+        + (s === "l" ? " is-load" : s === "o" ? " is-ok"
+           : s === "f" ? " is-fail" : s === "c" ? " is-cancel" : "");
     }
   }
   // итог массовой: кнопка «Оставить неудавшиеся» показывается один раз на

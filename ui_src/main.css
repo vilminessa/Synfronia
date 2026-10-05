@@ -132,7 +132,8 @@
   }
   .bulk-item .ico-load,
   .bulk-item .ico-ok,
-  .bulk-item .ico-fail { display: none; }
+  .bulk-item .ico-fail,
+  .bulk-item .ico-cancel { display: none; }
   /* качается: пульс акцента + вращающийся спиннер-дуга */
   .bulk-item.is-load {
     color: var(--accent);
@@ -162,6 +163,17 @@
     stroke: var(--err);
     stroke-dasharray: 34;
     stroke-dashoffset: 34;
+    animation: bulk-draw .3s ease-out forwards;
+  }
+  /* прервана отменой: нейтрально - это не успех и не провал, а решение
+     пользователя; строка гаснет и получает черту вместо спиннера, который
+     иначе кручился бы вечно */
+  .bulk-item.is-cancel { opacity: .55; }
+  .bulk-item.is-cancel .ico-cancel {
+    display: block;
+    stroke: var(--text);
+    stroke-dasharray: 14;
+    stroke-dashoffset: 14;
     animation: bulk-draw .3s ease-out forwards;
   }
   @keyframes bulk-pulse {
