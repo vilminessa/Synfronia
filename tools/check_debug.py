@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -174,7 +175,152 @@ def main() -> int:
     ok(debug.stop_app([{"ProcessId": 999999}]) == [],
        "stop_app: несуществующий PID не попадает в закрытые")
 
-    section("6. меню (смоук)")
+    section("6. пакеты обхода")
+    ok(debug.WIPE_ITEM == "12"
+       and f"{debug.WIPE_ITEM}. Удалить пакеты обхода" in debug.MENU,
+       "пункт удаления пакетов есть в меню")
+    with tempfile.TemporaryDirectory(prefix="synf_wipe_") as tmp:
+        root = Path(tmp) / "Synfronia"
+        make_tree(root)
+        # вторая установка: уйти должна вся папка Bypass, а не одна пачка
+        (root / "Bypass" / "zapret-y" / "bin").mkdir(parents=True)
+        (root / "Bypass" / "zapret-y" / "bin" / "WinDivert.dll").write_bytes(b"ZZ")
+
+        inv = debug.bypass_inventory(root)
+        ok([n for n, _s in inv] == ["zapret-x", "zapret-y"],
+           "инвентаризация видит обе установки", str(inv))
+        lines = debug.preview_wipe(root)
+        ok(any("Bypass" in l and "2" in l for l in lines),
+           "preview: папка, число установок и размер", str(lines[:1]))
+        ok(any("внимание" in l and "GitHub" in l for l in lines),
+           "preview предупреждает о потере скачанных версий")
+        ok(any("реестра" in l for l in lines),
+           "preview предупреждает про вычистку реестра")
+        plain = debug.preview(root, keep_bin=True)
+        ok(any(f"пункт {debug.WIPE_ITEM}" in l for l in plain),
+           "очистка 1/2 отсылает к пункту удаления пакетов", str(plain[-2:]))
+
+        # негатив: занятый winws.exe не роняет удаление остального
+        real_unlink = Path.unlink
+
+        def _deny(self, *args, **kwargs):
+            if self.name == "winws.exe":
+                raise PermissionError(13, "файл занят")
+            return real_unlink(self, *args, **kwargs)
+
+        Path.unlink = _deny
+        try:
+            removed, left = debug.wipe_bypass(root)
+        finally:
+            Path.unlink = real_unlink
+        ok(any(line.startswith("zapret-x/winws.exe") for line in left),
+           "занятый winws.exe попал в отчёт «занято»", str(left))
+        ok(not (root / "Bypass" / "zapret-y").exists(),
+           "вторая установка удалилась несмотря на занятый файл соседа")
+        ok((root / "Bypass" / "zapret-x" / "winws.exe").is_file(),
+           "занятый файл остался на месте")
+        ok(removed > 0, "удалено элементов больше нуля", str(removed))
+        ok((root / "Bypass").is_dir(),
+           "неполная папка остаётся - видно, что именно не удалилось")
+
+        removed2, left2 = debug.wipe_bypass(root)
+        ok(not left2 and removed2 >= 1,
+           "без занятого файла удаление доходит до конца", str(left2))
+        ok(not (root / "Bypass").exists(), "пустая папка Bypass удалилась")
+
+    # решение об остановке: четыре исхода и ни одного лишнего dpi.stop
+    import dpi as dpi_mod
+
+    class Cfg:
+        pass
+
+    calls = {"stop": 0}
+    real_status, real_stop = dpi_mod.status, dpi_mod.stop
+    mute = lambda *_a: None  # noqa: E731 - вывод в тесте не нужен
+    try:
+        dpi_mod.status = lambda: {"running": False, "pid": None}
+        ok(debug.stop_running_bypass(Cfg(), accept=lambda: True, out=mute) == "idle",
+           "обход выключен -> idle")
+        ok(calls["stop"] == 0, "выключенный обход не трогается (dpi.stop не зовётся)")
+
+        dpi_mod.status = lambda: {"running": True, "pid": 4242}
+        ok(debug.stop_running_bypass(Cfg(), accept=lambda: False, out=mute) == "declined",
+           "пользователь отказал -> declined")
+
+        def _stop_fail(cfg):
+            calls["stop"] += 1
+            return {"ok": False, "error": "нет задачи"}
+
+        dpi_mod.stop = _stop_fail
+        ok(debug.stop_running_bypass(Cfg(), accept=lambda: True, out=mute) == "failed",
+           "остановка не удалась -> failed")
+
+        def _stop_ok(cfg):
+            calls["stop"] += 1
+            return {"ok": True, "running": True}
+
+        # стоп прошёл, но процесс не гаснет - удалять всё равно нельзя
+        dpi_mod.stop = _stop_ok
+        dpi_mod.status = lambda: {"running": True, "pid": 4242}
+        ok(debug.stop_running_bypass(Cfg(), accept=lambda: True, out=mute, wait=0.4)
+           == "failed", "процесс не погас -> failed")
+        ok(calls["stop"] == 2, "dpi.stop вызван ровно в двух сценариях", str(calls))
+
+        # успех: первый снимок - запущен, после стопа - погас
+        flips = {"n": 0}
+
+        def _flip():
+            flips["n"] += 1
+            return {"running": flips["n"] <= 1, "pid": 4242}
+
+        dpi_mod.status = _flip
+        dpi_mod.stop = lambda cfg: {"ok": True, "running": False}
+        ok(debug.stop_running_bypass(Cfg(), accept=lambda: True, out=mute, wait=1)
+           == "stopped", "остановка и погасший процесс -> stopped")
+    finally:
+        dpi_mod.status, dpi_mod.stop = real_status, real_stop
+
+    # реестр: записи о папках внутри Bypass вычищаются, чужие не трогаются
+    old_local = os.environ.get("LOCALAPPDATA")
+    iso = Path(tempfile.mkdtemp(prefix="synf_prune_"))
+    outside = Path(tempfile.mkdtemp(prefix="synf_outside_"))
+    os.environ["LOCALAPPDATA"] = str(iso)
+    try:
+        def plant(folder: Path) -> Path:
+            # валидная установка: winws + стратегия + lists (без lists
+            # validate_install откажет с кодом lists и в реестр не пойдёт)
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / "winws.exe").write_bytes(b"MZ")
+            (folder / "general.bat").write_text("@echo off", encoding="ascii")
+            (folder / "lists").mkdir()
+            return folder
+
+        keep_dir = plant(iso / "Synfronia" / "Bypass" / "zapret-keep")
+        gone = plant(iso / "Synfronia" / "Bypass" / "zapret-gone")
+        foreign = plant(outside / "zapret-c")
+        ok(all(dpi_mod.registry_add(str(p)).get("ok")
+               for p in (keep_dir, gone, foreign)),
+           "фикстура реестра собрана")
+        shutil.rmtree(gone)          # папка исчезла - как после wipe
+        pruned = debug.prune_registry(iso / "Synfronia")
+        items = dpi_mod.registry_load()["items"]
+        paths = {str(Path(str(i["path"])).resolve()) for i in items}
+        ok(pruned == 1, "вычищена ровно одна мёртвая запись", str(pruned))
+        ok(str(keep_dir.resolve()) in paths, "живая установка осталась")
+        ok(str(foreign.resolve()) in paths,
+           "чужая установка (вне Bypass) не трогается", str(paths))
+        active = dpi_mod.registry_load()["active"]
+        ok(active in {i["id"] for i in items} or active is None,
+           "active после вычистки указывает на существующее", str(active))
+    finally:
+        if old_local is None:
+            os.environ.pop("LOCALAPPDATA", None)
+        else:
+            os.environ["LOCALAPPDATA"] = old_local
+        shutil.rmtree(iso, ignore_errors=True)
+        shutil.rmtree(outside, ignore_errors=True)
+
+    section("7. меню (смоук)")
     run = subprocess.run(
         [sys.executable, str(ROOT / "debug.py")],
         input="x\n7\n\n0\n", capture_output=True, timeout=60, cwd=str(ROOT),
@@ -185,6 +331,7 @@ def main() -> int:
     ok("Synfronia" in out and "Выбор" in out, "меню печатает заголовок и приглашение")
     ok("неизвестный пункт" in out, "некорректный ввод отклонён", out[-300:])
     ok("Очистить служебные файлы Synfronia" in out, "пункт 11 присутствует в меню")
+    ok("Удалить пакеты обхода" in out, "пункт 12 присутствует в меню")
     ok("список файлов логов" not in out or "нет" in out or "app_" in out,
        "пункт 7 отработал (логи есть или пусто)")
 

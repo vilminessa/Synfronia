@@ -4,6 +4,8 @@ r"""Отладочная консоль Synfronia: интерактивное ц
 
 Команды:
   очистка %LOCALAPPDATA%\Synfronia - полностью или оставив только bin\;
+  удаление пакетов обхода (Bypass\) - с предварительной остановкой
+    работающего winws (иначе Windows не отдаёт занятые файлы);
   запуск/остановка/состояние приложения;
   логи - хвост, список, показ файла целиком, очистка, следение в реальном
   времени (Ctrl+C возвращает в меню).
@@ -63,7 +65,13 @@ MENU = """\
 10. Следить за логом в реальном времени (Ctrl+C - назад в меню)
  --- служебное ---
 11. Очистить служебные файлы Synfronia в %TEMP%
+ --- обход ---
+12. Удалить пакеты обхода (Bypass\\) - сначала остановит обход
  0. Выход"""
+
+# Номер пункта меню, который удаляет пакеты обхода: его же называет preview()
+# обычной очистки, чтобы поведение пунктов 1/2 было объяснимым.
+WIPE_ITEM = "12"
 
 
 # -- пути и размеры -----------------------------------------------------------
@@ -120,6 +128,9 @@ def preview(root: Path, keep_bin: bool) -> list[str]:
     if not keep_bin:
         lost.append("журналы")
     out.append(f"  внимание: удалятся {', '.join(lost)}")
+    # пакеты обхода этим пунктом не трогаются (их держит работающий winws,
+    # а вшитый копии нужна защита) - сразу говорим, где это делается
+    out.append(f"  (пакеты обхода не трогаются - их удаляет пункт {WIPE_ITEM})")
     return out
 
 
@@ -145,6 +156,139 @@ def clean_root(root: Path, keep_bin: bool) -> tuple[int, list[str]]:
         except OSError as exc:
             errors.append(f"{child.name}: {exc}")
     return removed, errors
+
+
+# -- пакеты обхода --------------------------------------------------------------
+def bypass_dir(root: Path) -> Path:
+    """Папка с пакетами обхода (Bypass) внутри корня приложения."""
+    return root / "Bypass"
+
+
+def bypass_inventory(root: Path) -> list[tuple[str, int]]:
+    """(имя установки, размер в байтах) - что лежит внутри Bypass."""
+    target = bypass_dir(root)
+    if not target.is_dir():
+        return []
+    out: list[tuple[str, int]] = []
+    for child in sorted(target.iterdir()):
+        try:
+            if child.is_dir():
+                total = sum(f.stat().st_size for f in child.rglob("*") if f.is_file())
+            else:
+                total = child.stat().st_size
+        except OSError:
+            total = 0
+        out.append((child.name, total))
+    return out
+
+
+def preview_wipe(root: Path) -> list[str]:
+    """Строки «что будет удалено» для пакетов обхода."""
+    items = bypass_inventory(root)
+    if not items:
+        return ["  папки Bypass\\ нет - удалять нечего"]
+    total = sum(size for _name, size in items)
+    out = [f"  Bypass\\  -  установок: {len(items)}, всего {human_size(total)}"]
+    for name, size in items:
+        out.append(f"    {name}\\  -  {human_size(size)}")
+    out.append("  внимание: вшитый пакет ляжет заново при следующем старте "
+               "приложения, а скачанные из GitHub версии - только повторной "
+               "загрузкой")
+    out.append("  внимание: записи реестра обхода о этих папках будут вычищены")
+    return out
+
+
+def wipe_bypass(root: Path) -> tuple[int, list[str]]:
+    """Удалить всю папку Bypass пофайлово.
+
+    Работающий обход держит winws.exe и DLL: раньше это роняло удаление
+    посреди пути (п.102 - полупустая папка не проходила валидацию). Здесь
+    каждый элемент удаляется отдельно, отказы собираются в «занято», а
+    итог показывает, сколько осталось. Сама папка уходит только пустой -
+    иначе видно, что именно не поддалось.
+    Возвращает (сколько удалено, список «не удалилось»).
+    """
+    target = bypass_dir(root)
+    if not target.is_dir():
+        return 0, [f"папки нет: {target}"]
+    left: list[str] = []
+    removed = 0
+    # глубже - раньше родителя: иначе rmdir упадёт на непустой папке
+    items = sorted(target.rglob("*"), key=lambda p: len(p.parts), reverse=True)
+    for item in items:
+        try:
+            if item.is_dir():
+                item.rmdir()
+            else:
+                item.unlink()
+            removed += 1
+        except OSError as exc:
+            left.append(f"{item.relative_to(target).as_posix()}: "
+                        f"{exc.strerror or exc}")
+    try:
+        if not any(target.iterdir()):
+            target.rmdir()
+            removed += 1
+    except OSError:
+        pass
+    return removed, left
+
+
+def stop_running_bypass(cfg, accept=None, out=print, wait: float = 10.0) -> str:
+    """Остановить работающий обход перед удалением. Итог строкой:
+
+    "idle" - обход и так выключен (dpi.stop вообще не вызывается);
+    "stopped" - остановился, файлы свободны;
+    "declined" - пользователь отказал;
+    "failed" - не остановился (удаление запрещено: будут блокировки).
+    Остановка идёт через задачу планировщика - без запроса прав.
+    """
+    import dpi  # локно: с обходом работает только этот пункт
+    st = dpi.status()
+    if not st.get("running"):
+        return "idle"
+    out(f"  обход запущен (pid {st.get('pid')}) - его файлы будут заняты")
+    if accept is None:
+        accepted = confirm("  остановить обход и продолжить?")
+    else:
+        accepted = bool(accept())
+    if not accepted:
+        return "declined"
+    res = dpi.stop(cfg)
+    if not res.get("ok"):
+        out(f"  обход не остановился: {res.get('error') or 'неизвестная ошибка'}")
+        return "failed"
+    deadline = time.time() + max(1.0, wait)
+    while time.time() < deadline:
+        if not dpi.status().get("running"):
+            out("  обход остановлен")
+            return "stopped"
+        time.sleep(0.3)
+    out("  обход не погас - удаление отменено")
+    return "failed"
+
+
+def prune_registry(root: Path) -> int:
+    """Убрать записи реестра обхода о папках внутри Bypass, которых нет.
+
+    Иначе пикер в настройках показывал бы мёртвые строки. Чужие установки
+    (C:\\zapret и подобные) не трогаем: их живость этот пункт не проверяет.
+    """
+    import dpi  # локно: нужен только здесь
+    base = str(bypass_dir(root).resolve())
+    data = dpi.registry_load()
+    dead = []
+    for item in data["items"]:
+        path = str(item.get("path") or "")
+        try:
+            inside = str(Path(path).resolve()).startswith(base)
+        except OSError:
+            inside = False
+        if inside and not Path(path).is_dir():
+            dead.append(item)
+    for item in dead:
+        dpi.registry_remove(str(item.get("id") or ""))
+    return len(dead)
 
 
 # -- процессы приложения ------------------------------------------------------
@@ -460,6 +604,59 @@ def op_clean(root: Path, keep_bin: bool) -> None:
     pause()
 
 
+def op_bypass_wipe(root: Path) -> None:
+    print(f"\n--- пакеты обхода: {bypass_dir(root)} ---")
+    if not bypass_inventory(root):
+        print("  папки Bypass\\ нет - удалять нечего")
+        pause()
+        return
+    # приложение может поднять обход обратно: оркестрация во время качки
+    # делает это молча, и файлы снова окажутся заняты посреди удаления
+    procs = find_app_processes()
+    if procs:
+        print("  приложение запущено - оркестрация может вернуть обход:")
+        for p in procs:
+            print(f"    PID {p.get('ProcessId')}  {p.get('Name')}")
+        if confirm("  завершить приложение сейчас?"):
+            print(f"  завершено: {len(stop_app(procs))}")
+        else:
+            print("  отмена: сначала завершите приложение (пункт 4)")
+            pause()
+            return
+    import dpi
+    from settings import load_settings
+
+    verdict = stop_running_bypass(dpi.DpiConfig(load_settings()))
+    if verdict == "declined":
+        print("  отмена: обход остался запущенным, файлы заняты")
+        pause()
+        return
+    if verdict == "failed":
+        print("  файлы остаются занятыми - ничего не удалено")
+        pause()
+        return
+    for line in preview_wipe(root):
+        print(line)
+    if not confirm("Удалить пакеты обхода?"):
+        print("  отмена")
+        pause()
+        return
+    removed, left = wipe_bypass(root)
+    print(f"  удалено элементов: {removed}")
+    for line in left[:10]:
+        print(f"  занято: {line}")
+    if len(left) > 10:
+        print(f"  ... и ещё занятых: {len(left) - 10}")
+    if left:
+        print("  эти файлы ещё заняты системой - папка осталась неполной; "
+              "дописать её можно после перезагрузки")
+    pruned = prune_registry(root)
+    if pruned:
+        print(f"  вычищено записей реестра обхода: {pruned}")
+    print("  вшитый пакет вернётся при следующем старте приложения")
+    pause()
+
+
 def op_run(base: Path) -> None:
     busy = find_app_processes()
     if busy:
@@ -659,6 +856,7 @@ def main() -> int:
         "9": op_logs_clear,
         "10": op_logs_follow,
         "11": op_temp_clean,
+        "12": lambda: op_bypass_wipe(root),
     }
     while True:
         print()
