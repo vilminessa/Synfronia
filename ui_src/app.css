@@ -90,6 +90,9 @@
      плита ужимается с многоточием, кнопка не переносится */
   .state-row { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
   .state-row button { flex: 0 0 auto; white-space: nowrap; }
+  /* тумблер молчит во время прогона стратегий - старт/стоп посреди
+     перебора сломали бы его чередование запусков */
+  .state-row button:disabled { opacity: .45; cursor: default; }
   #dpi-state {
     flex: 1 1 auto; min-width: 0;
     display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px;

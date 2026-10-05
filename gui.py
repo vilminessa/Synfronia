@@ -326,6 +326,10 @@ class Api:
     # -- состояние (poll из JS) ----------------------------------------------
     def poll(self, since: int = 0) -> dict:
         with self._lock:
+            # правда - с диска: dpi_dir/dpi_bat пишет сам dpi.py (выбор
+            # установки, подбор стратегии), снапшот этого не видит - карточка
+            # и плашка обязаны показывать то, что реально записано
+            self.settings = load_settings()
             lines = list(self._logs)
             # Кольцевой буфер: индексы «поехали», поэтому отдаём хвост от
             # max(since, oldest) и всегда сообщаем актуальный курсор.
@@ -855,7 +859,7 @@ class Api:
         """
         if bypass == "off":
             return None   # явный выбор «продолжить без обхода»
-        cfg = dpi.DpiConfig(self.settings, self._lang)
+        cfg = self._cfg()
         try:
             res = dpi.auto(cfg, log=self._log, force=(bypass == "on"))
         except Exception as exc:  # noqa: BLE001 - обход не должен ломать загрузку
@@ -884,6 +888,19 @@ class Api:
             self._log("warning", str(exc))
 
     # -- плашка состояния: включён ли обход вообще ---------------------------
+    def _cfg(self) -> dpi.DpiConfig:
+        r"""Конфиг обхода из СВЕЖИХ настроек с диска.
+
+        dpi.py пишет dpi_dir/dpi_bat сам (выбор установки, подбор, выбор
+        активной установки в реестре) - снапшот self.settings этого не видит.
+        Из-за того, что конфиг строился из снапшота, после выбора 1.10.3
+        обход, тесты и оркестрация продолжали работать с D:\zapret-1.10.2, а
+        плашка показывала последнюю выбранную в UI стратегию. Маленький JSON
+        читаем заново - это копейки, а расхождение стоило бы работы не тем
+        обходом.
+        """
+        return dpi.DpiConfig(load_settings(), self._lang)
+
     def _remember_probe(self, report) -> None:
         """Запомнить последний отчёт маршрута для плашки состояния.
 
@@ -896,7 +913,9 @@ class Api:
                 self._last_probe = report
 
     def _bypass_state_locked(self) -> dict:
-        """Состояние для плашки. Вызывается УЖЕ под self._lock (из poll)."""
+        """Состояние для плашки. Вызывается УЖЕ под self._lock (из poll и
+        dpi_status) - там же обновляется self.settings, поэтому здесь можно
+        брать снапшот без нового чтения диска под замком."""
         st = dpi.status()
         cfg = dpi.DpiConfig(self.settings, self._lang)
         return {"running": bool(st.get("running")), "pid": st.get("pid"),
@@ -913,6 +932,9 @@ class Api:
         нажата кнопка проверки - само по себе состояние сети не пингуется.
         """
         with self._lock:
+            # свежие значения с диска: выбор установки мог прийти из dpi.py
+            # (реестр), минуя save_setting - снапшот бы соврал
+            self.settings = load_settings()
             return self._bypass_state_locked()
 
     def dpi_probe(self) -> dict:
@@ -923,14 +945,14 @@ class Api:
         это было замечено. Тот же отчёт возвращают включение и выключение,
         поэтому надписи не могут разойтись с журналом.
         """
-        cfg = dpi.DpiConfig(self.settings, self._lang)
+        cfg = self._cfg()
         report = dpi.status_report(cfg, log=self._log)
         self._remember_probe(report)
         return {"ok": True, "report": report}
 
     def dpi_start(self) -> dict:
         """Запуск обхода по кнопке: в ответ - тот же отчёт, что у проверки."""
-        cfg = dpi.DpiConfig(self.settings, self._lang)
+        cfg = self._cfg()
         res = dpi.start(cfg, log=self._log)
         self._remember_probe(res.get("report"))
         return res
@@ -942,7 +964,7 @@ class Api:
         проверенные - карточка рисует полоску, «12/22» и точки; после
         итога поле обнуляется, и JS понимает, что пора перечитать кэш.
         """
-        cfg = dpi.DpiConfig(self.settings, self._lang)
+        cfg = self._cfg()
         names = dpi.strategies(cfg)
         with self._lock:
             self._dpi_progress = {"running": True, "i": 0, "n": len(names),
@@ -991,7 +1013,7 @@ class Api:
 
     def dpi_test_one(self, name: str = "") -> dict:
         """«Проверить выбранную»: одна стратегия, тот же отчёт и цвет."""
-        cfg = dpi.DpiConfig(self.settings, self._lang)
+        cfg = self._cfg()
         res = dpi.test_one(cfg, name=name or cfg.bat, log=self._log)
         self._remember_probe(res.get("report"))
         return res
@@ -1002,7 +1024,7 @@ class Api:
 
     def dpi_stop(self) -> dict:
         """Остановка обхода по кнопке из карточки настроек."""
-        cfg = dpi.DpiConfig(self.settings, self._lang)
+        cfg = self._cfg()
         res = dpi.stop(cfg, log=self._log)
         self._remember_probe(res.get("report"))
         return res

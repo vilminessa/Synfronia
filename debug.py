@@ -6,7 +6,8 @@ r"""Отладочная консоль Synfronia: интерактивное ц
   очистка %LOCALAPPDATA%\Synfronia - полностью или оставив только bin\;
   удаление пакетов обхода (Bypass\) - с предварительной остановкой
     работающего winws (иначе Windows не отдаёт занятые файлы);
-  запуск/остановка/состояние приложения;
+  запуск/остановка/состояние приложения; запуск с немедленным следением
+    за журналом (первые строки старта не пролистываются мимо);
   логи - хвост, список, показ файла целиком, очистка, следение в реальном
   времени (Ctrl+C возвращает в меню).
 
@@ -57,6 +58,7 @@ MENU = """\
  3. Запустить приложение
  4. Завершить приложение
  5. Состояние приложения (PID/время старта)
+13. Запустить и сразу следить за логом
  --- логи ---
  6. Показать хвост последнего лога (Enter = 50 строк)
  7. Список файлов логов (даты, размеры)
@@ -657,29 +659,23 @@ def op_bypass_wipe(root: Path) -> None:
     pause()
 
 
-def op_run(base: Path) -> None:
-    busy = find_app_processes()
-    if busy:
-        print("  приложение уже запущено:")
-        for p in busy:
-            print(f"    PID {p.get('ProcessId')}  {p.get('Name')}")
-        print("  сначала завершите его (пункт 4)")
-        pause()
-        return
+def _launch_and_report(base: Path) -> bool:
+    """Запуск приложения со сторожем WebView2. Без пауз: делят пункты 3 и 13.
+
+    Сторож: WebView2 при старте может зависнуть без окна или умереть после
+    показа окна (тёмное окно без страницы) - убиваем и пробуем ещё раз,
+    потом отдаём диагностику. True - окно с содержимым готово.
+    """
     src = "Synfronia.exe" if (base / "Synfronia.exe").is_file() else "gui.py"
-    # Сторож: WebView2 при старте может зависнуть без окна или умереть после
-    # показа окна (тёмное окно без страницы) - убиваем и пробуем ещё раз,
-    # потом отдаём диагностику.
     for attempt in (1, 2):
         pid = run_app(base)
         if not pid:
-            break
+            return False
         print(f"  запущен {src}, PID {pid} (вывод - logs\\launcher.log); "
               f"жду окно и WebView2 (15 с), попытка {attempt}/2...")
         if wait_for_ready(pid, 15):
             print(f"  окно с содержимым готово - запущен PID {pid}")
-            pause()
-            return
+            return True
         state = f"окно={'есть' if window_visible(pid) else 'нет'}, " \
                 f"WebView2={'есть' if webview_child_running(pid) else 'нет'}"
         print(f"  не запустилось ({state}) - завершаю и повторяю")
@@ -691,7 +687,54 @@ def op_run(base: Path) -> None:
         print(f"  повтор не помог: {crash_evidence()}")
         print("  запустите python gui.py --diagnose-freeze "
               "и посмотрите gui_diag.log")
+    return False
+
+
+def op_run(base: Path) -> None:
+    busy = find_app_processes()
+    if busy:
+        print("  приложение уже запущено:")
+        for p in busy:
+            print(f"    PID {p.get('ProcessId')}  {p.get('Name')}")
+        print("  сначала завершите его (пункт 4)")
+        pause()
+        return
+    _launch_and_report(base)
     pause()
+
+
+def op_run_follow(base: Path, launch=None, follow=None) -> None:
+    """Пункт 13: запустить приложение и сразу следить за журналом.
+
+    Отдельный пункт вместо последовательности «3, потом 10»: при разборе
+    сбоя нужны ПЕРВЫЕ строки старта, а между пунктами меню они бы
+    пролистались мимо. Печатается хвост свежего лога (к этому моменту старт
+    уже записан - окно дождалось), потом идёт живой поток; Ctrl+C - назад
+    в меню. Если приложение уже запущено - просто следим за его журналом.
+
+    launch/follow подменяются в проверках: настоящий запуск приложения
+    в тестах недопустим.
+    """
+    launch = launch or _launch_and_report
+    follow = follow or op_logs_follow
+    busy = find_app_processes()
+    if busy:
+        print("  приложение уже запущено - следю за его журналом:")
+        for p in busy:
+            print(f"    PID {p.get('ProcessId')}  {p.get('Name')}")
+    elif not launch(base):
+        print("  запустить не удалось - следить не за чем")
+        pause()
+        return
+    files = log_files()
+    if files:
+        tail = tail_file(files[-1], 30)
+        if tail:
+            print(f"--- {files[-1].name}: последние {len(tail)} строк, далее "
+                  "в реальном времени (Ctrl+C - назад в меню) ---")
+            for line in tail:
+                print(line)
+    follow()
 
 
 def op_stop() -> None:
@@ -857,6 +900,7 @@ def main() -> int:
         "10": op_logs_follow,
         "11": op_temp_clean,
         "12": lambda: op_bypass_wipe(root),
+        "13": lambda: op_run_follow(base),
     }
     while True:
         print()

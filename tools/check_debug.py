@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import os
 import shutil
 import subprocess
@@ -334,6 +336,53 @@ def main() -> int:
     ok("Удалить пакеты обхода" in out, "пункт 12 присутствует в меню")
     ok("список файлов логов" not in out or "нет" in out or "app_" in out,
        "пункт 7 отработал (логи есть или пусто)")
+
+    section("8. запуск и немедленное следение за логом (пункт 13)")
+    ok("13. Запустить и сразу следить за логом" in debug.MENU,
+       "пункт 13 есть в меню")
+    with tempfile.TemporaryDirectory(prefix="synf_runfollow_") as tmp:
+        fake_log = Path(tmp) / "app_2026-01-01.log"
+        fake_log.write_text("старт 1\nстарт 2\n", encoding="utf-8")
+        calls = {"launch": 0, "follow": 0}
+        real_busy, real_logs, real_pause = (debug.find_app_processes,
+                                            debug.log_files, debug.pause)
+        try:
+            debug.pause = lambda: None     # пауза ждала бы Enter в тесте
+            debug.log_files = lambda: [fake_log]
+            debug.find_app_processes = lambda: []
+            with contextlib.redirect_stdout(io.StringIO()) as buf:
+                debug.op_run_follow(
+                    Path(tmp),
+                    launch=lambda base: calls.__setitem__("launch",
+                                                          calls["launch"] + 1) or True,
+                    follow=lambda: calls.__setitem__("follow",
+                                                     calls["follow"] + 1))
+            text = buf.getvalue()
+            ok(calls == {"launch": 1, "follow": 1},
+               "сначала запуск, потом следение - обе ступени прошли", str(calls))
+            ok("старт 2" in text and "реальном времени" in text,
+               "перед живым потоком напечатан хвост свежего лога", text[:200])
+
+            # запуск не удался - следить не за чем
+            calls.update(launch=0, follow=0)
+            with contextlib.redirect_stdout(io.StringIO()):
+                debug.op_run_follow(Path(tmp), launch=lambda base: False,
+                                    follow=lambda: calls.__setitem__("follow", 1))
+            ok(calls["follow"] == 0, "не запустилось - следения нет", str(calls))
+
+            # приложение уже запущено - повторный старт не нужен
+            debug.find_app_processes = lambda: [{"ProcessId": 7, "Name": "Synfronia.exe"}]
+            calls.update(launch=0, follow=0)
+            with contextlib.redirect_stdout(io.StringIO()):
+                debug.op_run_follow(
+                    Path(tmp),
+                    launch=lambda base: calls.__setitem__("launch", 1) or True,
+                    follow=lambda: calls.__setitem__("follow", 1))
+            ok(calls == {"launch": 0, "follow": 1},
+               "уже запущено - только следение за его журналом", str(calls))
+        finally:
+            debug.find_app_processes, debug.log_files, debug.pause = \
+                real_busy, real_logs, real_pause
 
     print()
     if _fails:

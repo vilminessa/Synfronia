@@ -122,6 +122,11 @@ def probe_url(url: str, timeout: float = PROBE_TIMEOUT) -> dict:
     wrapped = None
     try:
         wrapped = ctx.wrap_socket(raw, server_hostname=host)
+    except TimeoutError:
+        # таймаут рукопожатия - это тишина по маршруту (блокировка), а не
+        # «плохой TLS»: строка состояния должна называть причину честно
+        raw.close()
+        return out(False, "timeout")
     except (OSError, ssl.SSLError):
         raw.close()
         return out(False, "tls")
@@ -162,15 +167,30 @@ def probe_targets(timeout: float = PROBE_TIMEOUT, names=None) -> dict:
         return {"state": "none", "ok": False, "count": 0, "total": 0,
                 "targets": {}}
     targets: dict = {}
-    with ThreadPoolExecutor(max_workers=len(chosen)) as pool:
+    pool = ThreadPoolExecutor(max_workers=len(chosen))
+    futures: dict = {}
+    try:
         futures = {pool.submit(probe_url, url, timeout): name
                    for name, url in chosen}
-        for future in as_completed(futures):
+        # общий потолок на все цели: даже зависший DNS (getaddrinfo не
+        # слушает таймаут сокета) или подменённый чужой поток не должен
+        # держать кнопку «Проверить» дольше таймаута - поздние цели
+        # помечаются таймаутом, а не ждутся вечно
+        for future in as_completed(futures, timeout=timeout + 2.0):
             name = futures[future]
             try:
                 targets[name] = future.result()
-            except Exception as exc:  # noqa: BLE001 - сбой одной цели не валит пробу
-                targets[name] = {"ok": False, "ms": 0, "why": f"error:{exc}"[:40]}
+            except Exception as exc:  # noqa: BLE001 - цель сорвалась - остальные идут
+                targets[name] = {"ok": False, "ms": 0,
+                                 "why": f"error:{exc}"[:40]}
+    except TimeoutError:
+        for future, name in futures.items():
+            if name not in targets:
+                targets[name] = {"ok": False, "ms": int(timeout * 1000),
+                                 "why": "timeout"}
+    finally:
+        # без wait: замок на ожидании как раз и завис бы на зависшем воркере
+        pool.shutdown(wait=False, cancel_futures=True)
     count = sum(1 for target in targets.values() if target.get("ok"))
     # порядок целей - как в PROBE_TARGETS: иначе строка журнала и карточка
     # меняли бы вид при каждом замере (parallel as_completed)

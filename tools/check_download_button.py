@@ -104,6 +104,15 @@ def run(api, dl) -> None:
 
 def main() -> int:
     gui.threading.Thread = FakeThread          # type: ignore[assignment]
+    # п.109: poll() и dpi_status() перечитывают settings.json с диска (так
+    # dpi_dir/dpi_bat доходят до панели - их же пишет сам dpi.py). Чеку нужен
+    # свой «диск»: иначе внутрипамятные переопределения оркестрации затирает
+    # первый же poll (и «спрашивать» уходило в реальную пробу сети), плюс
+    # реальные настройки пользователя остаются нетронутыми
+    fixture = dict(gui.load_settings())
+    fixture["dpi_orch"] = "off"
+    gui.load_settings = lambda: dict(fixture)
+    gui.save_settings = lambda data: None       # чек не пишет в settings.json
     api = gui.Api()
     # Кнопку «Скачать» проверяем отдельно от обхода: режим «Спрашивать»
     # пингует маршрут и меняет поведение старта (need_bypass), а здесь
@@ -328,6 +337,9 @@ def main() -> int:
     def start_case(orch, probe, bypass=None):
         """Старт с подменённым пингом маршрута: сеть не участвует."""
         gui.dpi.probe_all = lambda timeout=0: dict(probe)
+        # в «диск» и в память сразу: poll (п.109) перечитывает файл, и
+        # переопределение должно пережить его, а не исчезнуть
+        fixture["dpi_orch"] = orch
         api.settings["dpi_orch"] = orch
         api._busy = False
         api._result = None
@@ -357,6 +369,7 @@ def main() -> int:
     finally:
         gui.dpi.probe_all = original_probe
         api.settings["dpi_orch"] = saved_orch or "off"
+        fixture["dpi_orch"] = saved_orch or "off"
 
     print(f"\nитог: {_checks - len(_fails)}/{_checks} ok")
     if _fails:

@@ -942,6 +942,8 @@
       note.className = "note";
       var name = configuredStrategy(panelFields["dpi.bat"]);
       note.textContent = t("sheet.dpi.testing_one").replace("{name}", name);
+      dpiTesting = {name: name, i: 0, n: 0};
+      renderStatePlate();   // плашка показывает, что тестируется эта стратегия
       var res = await pywebview.api.dpi_test_one(name);
       if (res && res.error && !res.report) {
         note.className = "note bad";
@@ -949,6 +951,8 @@
       } else {
         renderDpiReport(note, res && res.report, name);
       }
+      dpiTesting = null;
+      renderStatePlate();
       refreshBypasses();   // цвет точки в списке и бейдж под селектом
     },
     // все стратегии: идёт минуты, поэтому кнопка превращается в «Прервать»,
@@ -963,13 +967,17 @@
       }
       dpiTestRunning = true;
       setDpiTestButton(true);
+      dpiTesting = {name: "", i: 0, n: 0};   // плашка сразу в режиме теста
+      renderStatePlate();
       note.className = "note";
       note.textContent = t("sheet.dpi.scanning");
       setDpiProgress({running: true, i: 0, n: 0, name: ""});
       var res = await pywebview.api.dpi_scan();
       dpiTestRunning = false;
+      dpiTesting = null;
       setDpiTestButton(false);
       setDpiProgress(null);
+      renderStatePlate();
       refreshBypasses();   // итоговые цвета точек и бейдж
       var tally = (res && res.tally) || {};
       var line = t("sheet.dpi.tally")
@@ -1263,6 +1271,11 @@
       bypasses = (res && res.items) || [];
       bypassActive = (res && res.active) || null;
       bypassTests = (res && res.tests) || {};
+      // value_source поля «Активный обход» читает extra.bypass_active, а
+      // fillSettings идёт каждый тик poll: без этой строки селект каждый раз
+      // возвращался бы к значению на момент старта приложения - выбор
+      // «слетал» обратно на D:\zapret-1.10.2 спустя секунду
+      extra.bypass_active = bypassActive || "";
     } catch (e) { console.error("bypass list:", e); }
     buildBypassOptions();
     buildStrategyOptions();
@@ -1421,7 +1434,9 @@
   window.__synfDpiProgress = function(p) {
     if (!p || !p.running) return;
     dpiTestRunning = true;
+    dpiTesting = {name: p.name || "", i: p.i || 0, n: p.n || 0};
     setDpiProgress(p);
+    renderStatePlate();   // плашка называет тестируемую стратегию, а не настроенную
     var results = p.results || [];
     var last = results[results.length - 1];
     var note = document.getElementById("dpi-note");
@@ -1477,6 +1492,10 @@
   var dpiProbeAt = 0;              // когда меряли маршрут (дебаунс)
   var dpiProbeBusy = false;        // вторая параллельная проба не нужна
   var DPI_PROBE_DEBOUNCE = 10000;  // быстрое переключение вкладок не пингует
+  // что тестируется прямо сейчас {name, i, n}: пока идёт прогон, плашка
+  // называет тестируемую стратегию, а не настроенную (иначе сверху горит
+  // последняя выбранная, в строке внизу - совсем другая)
+  var dpiTesting = null;
 
   function dpiStateKey(st) {
     if (!st) return "";
@@ -1490,6 +1509,9 @@
     if (!btn) return;
     var cap = btn.querySelector("label") || btn;
     cap.textContent = t(running ? "sheet.dpi.stop" : "sheet.dpi.start");
+    // пока идёт прогон, тумблер молчит: старт/стоп посреди перебора
+    // сломали бы помощнику его чередование запусков
+    btn.disabled = !!dpiTesting;
   }
 
   function renderStatePlate() {
@@ -1504,9 +1526,16 @@
     plate.appendChild(dot);
     var main = document.createElement("span");
     main.className = "state-main";
-    main.textContent = (st.running
-      ? t("sheet.dpi.st.on").replace("{pid}", String(st.pid || "?"))
-      : t("sheet.dpi.st.off")) + (st.strategy ? " · " + st.strategy : "");
+    if (dpiTesting) {
+      main.textContent = (dpiTesting.name
+        ? t("sheet.dpi.st.testing").replace("{name}", dpiTesting.name)
+        : t("sheet.dpi.scanning")) +
+        (dpiTesting.n ? " · " + dpiTesting.i + "/" + dpiTesting.n : "");
+    } else {
+      main.textContent = (st.running
+        ? t("sheet.dpi.st.on").replace("{pid}", String(st.pid || "?"))
+        : t("sheet.dpi.st.off")) + (st.strategy ? " · " + st.strategy : "");
+    }
     plate.appendChild(main);
     var route = document.createElement("span");
     if (!probe) {

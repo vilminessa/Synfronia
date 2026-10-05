@@ -918,6 +918,31 @@ def main() -> int:
     for token in (".state-dot.on", ".state-route.ok", ".state-route.warn",
                   ".state-route.bad", ".state-route.none"):
         ok(token in app_css_now, f"в CSS есть {token}")
+    # свежесть настроек (п.109): dpi.py пишет dpi_dir/dpi_bat сам - выбор
+    # установки и подбор, поэтому конфиг, poll и плашка обязаны читать диск,
+    # а не снапшот при старте. Из-за снапшота после выбора 1.10.3 продолжал
+    # работать D:\zapret-1.10.2, а плашка показывала последнюю выбранную
+    # стратегию вместо тестируемой.
+    ok("def _cfg" in gui_now and "return dpi.DpiConfig(load_settings()" in gui_now,
+       "_cfg строит конфиг из свежих настроек с диска")
+    ok(gui_now.count("dpi.DpiConfig(self.settings") == 1,
+       "снапшот остался только в locked-хелпере плашки (он под свежим полем)",
+       str(gui_now.count("dpi.DpiConfig(self.settings")))
+    poll_src = gui_now[gui_now.index("def poll("):gui_now.index("def get_initial(")]
+    status_src = gui_now[gui_now.index("def dpi_status("):gui_now.index("def dpi_probe(")]
+    ok("self.settings = load_settings()" in poll_src,
+       "poll перечитывает настройки с диска")
+    ok("self.settings = load_settings()" in status_src,
+       "dpi_status перечитывает настройки с диска")
+    ok("extra.bypass_active = bypassActive" in settings_js,
+       "выбор установки синхронизируется в extra - селект не слетает обратно")
+    ok("var dpiTesting" in settings_js and "btn.disabled = !!dpiTesting" in settings_js,
+       "плашка знает тестируемую стратегию и блокирует тумблер на это время")
+    ok('t("sheet.dpi.st.testing")' in settings_js,
+       "плашка подписывает тестируемую стратегию ключом i18n")
+    ok(all("sheet.dpi.st.testing" in i18n.I18N.get(lang, {})
+           for lang in i18n.LANGUAGES),
+       "sheet.dpi.st.testing переведён на все языки")
 
     # 12. выгрузка на FTP: канал данных с возобновлением TLS-сессии
     section("12. выгрузка на FTP")

@@ -417,6 +417,31 @@ def main() -> int:
            and live.get("last_probe", {}).get("checked_at") == 1791150000,
            "карточка открыта - состояние и время пробы в poll", str(live))
         api._settings_open = False
+
+        # негатив главный (п.109): dpi.py записал dpi_dir/dpi_bat мимо
+        # save_setting - выбор установки и подбор пишут на диск сами.
+        # Подменяем загрузчик настроек: состояние и poll обязаны увидеть
+        # ЕГО значения, а не снапшот, сделанный при старте приложения.
+        real_loader = gui.load_settings
+        marker = dict(real_loader())          # читаем реальные (только чтение)
+        marker["dpi_dir"] = r"C:\marker\bypass-1.10.3"
+        marker["dpi_bat"] = "marker-strategy.bat"
+        gui.load_settings = lambda: dict(marker)
+        try:
+            fresh = api.dpi_status()
+            cfg = api._cfg()
+            polled = api.poll()
+        finally:
+            gui.load_settings = real_loader
+        ok(fresh.get("install") == marker["dpi_dir"]
+           and fresh.get("strategy") == marker["dpi_bat"],
+           "dpi_status видит свежие настройки, а не снапшот при старте",
+           str((fresh.get("install"), fresh.get("strategy"))))
+        ok(cfg.dir == marker["dpi_dir"] and cfg.bat == marker["dpi_bat"],
+           "_cfg (все действия обхода) тоже берёт диск", str((cfg.dir, cfg.bat)))
+        ok(polled.get("settings", {}).get("dpi_dir") == marker["dpi_dir"],
+           "poll несёт панели свежие значения",
+           str(polled.get("settings", {}).get("dpi_dir")))
     finally:
         with api._lock:
             api._last_probe = None
