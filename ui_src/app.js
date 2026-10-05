@@ -437,6 +437,9 @@
       settingsOpener = (document.activeElement && document.activeElement !== document.body)
         ? document.activeElement : null;
       focusSettings();
+      // карточка открылась: если пользователь остался на вкладке «Обход»,
+      // плашке нужно свежее состояние, а маршруту - свежая проба
+      if (window.synfSettingsShown) window.synfSettingsShown();
     } else {
       // ловушка фокуса: пока карточка открыта, Tab не должен уходить на вкладки
       // и поля главного окна - они inert и всё равно не получают фокус.

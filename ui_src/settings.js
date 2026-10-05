@@ -716,6 +716,10 @@
       if (item) item.classList.toggle("active", group.id === name);
     });
     activeSection = name;
+    // вкладка «Обход» открылась - сразу показать состояние и замерить
+    // маршрут (дебаунс внутри refreshDpiState не даёт пинговать чаще
+    // раза в 10 секунд при быстром переключении туда-сюда)
+    if (name === "dpi") refreshDpiState(true);
   }
 
   // -- списки значений полей -------------------------------------------------
@@ -1015,6 +1019,26 @@
         note.className = "note bad";
         note.textContent = (res && res.error) || t("sheet.dpi.stop_fail");
       }
+    },
+    // тумблер прямо в плашке: включить/выключить, не скролля к кнопкам
+    // вниз; ответ пишется в строку и сразу же обновляет саму плашку
+    "dpi-state-toggle": async function() {
+      var note = document.getElementById("dpi-note");
+      var running = !!(dpiStatus && dpiStatus.running);
+      note.className = "note";
+      note.textContent = t(running ? "sheet.dpi.stop_ok" : "sheet.dpi.starting");
+      var res = running ? await pywebview.api.dpi_stop()
+                        : await pywebview.api.dpi_start();
+      if (res && res.report) renderDpiReport(note, res.report);
+      else {
+        note.className = "note bad";
+        note.textContent = (res && res.error) ||
+          t(running ? "sheet.dpi.stop_fail" : "sheet.dpi.start_fail");
+      }
+      // отчёт уже свежий (в нём и время), поэтому проба при следующем
+      // открытии вкладки не пойдёт - дебаунс считает от этой секунды
+      dpiProbeAt = Date.now();
+      refreshDpiState(false);
     },
     // установки обхода: выбор из реестра (модал) и пополнение реестра
     "bypass-choose": function() { openBypassDialog(); },
@@ -1446,6 +1470,92 @@
       new Date((rec.ts || 0) * 1000).toLocaleString();
   }
 
+  // -- плашка состояния: включён ли обход вообще ---------------------------
+  // Две правды отдельно и не смешиваются: что запущено (точка, снимок
+  // процессов, всегда свежий) и что отвечало последним (время пробы).
+  var dpiStatus = null;            // ответ dpi_status()/poll
+  var dpiProbeAt = 0;              // когда меряли маршрут (дебаунс)
+  var dpiProbeBusy = false;        // вторая параллельная проба не нужна
+  var DPI_PROBE_DEBOUNCE = 10000;  // быстрое переключение вкладок не пингует
+
+  function dpiStateKey(st) {
+    if (!st) return "";
+    var p = st.last_probe || {};
+    return [st.running, st.pid, st.strategy, p.checked_at, p.state,
+            p.count, p.total].join("|");
+  }
+
+  function setDpiStateButton(running) {
+    var btn = panelButtons["dpi-state-toggle"];
+    if (!btn) return;
+    var cap = btn.querySelector("label") || btn;
+    cap.textContent = t(running ? "sheet.dpi.stop" : "sheet.dpi.start");
+  }
+
+  function renderStatePlate() {
+    var plate = document.getElementById("dpi-state");
+    if (!plate) return;
+    var st = dpiStatus;
+    if (!st) { plate.textContent = ""; return; }
+    var probe = st.last_probe || null;
+    plate.textContent = "";
+    var dot = document.createElement("span");
+    dot.className = "state-dot" + (st.running ? " on" : "");
+    plate.appendChild(dot);
+    var main = document.createElement("span");
+    main.className = "state-main";
+    main.textContent = (st.running
+      ? t("sheet.dpi.st.on").replace("{pid}", String(st.pid || "?"))
+      : t("sheet.dpi.st.off")) + (st.strategy ? " · " + st.strategy : "");
+    plate.appendChild(main);
+    var route = document.createElement("span");
+    if (!probe) {
+      route.className = "state-route none";
+      route.textContent = t("sheet.dpi.state.none");
+    } else {
+      route.className = "state-route " + (probe.state === "full" ? "ok"
+                            : probe.state === "partial" ? "warn" : "bad");
+      route.textContent = t("sheet.dpi.state.checked")
+        .replace("{time}", new Date((probe.checked_at || 0) * 1000)
+                             .toLocaleTimeString())
+        .replace("{ok}", String(probe.count || 0))
+        .replace("{n}", String(probe.total || 0));
+    }
+    plate.appendChild(route);
+    setDpiStateButton(!!st.running);
+  }
+
+  // Обновление плашки: сначала локальное состояние, при withProbe - и свежая
+  // проба маршрута (ровно по открытию вкладки «Обход», с дебаунсом: быстрое
+  // переключение вкладок туда-сюда не плодит пинги сети)
+  async function refreshDpiState(withProbe) {
+    try {
+      dpiStatus = await pywebview.api.dpi_status();
+    } catch (e) { console.error("dpi status:", e); }
+    renderStatePlate();
+    if (!withProbe) return;
+    var now = Date.now();
+    if (dpiProbeBusy || now - dpiProbeAt < DPI_PROBE_DEBOUNCE) return;
+    dpiProbeBusy = true;
+    dpiProbeAt = now;
+    try {
+      var res = await pywebview.api.dpi_probe();
+      if (res && res.report) {
+        dpiStatus = {running: !!res.report.running, pid: res.report.pid,
+                     strategy: res.report.strategy, install: res.report.install,
+                     last_probe: res.report};
+      }
+    } catch (e) { console.error("dpi probe:", e); }
+    dpiProbeBusy = false;
+    renderStatePlate();
+  }
+
+  // карточка открылась (вызывает app.js): если пользователь остался на
+  // «Обходе», состояние надо показать сразу, а маршрут - замерить свежо
+  window.synfSettingsShown = function() {
+    if (activeSection === "dpi") refreshDpiState(true);
+  };
+
   function openBypassDialog() {
     var dlg = document.getElementById("bypass-dialog");
     if (!dlg) return;
@@ -1586,6 +1696,9 @@
     // список установок и пояснение под ним тянутся из Python сразу после
     // монтирования полей - иначе селект пуст до первого действия
     refreshBypasses();
+    // плашка состояния: локально, без пробы - маршрут замерится, только
+    // когда пользователь откроет вкладку «Обход»
+    refreshDpiState(false);
   }
 
   // Условия видимости описаны в схеме (visible_if) - здесь только их применение.
@@ -1842,4 +1955,11 @@
       reloadFonts();
     }
     fontDlState(st);
+    // плашка состояния: пока карточка открыта, Python присылает локальный
+    // снимок winws (без сети) - так видно, что оркестрация подняла обход
+    // во время качки или погасила после, хотя кнопок никто не нажимал
+    if (st.bypass_state && dpiStateKey(st.bypass_state) !== dpiStateKey(dpiStatus)) {
+      dpiStatus = st.bypass_state;
+      renderStatePlate();
+    }
   }

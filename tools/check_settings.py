@@ -79,6 +79,7 @@ LEGACY_DOM = {
     "ftp-test", "ftp-test-note",
     # раздел «Обход»
     "dpi-orch", "dpi-after", "dpi-install", "dpi-install-note", "dpi-dir",
+    "dpi-state", "dpi-state-toggle",
     "dpi-mode", "dpi-bat", "dpi-bat-note", "dpi-args", "dpi-timeout",
     "dpi-probe", "dpi-test-one", "dpi-test-all",
     "dpi-start", "dpi-stop", "dpi-progress", "dpi-note",
@@ -888,9 +889,35 @@ def main() -> int:
        "в списке стратегий три цвета состояния")
     # i18n: подписи новых кнопок и все шесть языков
     for key in ("sheet.dpi.test_one", "sheet.dpi.test_all", "sheet.dpi.cancel",
-                "sheet.dpi.progress", "sheet.dpi.tally", "sheet.dpi.st.on"):
+                "sheet.dpi.progress", "sheet.dpi.tally", "sheet.dpi.st.on",
+                "sheet.dpi.state.checked", "sheet.dpi.state.none"):
         ok(all(key in i18n.I18N.get(lang, {}) for lang in i18n.LANGUAGES),
            f"{key} переведён на все языки")
+    # плашка состояния: первая строка карточки, свой тумблер и обновление
+    dpi_fields = dpi.SETTINGS["fields"]
+    ok(dpi_fields[0].get("dom") == "dpi-state",
+       "плашка состояния - первым полем карточки «Обход»",
+       str(dpi_fields[0]))
+    toggle = next((b for f in dpi_fields if f.get("type") == "actions"
+                   for b in f.get("buttons", [])
+                   if b.get("dom") == "dpi-state-toggle"), None)
+    ok(toggle is not None and toggle.get("label") == "sheet.dpi.start",
+       "в плашке есть тумблер с подписью из словаря")
+    for ident in ("function renderStatePlate", "function refreshDpiState",
+                  "window.synfSettingsShown", '"dpi-state-toggle":',
+                  "DPI_PROBE_DEBOUNCE"):
+        ok(ident in settings_js, f"settings.js знает {ident}")
+    app_js_now = (ROOT / "ui_src" / "app.js").read_text(encoding="utf-8")
+    ok("synfSettingsShown" in app_js_now,
+       "открытие карточки сообщает об этом настройкам")
+    ok('"bypass_state"' in gui_now and "if self._settings_open" in gui_now,
+       "poll несёт состояние обхода только при открытой карточке")
+    ok("def dpi_status" in gui_now and "def _remember_probe" in gui_now,
+       "Api.dpi_status и кэш последней пробы существуют")
+    app_css_now = (ROOT / "ui_src" / "app.css").read_text(encoding="utf-8")
+    for token in (".state-dot.on", ".state-route.ok", ".state-route.warn",
+                  ".state-route.bad", ".state-route.none"):
+        ok(token in app_css_now, f"в CSS есть {token}")
 
     # 12. выгрузка на FTP: канал данных с возобновлением TLS-сессии
     section("12. выгрузка на FTP")

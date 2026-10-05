@@ -2089,6 +2089,16 @@ SETTINGS = {
     "flat_prefix": "dpi_",
     "boxes": {"run": "sheet.dpi.run"},
     "fields": [
+        # Плашка состояния - первой строкой: вопрос «включён ли обход
+        # вообще» не должен требовать прокрутки до «Проверки и запуска».
+        # Текст и точка рисуются из dpi_status() (локально, без сети),
+        # кнопка справа - тумблер туда же-обратно. Свой класс строки:
+        # плита + кнопка обязаны стоять в одну линию (без переноса).
+        {"type": "note", "transient": True, "dom": "dpi-state", "row": 1,
+         "row_class": "state-row"},
+        {"type": "actions", "transient": True, "row": 1, "buttons": [
+            {"dom": "dpi-state-toggle", "label": "sheet.dpi.start"},
+        ]},
         {"key": "orch", "type": "choice_buttons", "label": "sheet.dpi.orch",
          "default": "ask",
          "option_hints": {"off": "sheet.dpi.orch.off.hint",

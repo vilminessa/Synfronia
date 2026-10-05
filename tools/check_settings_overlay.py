@@ -376,6 +376,52 @@ def main() -> int:
     ok((target / "bin" / "WinDivert.dll").is_dir(),
        "занятый чужой файл остался как был")
 
+    section("10. плашка состояния: локально, без пробы сети")
+    api = gui.Api()
+    try:
+        # негатив главный: dpi_status() не имеет права мерять маршрут -
+        # плашка показывает состояние, а не создаёт пинг при каждом poll
+        real_probe, real_all = gui.dpi.probe_targets, gui.dpi.probe_all
+
+        def _no_network(timeout=0, names=None):
+            raise AssertionError("dpi_status обратился к сети")
+
+        gui.dpi.probe_targets = gui.dpi.probe_all = _no_network
+        try:
+            state = api.dpi_status()
+        finally:
+            gui.dpi.probe_targets, gui.dpi.probe_all = real_probe, real_all
+        ok(isinstance(state, dict)
+           and {"running", "pid", "strategy", "install", "last_probe"} <= set(state),
+           "dpi_status отдаёт состояние без обращения к сети", str(sorted(state)))
+        # кэш последней пробы: плашка помнит время, ничего не измеряя
+        report = {"running": True, "pid": 4242, "strategy": "general.bat",
+                  "install": "C:\\zapret", "state": "partial", "count": 3,
+                  "total": 4,
+                  "targets": {"web": {"ok": True, "ms": 10, "why": ""}},
+                  "checked_at": 1791150000}
+        api._remember_probe(report)
+        cached = api.dpi_status()["last_probe"]
+        ok(cached and cached["checked_at"] == 1791150000 and cached["count"] == 3,
+           "последняя проба запоминается и возвращается как есть", str(cached))
+        api._remember_probe({"ok": False, "error": "нет папки"})   # отказ без пробы
+        ok(api.dpi_status()["last_probe"] == cached,
+           "отказ до пробы не затирает кэш", str(api.dpi_status()["last_probe"]))
+        # состояние уходит в poll только пока открыта карточка
+        api._settings_open = False
+        ok(api.poll().get("bypass_state") is None,
+           "карточка закрыта - состояние в poll не считается")
+        api._settings_open = True
+        live = api.poll().get("bypass_state")
+        ok(isinstance(live, dict) and live.get("running") is not None
+           and live.get("last_probe", {}).get("checked_at") == 1791150000,
+           "карточка открыта - состояние и время пробы в poll", str(live))
+        api._settings_open = False
+    finally:
+        with api._lock:
+            api._last_probe = None
+            api._settings_open = False
+
     print(f"\nитог: {_checks - len(_fails)}/{_checks} ok")
     if _fails:
         print("провалено: " + ", ".join(_fails))

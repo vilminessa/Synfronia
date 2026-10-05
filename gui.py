@@ -193,6 +193,9 @@ class Api:
         # {running, i, n, name, state, results} - им карточка рисует полоску,
         # «12/22» и точки стратегий, пока помощник меряет
         self._dpi_progress: dict | None = None
+        # последняя проба маршрута (отчёт с мс и временем): им плашка
+        # состояния говорит «проверено 14:22», не трогая сеть
+        self._last_probe: dict | None = None
         # упавшие ссылки прошлой массовой загрузки — их подставляет кнопка
         # «Оставить неудавшиеся» (сбрасывается при следующем старте)
         self._bulk_failed: list[str] = []
@@ -347,6 +350,11 @@ class Api:
                 # ход проверки стратегий: None, пока перебор не запущен
                 "dpi_progress": (dict(self._dpi_progress)
                                  if self._dpi_progress else None),
+                # состояние обхода для плашки: только пока открыта карточка -
+                # снимок процессов локальный (без сети), но и его нет смысла
+                # считать, когда карточки на экране нет
+                "bypass_state": (self._bypass_state_locked()
+                                 if self._settings_open else None),
                 # упавшие ссылки прошлой массовой (для «Оставить неудавшиеся»)
                 "bulk_failed": list(self._bulk_failed),
                 # финальные построчные статусы последней массовой: воркер уже
@@ -875,6 +883,38 @@ class Api:
         except Exception as exc:  # noqa: BLE001 - итог загрузки не должен упасть
             self._log("warning", str(exc))
 
+    # -- плашка состояния: включён ли обход вообще ---------------------------
+    def _remember_probe(self, report) -> None:
+        """Запомнить последний отчёт маршрута для плашки состояния.
+
+        Плашка не должна пинговать сеть сама - она показывает, что мерилось
+        последним, и время замера. Отчёта нет только у отказов, случившихся
+        до проб (нет папки, нет прав) - тогда кэш не трогаем.
+        """
+        if isinstance(report, dict) and report.get("targets"):
+            with self._lock:
+                self._last_probe = report
+
+    def _bypass_state_locked(self) -> dict:
+        """Состояние для плашки. Вызывается УЖЕ под self._lock (из poll)."""
+        st = dpi.status()
+        cfg = dpi.DpiConfig(self.settings, self._lang)
+        return {"running": bool(st.get("running")), "pid": st.get("pid"),
+                "strategy": cfg.bat, "install": cfg.dir,
+                "last_probe": dict(self._last_probe) if self._last_probe else None}
+
+    def dpi_status(self) -> dict:
+        """Состояние обхода для плашки: локально, БЕЗ единой пробы сети.
+
+        Плашка спрашивает два разных вопроса, и они не смешиваются: «что
+        запущено» (снимок процессов, всегда свежий) и «что отвечало в
+        последний раз» (кэш последнего отчёта с его временем). Сам маршрут
+        меряется только когда карточка открывает вкладку «Обход» или когда
+        нажата кнопка проверки - само по себе состояние сети не пингуется.
+        """
+        with self._lock:
+            return self._bypass_state_locked()
+
     def dpi_probe(self) -> dict:
         """«Проверить маршрут»: отчёт по всем четырём целям.
 
@@ -884,12 +924,16 @@ class Api:
         поэтому надписи не могут разойтись с журналом.
         """
         cfg = dpi.DpiConfig(self.settings, self._lang)
-        return {"ok": True, "report": dpi.status_report(cfg, log=self._log)}
+        report = dpi.status_report(cfg, log=self._log)
+        self._remember_probe(report)
+        return {"ok": True, "report": report}
 
     def dpi_start(self) -> dict:
         """Запуск обхода по кнопке: в ответ - тот же отчёт, что у проверки."""
         cfg = dpi.DpiConfig(self.settings, self._lang)
-        return dpi.start(cfg, log=self._log)
+        res = dpi.start(cfg, log=self._log)
+        self._remember_probe(res.get("report"))
+        return res
 
     def dpi_scan(self) -> dict:
         """«Проверить все»: перебор стратегий с живым ходом в poll().
@@ -927,13 +971,30 @@ class Api:
         if res.get("ok"):
             # подбор пишет dpi_bat - без ui_rev карточка показала бы старое
             self._bump_ui()
+        # плашке есть что показать и без новой пробы: помощник только что
+        # замерил четыре цели выигравшей стратегии - берём их отчёт
+        entry = next((r for r in res.get("results") or []
+                      if r.get("name") == res.get("best")), None)
+        targets = (entry or {}).get("targets")
+        if res.get("ok") and isinstance(targets, dict) and targets:
+            st = dpi.status()
+            self._remember_probe({
+                "running": bool(st.get("running")), "pid": st.get("pid"),
+                "strategy": str(res.get("best") or ""), "install": cfg.dir,
+                "state": str(entry.get("state") or ""),
+                "count": sum(1 for t in targets.values()
+                             if isinstance(t, dict) and t.get("ok")),
+                "total": len(targets), "targets": targets,
+                "checked_at": int(time.time())})
         # цвета уже в кэше: scan кладёт их по ходу, JS перечитает сам
         return res
 
     def dpi_test_one(self, name: str = "") -> dict:
         """«Проверить выбранную»: одна стратегия, тот же отчёт и цвет."""
         cfg = dpi.DpiConfig(self.settings, self._lang)
-        return dpi.test_one(cfg, name=name or cfg.bat, log=self._log)
+        res = dpi.test_one(cfg, name=name or cfg.bat, log=self._log)
+        self._remember_probe(res.get("report"))
+        return res
 
     def dpi_cancel(self) -> dict:
         """«Прервать» перебор: помощник доедет до конца текущей стратегии."""
@@ -942,7 +1003,9 @@ class Api:
     def dpi_stop(self) -> dict:
         """Остановка обхода по кнопке из карточки настроек."""
         cfg = dpi.DpiConfig(self.settings, self._lang)
-        return dpi.stop(cfg, log=self._log)
+        res = dpi.stop(cfg, log=self._log)
+        self._remember_probe(res.get("report"))
+        return res
 
     # -- реестр установок обхода (несколько версий и папок) --------------------
     @staticmethod

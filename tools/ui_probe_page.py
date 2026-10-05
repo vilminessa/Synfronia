@@ -97,6 +97,15 @@ STUB = """<script>
             install: BYPASSES[0].path, state: stateName, count: count, total: 4,
             targets: targets, checked_at: Math.floor(Date.now() / 1000)};
   }
+  // Состояние для плашки: локально (winws) + кэш последней пробы.
+  // Живёт в state, чтобы тумблер и проба реально меняли картинку -
+  // статичная заглушка не показала бы ни смену вкл/выкл, ни «не проверялся»
+  var BYPASS = {running: true, probe: null};
+  function makeStatus() {
+    return {running: BYPASS.running, pid: BYPASS.running ? 4242 : null,
+            strategy: "general (ALT9).bat", install: BYPASSES[0].path,
+            last_probe: BYPASS.probe};
+  }
   // Цвета для списка: часть стратегий уже «проверена» (точки и бейдж),
   // одна специально остаётся непроверенной - её серый вид тоже надо уметь
   var TESTS = {};
@@ -128,6 +137,9 @@ STUB = """<script>
       logs: state.logs, log_cursor: state.logs.length,
       bulk: state.bulk, bulk_failed: state.bulkFailed,
       bulk_statuses: state.bulkStatuses,
+      // как настоящий poll: состояние обхода приходит только пока открыта
+      // карточка (снимок процессов Python делает лишь для неё)
+      bypass_state: state.settingsOpen ? makeStatus() : null,
       ffmpeg: {downloading: false, extracting: false, pct: 0, ok: true, error: null},
       fonts_dl: {downloading: false, pct: 0, error: null}}, uiState(), state.dlState)); },
     synf_settings_state: function (open) { state.settingsOpen = !!open; return ok(); },
@@ -155,6 +167,7 @@ STUB = """<script>
     dpi_test_one: function (name) {
       var report = makeReport("full");
       report.strategy = name || report.strategy;
+      BYPASS.probe = report;
       return ok({ok: true, state: "full", strategy: report.strategy,
                  started: false, report: report});
     },
@@ -181,11 +194,20 @@ STUB = """<script>
     open_fonts_folder: function () { return ok(); },
     open_themes_folder: function () { return ok(); },
     // -- обход: панель, диалог выбора и загрузка версий ----------------------
-    dpi_probe: function () { return ok({ok: true, report: makeReport("full")}); },
-    dpi_start: function () {
-      return ok({ok: true, already: true, pid: 4242, report: makeReport("full")});
+    dpi_status: function () { return ok(makeStatus()); },
+    dpi_probe: function () {
+      BYPASS.probe = makeReport("full");
+      return ok({ok: true, report: BYPASS.probe});
     },
-    dpi_stop: function () { return ok({ok: true, running: false, report: makeReport("full", false)}); },
+    dpi_start: function () {
+      BYPASS.running = true;
+      return ok({ok: true, already: false, pid: 4242, report: makeReport("full")});
+    },
+    dpi_stop: function () {
+      BYPASS.running = false;
+      BYPASS.probe = makeReport("full", false);
+      return ok({ok: true, running: false, report: BYPASS.probe});
+    },
     dpi_scan: function () {
       var tally = {n: SCAN_RESULTS.length, full: 0, partial: 0, none: 0};
       SCAN_RESULTS.forEach(function(r) {

@@ -85,6 +85,31 @@
     background: var(--accent);
     transition: width .3s ease;
   }
+  /* ---- плашка состояния обхода: точка + что запущено + последняя проба --- */
+  /* свой ряд (см. row_class в схеме): плита и тумблер всегда в одну линию,
+     плита ужимается с многоточием, кнопка не переносится */
+  .state-row { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
+  .state-row button { flex: 0 0 auto; white-space: nowrap; }
+  #dpi-state {
+    flex: 1 1 auto; min-width: 0;
+    display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px;
+    opacity: 1;
+  }
+  #dpi-state .state-dot {
+    flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%;
+    background: var(--widget);
+  }
+  #dpi-state .state-dot.on { background: var(--ok); }
+  #dpi-state .state-main {
+    flex: 0 1 auto; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  /* время пробы уходит вправо (при переносе - на свою строку) */
+  #dpi-state .state-route { margin-left: auto; font-size: 12px; opacity: .8; }
+  #dpi-state .state-route.ok { color: var(--ok); opacity: 1; }
+  #dpi-state .state-route.warn { color: var(--warn); opacity: 1; }
+  #dpi-state .state-route.bad { color: var(--err); opacity: 1; }
+  #dpi-state .state-route.none { opacity: .7; }
 
   /* ---- подсказки ----
      Один элемент на страницу (см. initTooltips в common.js): показывается с
