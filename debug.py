@@ -341,6 +341,10 @@ def run_app(base: Path) -> int:
         proc = subprocess.Popen(
             cmd, cwd=str(base), stdin=subprocess.DEVNULL,
             stdout=fh, stderr=subprocess.STDOUT,
+            # дочерний python без этого пишет stdout в локальной кодировке
+            # (cp1251), и launcher.log не читался бы как UTF-8; env уважают
+            # и gui.py, и встроенный python внутри Synfronia.exe
+            env={**os.environ, "PYTHONUTF8": "1"},
             creationflags=getattr(subprocess, "DETACHED_PROCESS", 0x00000008),
         )
         return proc.pid
@@ -530,12 +534,30 @@ def log_files() -> list[Path]:
         return []
 
 
+def decode_log(data: bytes) -> str:
+    """Байты журнала -> текст, построчно (UTF-8 и ANSI в одном файле).
+
+    Файлы лежат в двух кодировках: свежие пишет дочерний процесс с
+    PYTHONUTF8=1 (UTF-8), старые launcher.log - в локальной кодировке
+    Windows (cp1251), а после дозапуска старого файла возможны смешанные
+    строки. Поэтому решаем по КАЖДОЙ строке, а не по всему файлу: так
+    читается и то, и другое, а кириллица не превращается в «?».
+    """
+    out = []
+    for raw in data.split(b"\n"):
+        try:
+            out.append(raw.decode("utf-8"))
+        except UnicodeDecodeError:
+            out.append(raw.decode("cp1251", errors="replace"))
+    return "\n".join(out)
+
+
 def tail_file(path: Path, n: int) -> list[str]:
-    """Последние n строк файла (utf-8 с заменой битых байтов)."""
+    """Последние n строк файла (UTF-8 или ANSI - см. decode_log)."""
     if not path.is_file():
         return []
     try:
-        return path.read_text(encoding="utf-8", errors="replace").splitlines()[-n:]
+        return decode_log(path.read_bytes()).splitlines()[-n:]
     except OSError:
         return []
 
@@ -551,8 +573,8 @@ def new_lines(path: Path, pos: int) -> tuple[list[str], int]:
         with open(path, "rb") as fh:
             fh.seek(pos)
             chunk = fh.read()
-        text = chunk.decode("utf-8", errors="replace")
-        lines = text.splitlines()
+        # позиция остаётся байтовой: decode_log не двигает счётчик чтения
+        lines = decode_log(chunk).splitlines()
         return lines, size
     except OSError:
         return [], pos
@@ -810,7 +832,7 @@ def op_logs_show() -> None:
     path = files[idx - 1]
     print(f"\n--- {path.name} ---")
     try:
-        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        for line in decode_log(path.read_bytes()).splitlines():
             print(line)
     except OSError as exc:
         print(f"  ошибка: {exc}")

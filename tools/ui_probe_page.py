@@ -33,8 +33,12 @@ PROBE_DIR = logs_dir().parent / "probe"
 
 # Настройки в стабе берём из схемы: так пробник проверяет настоящие умолчания,
 # а не отдельный список (он уже расходился с приложением).
-def stub_settings(lang: str) -> str:
-    data = {**settings_schema.defaults(), "dest": r"C:\Downloads", "language": lang}
+def stub_settings(lang: str, theme: str = "scarred_mind") -> str:
+    # тему тоже отдаём: applyTheme при старте красит :root по settings.theme,
+    # и без неё ВСЕ скриншоты получались бы в дефолтной Scarred Mind,
+    # как бы страница ни собиралась флагом --theme
+    data = {**settings_schema.defaults(), "dest": r"C:\Downloads",
+            "language": lang, "theme": theme}
     return json.dumps(data, ensure_ascii=False).replace("\\", "\\\\")
 
 
@@ -287,6 +291,76 @@ STUB = """<script>
 """
 
 
+# Состояние для скриншотов (флаг --state): страница сама доводит себя до
+# вида, который снимает headless Edge (msedge --screenshot --window-size).
+# Скрипт кладётся в самый конец страницы - после стаба и всех скриптов
+# приложения, поэтому можно пользоваться их публичными API (кнопки,
+# switchTab, __synfPing, __probe). Без --state не вставляется вовсе -
+# зонды работают как прежде.
+DEMO = """<script>
+(function () {
+  var state = "__STATE__";
+  function click(id) { var el = document.getElementById(id); if (el) el.click(); }
+  if (state === "main" || !state) {
+    var u = document.getElementById("url-video");
+    if (u) u.value = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
+    return;
+  }
+  if (state === "bulk") {
+    switchTab("batch");
+    var box = document.getElementById("url-batch");
+    box.value = ["https://youtu.be/first", "https://youtu.be/second",
+                 "https://youtu.be/third", "https://youtu.be/fourth"].join("\\n");
+    box.dispatchEvent(new Event("input"));
+    click("download");
+    // итоговая роспись строк: скачано, скачано, прервано отменой, в очереди
+    setTimeout(function () {
+      window.__probe.bulk = {total: 4, index: 4,
+                             statuses: ["o", "o", "c", "p"]};
+      if (window.__synfPing) window.__synfPing();
+    }, 500);
+    return;
+  }
+  // состояния с открытой карточкой настроек (сама карточка - флаг --state,
+  // выше: для этих состояний settings_open выставляется автоматически)
+  click("settings-btn");
+  setTimeout(function () {
+    var nav = {bypass: "nav-dpi", strategies: "nav-dpi",
+               downloader: "nav-dl", ftp: "nav-ftp"}[state];
+    if (nav) click(nav);
+    if (state === "strategies") {
+      setTimeout(function () { click("bypass-choose"); }, 400);
+    }
+    if (state === "ftp") {
+      setTimeout(function () {
+        var host = document.getElementById("ftp-host");
+        if (host) {
+          host.value = "ftp.example.com";
+          host.dispatchEvent(new Event("change", {bubbles: true}));
+        }
+        var dir = document.getElementById("ftp-dir");
+        if (dir) {
+          dir.value = "media/{playlist}";
+          dir.dispatchEvent(new Event("change", {bubbles: true}));
+        }
+        var act = document.getElementById("ftp-active");
+        if (act && !act.checked) act.click();
+      }, 400);
+    }
+  }, 300);
+})();
+</script>
+"""
+
+
+def inject_demo(page: str, state: str) -> str:
+    """Скрипт состояния - в самый конец страницы, после всех скриптов."""
+    block = DEMO.replace("__STATE__", state)
+    if "</body>" in page:
+        return page.replace("</body>", block + "\n</body>", 1)
+    return page + block
+
+
 def build_page_with_stub(theme: str = "scarred_mind", lang: str = "ru",
                          settings_open: bool = False) -> str:
     """Страница приложения со стабом API; settings_open - сразу открытая карточка."""
@@ -303,13 +377,13 @@ def build_page_with_stub(theme: str = "scarred_mind", lang: str = "ru",
     if idx < 0:
         raise SystemExit("не найден <script> для вставки стаба")
     stub = STUB % {"lang": lang, "settings_open": "true" if settings_open else "false"}
-    stub = stub.replace("__SETTINGS__", stub_settings(lang))
+    stub = stub.replace("__SETTINGS__", stub_settings(lang, theme))
     return out[:idx] + stub + out[idx:]
 
 
 def main(argv: list[str]) -> int:
     args = [a for a in argv[1:] if a]
-    theme, lang = "scarred_mind", "ru"
+    theme, lang, state = "scarred_mind", "ru", ""
     settings_open = False
     out: Path | None = None
     i = 0
@@ -320,6 +394,9 @@ def main(argv: list[str]) -> int:
         elif args[i] == "--lang":
             lang = args[i + 1] if i + 1 < len(args) else lang
             i += 2
+        elif args[i] == "--state":
+            state = args[i + 1] if i + 1 < len(args) else state
+            i += 2
         elif args[i] == "--settings":
             settings_open = True
             i += 1
@@ -328,12 +405,19 @@ def main(argv: list[str]) -> int:
         else:
             out = Path(args[i])
             i += 1
+    known = ("", "main", "bulk", "bypass", "strategies", "downloader", "ftp")
+    if state not in known:
+        raise SystemExit(f"неизвестное состояние {state!r}, допустимы: {', '.join(known[1:])}")
+    if state and state not in ("main", "bulk"):
+        settings_open = True   # состояния с карточкой начинаются с её открытия
     out = out or PROBE_DIR / "page.html"
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(build_page_with_stub(theme=theme, lang=lang, settings_open=settings_open),
-                   encoding="utf-8")
+    page = build_page_with_stub(theme=theme, lang=lang, settings_open=settings_open)
+    if state:
+        page = inject_demo(page, state)
+    out.write_text(page, encoding="utf-8")
     print(f"{out} (карточка настроек={'открыта' if settings_open else 'закрыта'}, "
-          f"тема={theme}, язык={lang})")
+          f"тема={theme}, язык={lang}, состояние={state or '-'})")
     return 0
 
 

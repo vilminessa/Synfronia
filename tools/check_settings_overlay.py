@@ -447,6 +447,26 @@ def main() -> int:
             api._last_probe = None
             api._settings_open = False
 
+    section("11. журнал в окне: пустая полезная нагрузка получает маркер")
+    # yt-dlp при отмене шлёт logger.error("ERROR: ") - строка без текста.
+    # Окно и файл обязаны говорить одно и то же, поэтому маркер ставится до
+    # раздвоения путей (Api._log -> file_log и буфер окна)
+    seen = []
+    real_file_log = gui.file_log
+    gui.file_log = lambda level, msg: seen.append((level, msg))
+    try:
+        api._log("error", "ERROR: ")
+        api._log("info", "обычная строка")
+    finally:
+        gui.file_log = real_file_log
+    ok(seen and "(пустое сообщение)" in seen[0][1],
+       "file_log получил маркер вместо пустого хвоста", str(seen[:1]))
+    with api._lock:
+        tail = list(api._logs)[-2:]
+    ok(tail and "(пустое сообщение)" in tail[0]
+       and "обычная строка" in tail[-1],
+       "буфер окна не отстаёт от файла", str(tail))
+
     print(f"\nитог: {_checks - len(_fails)}/{_checks} ok")
     if _fails:
         print("провалено: " + ", ".join(_fails))

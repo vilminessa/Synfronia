@@ -45,7 +45,7 @@ _THEME_DEFAULTS = {
 THEMES = {
     "technology_day": {
         "label": "Technology day",
-        "bg": "#00181a",
+        "bg": "#01282c",
         "surface": "#00585a",
         "widget": "#003638",
         "text": "#dcdedd",
@@ -90,7 +90,7 @@ THEMES = {
     "night_sky": {
         "label": "Basic Night Sky",
         "bg": "#373051",
-        "surface": "#3b2f4d",
+        "surface": "#483a5f",
         "widget": "#323756",
         "text": "#fffedd",
         "accent": "#fff2c9",
@@ -100,8 +100,8 @@ THEMES = {
     },
     "liquid_glass": {
         "label": "Liquid Glass",
-        "bg": "#060a14",
-        "surface": "#101b2f",
+        "bg": "#142244",
+        "surface": "#1f345a",
         "widget": "#16223d",
         "text": "#e9f1ff",
         "accent": "#69c1ff",

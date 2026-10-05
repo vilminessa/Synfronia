@@ -144,7 +144,11 @@ const THEME_SWITCH = `(function () {
     return THEMES[k] && !THEMES[k].entry && !THEMES[k].hidden;
   });
   var before = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();
-  var key = pick[0] || sel.value;
+  // цель - тема НЕ текущая: страница пробника собирается под конкретную
+  // тему (--theme), и переключение на неё же дало бы before == after,
+  // а чек решил бы, что палитра «не сменилась»
+  var others = pick.filter(function (k) { return k !== sel.value; });
+  var key = others[0] || pick[0] || sel.value;
   sel.value = key;
   sel.dispatchEvent(new Event("change"));
   return {key: key, before: before,

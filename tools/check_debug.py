@@ -384,6 +384,76 @@ def main() -> int:
             debug.find_app_processes, debug.log_files, debug.pause = \
                 real_busy, real_logs, real_pause
 
+    section("9. журналы: старые ANSI, свежие UTF-8, пустая полезная нагрузка")
+    with tempfile.TemporaryDirectory(prefix="synf_enc_") as tmp:
+        lg = Path(tmp)
+        ansi = lg / "old.log"
+        ansi.write_bytes("старая строка: проба\n".encode("cp1251"))
+        fresh = lg / "new.log"
+        fresh.write_text("свежая строка: проба\n", encoding="utf-8")
+        mixed = lg / "mixed.log"
+        mixed.write_bytes("первая cp1251\n".encode("cp1251") +
+                          "вторая utf-8\n".encode("utf-8"))
+        ok(debug.tail_file(ansi, 5) == ["старая строка: проба"],
+           "хвост ANSI-файла читается без кракозябр",
+           str(debug.tail_file(ansi, 5)))
+        ok(debug.tail_file(fresh, 5) == ["свежая строка: проба"],
+           "UTF-8 читается как раньше")
+        ok(debug.tail_file(mixed, 5) == ["первая cp1251", "вторая utf-8"],
+           "смешанный файл: обе строки чисто", str(debug.tail_file(mixed, 5)))
+        lines, pos = debug.new_lines(ansi, 0)
+        ok(lines == ["старая строка: проба"] and pos == ansi.stat().st_size,
+           "следение за ANSI-файлом отдаёт кириллицу и байтовую позицию",
+           str((lines, pos)))
+        lines, _ = debug.new_lines(mixed, 0)
+        ok(lines == ["первая cp1251", "вторая utf-8"],
+           "следение по смешанному файлу", str(lines))
+
+        # запуск: дочерний процесс обязан уметь писать UTF-8
+        captured = {}
+
+        class _FakePopen:
+            def __init__(self, cmd, **kwargs):
+                captured.update(kwargs)
+                self.pid = 4242
+
+        real_popen, real_logs_dir = debug.subprocess.Popen, debug.logs_dir
+        try:
+            debug.subprocess.Popen = _FakePopen
+            debug.logs_dir = lambda: lg    # launcher.log во временную папку
+            pid = debug.run_app(Path(tmp))
+        finally:
+            debug.subprocess.Popen = real_popen
+            debug.logs_dir = real_logs_dir
+        ok(pid == 4242, "run_app вернул PID подменённого Popen", str(pid))
+        ok(captured.get("env", {}).get("PYTHONUTF8") == "1",
+           "дочерний процесс получает PYTHONUTF8=1 (новые launcher.log в UTF-8)",
+           str(captured.get("env")))
+
+    # пустая полезная нагрузка yt-dlp ("ERROR: ") - маркер в самом файле
+    old_local = os.environ.get("LOCALAPPDATA")
+    iso = Path(tempfile.mkdtemp(prefix="synf_logmsg_"))
+    os.environ["LOCALAPPDATA"] = str(iso)
+    try:
+        import paths as paths_mod
+        paths_mod._file_log("error", "ERROR: ")
+        paths_mod._file_log("info", "нормальная строка")
+        day = time.strftime("%Y-%m-%d")
+        text = (iso / "Synfronia" / "logs" / f"app_{day}.log") \
+            .read_text(encoding="utf-8")
+        rows = text.splitlines()
+        ok(rows and rows[0].endswith("[error] (пустое сообщение)"),
+           "пустая полезная нагрузка получает маркер, а не пустой хвост",
+           repr(rows[:1]))
+        ok(len(rows) > 1 and rows[1].endswith("[info] нормальная строка"),
+           "обычная строка не изменилась", repr(rows[1:2]))
+    finally:
+        if old_local is None:
+            os.environ.pop("LOCALAPPDATA", None)
+        else:
+            os.environ["LOCALAPPDATA"] = old_local
+        shutil.rmtree(iso, ignore_errors=True)
+
     print()
     if _fails:
         print(f"итог: {_checks - len(_fails)}/{_checks} ok, провалено: {len(_fails)}")

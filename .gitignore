@@ -24,3 +24,7 @@ _*.py
 result_log.txt
 Задачи.md
 
+# Личная история проекта (История.md): живёт только на диске,
+# из git вычищена вместе с историей - git filter-repo --path docs/ --invert-paths
+# (бекап до чистки: D:\projs\Synfronia-backup-2026-10-05.git)
+docs/

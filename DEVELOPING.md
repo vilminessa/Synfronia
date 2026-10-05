@@ -1,0 +1,252 @@
+# Synfronia — Developer Guide
+
+Всё техническое живёт здесь; [README.md](README.md) /
+[README.ru.md](README.ru.md) — для пользователей.
+
+## Запуск из исходников
+
+```bat
+git clone https://github.com/vilminessa/Synfronia.git
+cd Synfronia
+pip install -r requirements.txt
+python gui.py
+```
+
+## CLI
+
+```bat
+python download.py <URL> [--dest C:\videos] [--subtitles ru] [--quality 720] [--transcode nvenc] [--lang en] [--no-ftp]
+```
+
+Те же аргументы принимает `python core.py <URL> ...` — тот же движок без
+web-интерфейса. Выгрузка на FTP берётся из настроек; `--no-ftp`
+отключает её для одного запуска.
+
+### Самопроверка (для отладки сборки)
+
+```bat
+Synfronia.exe --selftest C:\videos https://youtu.be/GUS0q7gZdNE --subtitles ru --quality 720 --transcode libx265
+```
+
+Результаты пишутся в `selftest.log`, файлы — в указанный каталог.
+
+## Отладочная консоль
+
+`debug.py` — интерактивное меню по цифрам для обслуживания локальных данных
+и журналов (только stdlib):
+
+```bat
+python debug.py
+```
+
+| Пункт | Что делает |
+|-------|-----------|
+| 1 | очистить `%LOCALAPPDATA%\Synfronia` полностью (предпросмотр с размерами + подтверждение) |
+| 2 | то же, но оставить `bin\` и `logs\` |
+| 3 | запуск приложения со сторожем WebView2 (ждёт окно с живым WebView2 15 с, при зависании — повтор и диагностика) |
+| 4 | завершение приложения (сначала мягко WM_CLOSE, через 5 с — taskkill) |
+| 5 | состояние приложения (PID, время старта) |
+| 6–9 | логи: хвост последнего файла, список, показ файла целиком, удаление |
+| 10 | следить за логом в реальном времени (Ctrl+C — назад в меню) |
+| 11 | убрать служебные файлы из `%TEMP%` (каталоги WebView2, артефакты пробников) |
+| 12 | удалить пакеты обхода (`Bypass\`) — сначала остановит работающий обход, потом пофайловое удаление с отчётом «занято» |
+| 13 | запустить приложение и **сразу** следить за журналом (первые строки старта не пролистываются мимо) |
+
+Журналы читаются с учётом кодировки: свежие пишутся в UTF-8, старые
+`launcher.log` — в ANSI; `debug.py` различает кодировку построчно.
+
+Надзор за WebView2: пока окно открыто, `gui.py` каждые полсекунд проверяет
+дочерний `msedgewebview2`; если процесс умер — в `gui_diag.log` уходит
+разобранный след падения (Crashpad + LiveKernelEvent), а окно перезапускается
+до трёх раз. Падение во время загрузки перезапуском не лечится — показывается
+сообщение, работу дожидается фоновый процесс.
+
+## Проверки
+
+```bat
+python tools/check_settings.py          # схема настроек, переводы, карточка, обход
+python tools/check_settings_overlay.py  # оверлей: сборка, Api, одно окно, плашка
+python tools/check_test_fonts.py        # встроенные шрифты и докачка (без сети)
+python tools/check_download_button.py   # кнопка «Скачать», массовая, оркестрация
+python tools/check_stop_download.py     # остановка: extractor-ретраи, kill ffmpeg
+python tools/check_tools_output.py      # ui.py актуален, скрипты печатают на любой кодовой странице
+python tools/check_release_yml.py       # линт release.yml: пиннинг, permissions SLSA, ASCII
+python tools/check_debug.py             # отладочная консоль: очистка, логи, пакеты обхода, меню
+python tools/check_push_channel.py      # правила пуша/тегов
+python tools/check_webview_guard.py     # диагностика сирот WebView2
+python tools/build_ui.py --check        # ui.py собран из ui_src/ без расхождений
+node  tools/ui_fonts_probe.js           # вёрстка главного окна (headless Edge)
+node  tools/ui_themes_probe.js          # та же проверка по всем темам
+node  tools/ui_perf_probe.js            # производительность рендера
+```
+
+Зондам нужна страница: `python tools/ui_probe_page.py` (см. ниже).
+
+## Страница пробника и скриншоты
+
+`tools/ui_probe_page.py` собирает страницу приложения со стабом pywebview —
+на ней работают зонды и снимаются скриншоты для README:
+
+```bat
+python tools/ui_probe_page.py --state bypass --theme liquid_glass
+```
+
+- `--settings` — карточка настроек сразу открыта;
+- `--theme <имя>` / `--lang <код>` — тема и язык страницы;
+- `--state <main|bulk|bypass|strategies|downloader|ftp>` — довести страницу
+  до нужного вида (открыть карточку и вкладку, модал стратегий, массовую
+  с отметками, заполнить поля FTP); для состояний с карточкой `--settings`
+  включается сам.
+
+Скриншоты README снимаются headless Edge в формате 16:10 (1600×1000):
+
+```bat
+msedge --headless=new --disable-gpu --hide-scrollbars --force-device-scale-factor=1 ^
+  --virtual-time-budget=8000 --run-all-compositor-stages-before-draw ^
+  --window-size=1600,1000 --screenshot=screenshots\01-main.png http://localhost:<port>/page.html
+```
+
+(страницу раздаёт любой статический сервер, например
+`python -m http.server --directory %LOCALAPPDATA%\Synfronia\probe`).
+
+## Правка интерфейса
+
+`ui.py` не редактируется руками: приложение читает страницу из этого модуля,
+поэтому после правки исходников его пересобирают:
+
+```bat
+python tools/build_ui.py            # ui_src/ -> ui.py
+python tools/build_ui.py --check    # проверить, что ui.py актуален (в CI)
+```
+
+Плейсхолдеры (`__THEME_ROOT__`, `__THEME_CSS__`, `__FONTS_CSS__`, `__APP_CSS__`,
+`__MAIN_CSS__`, `__SETTINGS_CSS__`, `__SETTINGS_HTML__`, `__COMMONJS__`,
+`__APPJS__`, `__SETTINGS_JS__`, `__I18N__`, `__THEMES__`,
+`__SETTINGS_SCHEMA__`, `__APP_VERSION__`) подставляются при сборке страницы.
+
+## Состав
+
+```
+gui.py             - web-интерфейс (pywebview) + скрытый режим --selftest
+core.py            - фасад над модулями и точка входа `python core.py`
+dpi.py             - обход блокировок: пробы маршрута, запуск winws, подбор
+                     стратегий, реестр установок, помощник (bypass_runner.ps1)
+paths.py           - пути приложения и файловый журнал
+settings.py        - настройки (based_settings.json -> settings.json)
+i18n.py            - переводы интерфейса и статусов (6 языков)
+themes.py          - модульные темы, валидация theme.json, сборка страницы
+fonts.py           - модульные шрифты из папки fonts (@font-face, data:URI)
+ftp.py             - выгрузка готовых файлов на FTP/FTPS (ftplib)
+downloader.py      - загрузка через yt-dlp, постпроцессоры, ffmpeg
+download.py        - CLI-обёртка
+ui_src/            - исходники интерфейса (html/css/js)
+ui.py              - сгенерированный из ui_src/ интерфейс (в репозитории)
+tools/             - сборщик ui.py, зонды и проверки
+assets/fonts/      - вшитые тестовые шрифты (OFL 1.1) и их лицензии
+assets/bypass/     - вшитый пакет обхода (MIT) и его лицензия
+based_settings.json- настройки по умолчанию
+version.py         - версия приложения (единственный источник)
+Synfronia.spec     - конфиг сборки exe
+LICENSE            - PolyForm Noncommercial 1.0.0
+THIRD_PARTY_NOTICES.md - источники и лицензии компонентов
+```
+
+## Сборка exe
+
+```bat
+python -m PyInstaller Synfronia.spec --distpath . --workpath build --noconfirm
+```
+
+Один файл (`--onefile --windowed`), включает yt-dlp, webview и рантайм .NET
+(pythonnet) для EdgeChromium.
+
+## Выпуск версии
+
+Версия живёт в одном месте — `version.py` (`__version__`). От неё питаются:
+подпись «Synfronia by Vilminessa - vX.Y.Z» в главном окне, ключ
+`app_version` (`based_settings.json`), VersionInfo в свойствах exe и сверка
+тега в CI.
+
+1. поднять `__version__` в `version.py` и `app_version` в
+   `based_settings.json` (проверки не дают забыть);
+2. закоммитить;
+3. поставить тег `vX.Y.Z` (допускается `X.Y.Z.N`, например `v1.2.7.4`) и
+   запушить — workflow **release** сверит тег с версией и выпустит релиз.
+
+**Релиз по тегу.** Push тега `v*` запускает `.github/workflows/release.yml`:
+проверки и пробники вёрстки → сборка exe → публикация в GitHub Release →
+**SLSA-провенанс** (`Synfronia.exe.intoto.jsonl`, slsa-github-generator,
+keyless-подпись через OIDC) → `gh attestation verify`. Ручной запуск
+(workflow_dispatch) проходит тот же путь без публикации. Линт workflow:
+`python tools/check_release_yml.py`.
+
+## Ссылочная справка
+
+### FTP (раздел в настройках)
+
+| Поле | Смысл |
+| --- | --- |
+| Выгружать на FTP | общий выключатель |
+| Режим | `Пакет` — все файлы одним заходом в конце; `Пофайлово` — подключение на каждый файл сразу после его готовности |
+| Сервер / Порт / Логин / Пароль | параметры подключения (порт 21, логин `anonymous`) |
+| FTPS | явный TLS (обычный вход, затем `PROT P`) |
+| Проверять сертификат | выключайте только для самоподписанного сертификата |
+| Пассивный режим (PASV) | по умолчанию включён |
+| Папка на сервере / Имя файла | шаблоны: `{title}`, `{ext}`, `{index}`, `{id}`, `{playlist}`, `{date}`; `{index:02d}` → `07`; `..` и пустые сегменты выкидываются, зарезервированные имена (`CON`, `NUL`…) заменяются, длина ограничается 180 байтами |
+| Удалять локальный файл | только после подтверждённой загрузки |
+| Таймаут / Повторы | таймаут сокета и число попыток при обрыве |
+| Проверить подключение | подключается и отключается, результат в журнале |
+
+Особенности: повторные имена получают `~2`; при обрыве — новое подключение
+и каталоги заново; размер на сервере сверяется с локальным; отказ сервера
+(например 553) не повторяется; пароль хранится в `settings.json` открытым
+текстом. Реализация — только `ftplib`, сторонние пакеты не нужны.
+
+### Темы
+
+Тема — папка `%LOCALAPPDATA%\Synfronia\themes\<имя>\` с `theme.json`:
+
+```jsonc
+{
+  "label": "Моя тема",                 // имя в списке (обязательное)
+  "extends": "scarred_mind",           // палитра поверх встроенной
+  "bg": "#101418", "surface": "#1b2228", "widget": "#263038",
+  "text": "#e6e9ec", "accent": "#7fd1b9", "warn": "#ffb454",
+  "ok": "#3fbf6b", "err": "#e0554f",  // цвета состояний
+  "radius_s": 6, "radius_m": 8, "radius_l": 12,
+  "opacity": 0.96,                     // 0..1
+  "font": "Inter", "font_mono": "JetBrains Mono",
+  "entry": "index.html",               // полностью своя страница (необязательно)
+  "css": "body { letter-spacing: .2px; }"   // или custom.css в папке
+}
+```
+
+- `entry` даёт плейсхолдеры `__THEME_ROOT__`, `__THEME_CSS__`, `__FONTS_CSS__`,
+  `__APP_CSS__`, `__MAIN_CSS__`, `__COMMONJS__`, `__APPJS__`, `__I18N__`,
+  `__THEMES__`, `__SETTINGS_SCHEMA__`, секции `<!-- SLOT:имя -->` и
+  `{{asset:путь}}` (ассеты как `data:URI`).
+- Карточку настроек тема не подменяет: её рисует код по схеме.
+- Битые поля не ломают интерфейс — они попадают в журнал и помечаются `⚠`
+  в списке тем.
+- Переключение не перезагружает страницу, кроме тем с `entry` или своими
+  шрифтами.
+
+### Шрифты
+
+В поставке вшит один шрифт (JetBrains Mono, OFL 1.1, ~190 КБ) — он
+раскладывается в `%LOCALAPPDATA%\Synfronia\fonts` при первом запуске, так
+что свежая установка работает без сети. Свои файлы (`.ttf`, `.otf`, `.woff`,
+`.woff2`) кладутся в ту же папку; приложение читает из них семейство, вес и
+диапазон вариативного веса и встраивает выбранные шрифты в страницу как
+`@font-face` с `data:URI`. Лимиты: 8 МБ на файл и 8 МБ на страницу.
+Карточка «Шрифты» выбирает шрифт заголовков, общий и консольный плюс вес
+100..900; смена применяется без перезагрузки страницы.
+
+## Третьи стороны и провенанс
+
+Полный список компонентов и лицензий — в
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). Ключевое: yt-dlp
+(Unlicense), pywebview/pythonnet (BSD/MIT), PyInstaller только для сборки
+(GPL-2.0+ с исключением), ffmpeg — внешний и в exe не входит, шрифт и пакет
+обхода — в комплекте (OFL-1.1 / MIT). Проверка подписи скачанного exe —
+в [README.md](README.md#license--disclaimer).

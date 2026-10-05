@@ -45,7 +45,7 @@ from core import _file_log as file_log
 from core import _fonts_root as fonts_root
 from core import _themes_root as themes_root
 from paths import crash_evidence, kill_orphan_webviews, logs_dir, \
-    minidump_fault, newest_crash_dump, webview_child_running
+    minidump_fault, newest_crash_dump, normalize_msg, webview_child_running
 
 seed_bundled_fonts()   # вшитые шрифты в папку шрифтов: первый запуск работает без сети
 dpi.registry_autofill(on_log=file_log)   # свои установки (службы, типовые папки)
@@ -1259,6 +1259,9 @@ class Api:
 
     # -- коллбеки от core ----------------------------------------------------
     def _log(self, level: str, msg: str) -> None:
+        # пустая полезная нагрузка (yt-dlp шлёт "ERROR: " при отмене) получает
+        # маркер здесь же: журнал в окне и файл на диске не должны разойтись
+        msg = normalize_msg(msg)
         file_log(level, msg)
         with self._lock:
             self._logs.append(f"[{level}] {msg}")

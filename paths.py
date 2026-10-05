@@ -7,6 +7,7 @@ r"""Пути приложения и файловый лог.
 """
 
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -35,6 +36,22 @@ def logs_dir() -> Path:
 _LOG_LOCK = threading.Lock()
 
 
+def normalize_msg(msg) -> str:
+    r"""Текст строки журнала; пустая полезная нагрузка получает маркер.
+
+    yt-dlp при отмене присылает logger.error("ERROR: ") - одну только метку
+    без текста. Такая строка выглядит поломкой и не несёт ничего сверх
+    события, которое уже описывают соседние строки, но и удалять её нельзя:
+    факт ошибки обязан остаться в журнале. Обычные сообщения возвращаются
+    как были (префикс ERROR: у сообщений yt-dlp сохраняем - формат строк
+    не меняется, проверяют это чеки).
+    """
+    text = "" if msg is None else str(msg)
+    payload = re.sub(r"^(ERROR|WARNING|DEBUG|INFO):\s*", "",
+                     text.strip(), flags=re.IGNORECASE).strip()
+    return text if payload else "(пустое сообщение)"
+
+
 def _file_log(level: str, msg: str) -> None:
     r"""Дописывает строку в дневной лог-файл: %LOCALAPPDATA%\Synfronia\logs\app_YYYY-MM-DD.log."""
     try:
@@ -47,7 +64,7 @@ def _file_log(level: str, msg: str) -> None:
     try:
         with _LOG_LOCK:
             with open(path, "a", encoding="utf-8") as fh:
-                fh.write(f"[{stamp}] [{level}] {msg}\n")
+                fh.write(f"[{stamp}] [{level}] {normalize_msg(msg)}\n")
     except OSError:
         pass
 
