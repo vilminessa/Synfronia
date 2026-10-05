@@ -1,18 +1,18 @@
-# Полоса main: стабильный релиз по тегу v* (версия берётся из тега -
-# коммитов с бампом не нужно). Тег обязан входить в main, публикация
-# обычным релизом. Бета-полоса (b*, Pre-release из dev) живёт отдельно -
-# .github/workflows/beta.yml; структуру файлов держит вместе
-# tools/check_release_yml.py (парность полос).
+# Полоса dev: бета-пререлиз по тегу b* (версия берётся из тега -
+# коммитов с бампом не нужно). Тег обязан входить в dev, публикация как
+# GitHub Pre-release. Стабильная полоса (v*, релиз из main) живёт
+# отдельно - .github/workflows/release.yml; структуру файлов держит
+# вместе tools/check_release_yml.py (парность полос).
 # Версию в бандл вписывает tools/stamp_version.py (шаг в build перед
 # PyInstaller), футер локальных сборок показывает «unreleased».
 # Пробный запуск: workflow_dispatch (ветка вручную) - пройдут verify и
 # build, публикация и провенанс выполняются только на тегах.
 
-name: release
+name: beta
 
 on:
   push:
-    tags: ["v*"]
+    tags: ["b*"]
   workflow_dispatch: {}
 
 permissions:
@@ -38,27 +38,27 @@ jobs:
         run: python tools/build_ui.py --check
       - name: Линт release.yml и beta.yml (пиннинг, парность, SLSA)
         run: python tools/check_release_yml.py
-      - name: Формат тега (v1.2.7.5)
+      - name: Формат тега (b1.2.7.41)
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: |
-          if [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+(\.[0-9]+){2,3}$ ]]; then
+          if [[ "$GITHUB_REF_NAME" =~ ^b[0-9]+(\.[0-9]+){2,3}$ ]]; then
             echo "tag $GITHUB_REF_NAME ok - version will be stamped by tools/stamp_version.py"
           else
-            echo "::error::tag $GITHUB_REF_NAME has wrong format; expected v1.2.7.5"
+            echo "::error::tag $GITHUB_REF_NAME has wrong format; expected b1.2.7.41"
             exit 1
           fi
-      - name: Тег v указывает на коммит из main
-        # стабильные релизы собираются из main: тег на коммите, которого ещё
-        # нет в main, падает здесь - до сборки exe и публикации не доходит;
-        # if нужен для dispatch (ветка, тега нет)
+      - name: Тег b указывает на коммит из dev
+        # бета собирается из dev: тег на коммите, которого ещё нет в dev,
+        # падает здесь - до сборки exe и публикации не доходит; if нужен
+        # для dispatch (ветка, тега нет)
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: |
-          if git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
-            echo "tag $GITHUB_REF_NAME is reachable from origin/main - ok"
+          if git merge-base --is-ancestor "$GITHUB_SHA" origin/dev; then
+            echo "tag $GITHUB_REF_NAME is reachable from origin/dev - ok"
           else
-            echo "::error::tag $GITHUB_REF_NAME is not in main (only on dev). Fast-forward main first: git branch -f main dev && git push origin main forgejo/main, then move the tag."
+            echo "::error::tag $GITHUB_REF_NAME is not in dev; push the commit to dev (git push forgejo dev), then move the tag."
             exit 1
           fi
       - name: Синтаксис JS
@@ -141,13 +141,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          notes="Автоматическая сборка (CI). Провенанс SLSA прикладывается отдельным джобом."
+          notes="Бета-сборка из dev ($GITHUB_REF_NAME). Автоматическая сборка (CI). Провенанс SLSA прикладывается отдельным джобом."
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" Synfronia.exe --repo "$GITHUB_REPOSITORY" --clobber
           else
             gh release create "$GITHUB_REF_NAME" Synfronia.exe --repo "$GITHUB_REPOSITORY" \
               --title "$GITHUB_REF_NAME" \
-              --notes "$notes"
+              --notes "$notes" \
+              --prerelease
           fi
 
   generator-generic-ossf-slsa3-publish:

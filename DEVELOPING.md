@@ -70,7 +70,7 @@ python tools/check_test_fonts.py        # встроенные шрифты и �
 python tools/check_download_button.py   # кнопка «Скачать», массовая, оркестрация
 python tools/check_stop_download.py     # остановка: extractor-ретраи, kill ffmpeg
 python tools/check_tools_output.py      # ui.py актуален, скрипты печатают на любой кодовой странице
-python tools/check_release_yml.py       # линт release.yml: пиннинг, permissions SLSA, ASCII
+python tools/check_release_yml.py       # линт release.yml и beta.yml: парность полос, пиннинг, permissions SLSA
 python tools/check_debug.py             # отладочная консоль: очистка, логи, пакеты обхода, меню
 python tools/check_push_channel.py      # правила пуша/тегов
 python tools/check_webview_guard.py     # диагностика сирот WebView2
@@ -177,16 +177,20 @@ python -m PyInstaller Synfronia.spec --distpath . --workpath build --noconfirm
 
 ### Две полосы
 
-| | тег | откуда собирается | что выходит |
-| --- | --- | --- | --- |
-| **бета** | `b<номер>` (напр. `b1.2.7.41`) | `dev` | GitHub Release с пометкой **Pre-release** |
-| **релиз** | `v<номер>` (напр. `v1.2.7.5`) | `main` | обычный релиз + SLSA-провенанс |
+Каждая полоса живёт в своём workflow-файле:
 
-Гарды в `release.yml`: `v`-тег обязан входить в `main`, `b`-тег — в `dev`
+| | файл | тег | откуда собирается | что выходит |
+| --- | --- | --- | --- | --- |
+| **бета** | `beta.yml` | `b<номер>` (напр. `b1.2.7.41`) | `dev` | GitHub Release с пометкой **Pre-release** |
+| **релиз** | `release.yml` | `v<номер>` (напр. `v1.2.7.5`) | `main` | обычный релиз + SLSA-провенанс |
+
+Гарды: `v`-тег обязан входить в `main`, `b`-тег — в `dev`
 (`git merge-base --is-ancestor`, у checkout `fetch-depth: 0` — иначе у
 shallow-клона нет общей истории). Формат тега — `[vb]X.Y.Z[.N]`, максимум
 четыре компонента (Windows VersionInfo не принимает больше, поэтому
-«промежуточность» несёт префикс `b`, а не пятый разряд версии).
+«промежуточность» несёт префикс `b`, а не пятый разряд версии). Общий
+скелет обоих файлов держит вместе линтер: парность сверяет всё, кроме
+полосных шагов (формат тега, гард, текст публикации).
 
 ### Порядок
 
@@ -202,14 +206,15 @@ shallow-клона нет общей истории). Формат тега — 
      git tag v1.2.7.5
      git push origin v1.2.7.5
      ```
-3. workflow **release**: проверки и гарды → стамп версии из тега → сборка
-   exe → публикация (`--prerelease` для `b*`) → **SLSA-провенанс**
-   (`Synfronia.exe.intoto.jsonl`, keyless-подпись через OIDC) →
-   `gh attestation verify`.
+3. свой workflow (**beta** для `b*`, **release** для `v*`): проверки и
+   гарды → стамп версии из тега → сборка exe → публикация (в `beta.yml` —
+   с `--prerelease`) → **SLSA-провенанс** (`Synfronia.exe.intoto.jsonl`,
+   keyless-подпись через OIDC) → `gh attestation verify`.
 
 Неверный формат тега, тег вне своей ветки или расхождение пары версий валятся
-**до** сборки exe и публикации. Ручной запуск (`workflow_dispatch`) проходит
-тот же путь без публикации и стампа (сборка «как есть»). Линт workflow:
+**до** сборки exe и публикации. Ручной запуск (`workflow_dispatch`, есть в
+обоих файлах) проходит тот же путь без публикации и стампа (сборка «как
+есть»). Линт обоих workflow, включая парность полос:
 `python tools/check_release_yml.py`.
 
 ## Ссылочная справка
