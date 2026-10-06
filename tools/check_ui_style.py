@@ -20,7 +20,9 @@ syn-theme, утилиты живут в syn-utilities: компоненты < т
   7. @media в util.css используют только BREAKPOINTS-значения;
   8. селекторы утилит валидны (с точкой) и адаптив-варианты посчитаны;
   9. кнопки на токенах: disabled - только var(--op-disabled), нажатие везде
-     scale(.96), кольцо фокуса - var(--focus-ring).
+     scale(.96), кольцо фокуса - var(--focus-ring);
+  10. hex-цвета - только allowlist магии подсказок (conic/маска/пылинки),
+      цвета итогов .dl - из палитры темы.
 
 Запуск:  python tools/check_ui_style.py
 """
@@ -151,6 +153,20 @@ def main() -> int:
        and all("var(--focus-ring)" in body for body in ring_rules),
        "кольцо фокуса везде через var(--focus-ring)",
        f"правил с outline: {len(ring_rules)}")
+
+    section("10. hex-цвета только из allowlist магии подсказок")
+    # палитра живёт в теме; здесь остаются лишь conic-обводка/маска/пылинки
+    # подсказок (#fff9c4/#b6f0ff/#fff/#000) и фолбэки внутри var(--x, #hex)
+    hex_allow = {"#fff9c4", "#b6f0ff", "#fff", "#000"}
+    stripped = re.sub(r"var\([^)]*\)", "", css3)
+    hexes = {h.lower() for h in
+             re.findall(r"#[0-9a-fA-F]{3,8}(?![0-9a-zA-Z-])", stripped)}
+    stray_hex = sorted(hexes - hex_allow)
+    ok(not stray_hex,
+       "ни одного зашитого hex вне allowlist (цвета - из палитры темы)",
+       str(stray_hex))
+    ok(not re.search(r"--dl-(ok|fail):\s*#", css3),
+       "цвета итогов .dl берутся из палитры темы (var(--ok)/var(--err))")
 
     print()
     if _fails:
