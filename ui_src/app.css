@@ -5,7 +5,7 @@
   body {
     margin: 0; padding: 16px;
     font-family: var(--font-sans, "Segoe UI"), system-ui, sans-serif;
-    background: var(--bg); color: var(--text); font-size: 14px;
+    background: var(--bg); color: var(--text); font-size: var(--fs-md);
     font-weight: var(--font-weight, 400);
     opacity: var(--opacity);
   }
@@ -16,10 +16,10 @@
   /* Отступ подпись -> контрол 8px: 4px выглядело слипанием (жалоба - «элементы
      слишком близко»); верхний отступ 10px остаётся, чтобы дыхание между
      блоками не менялось. */
-  label { display: block; margin: 10px 0 8px; font-size: 13px; opacity: .9; }
+  label { display: block; margin: 10px 0 8px; font-size: var(--fs-base); opacity: .9; }
   input[type=text], input[type=password], select {
     width: 100%; padding: 8px 10px; border-radius: var(--radius-s); border: 1px solid var(--surface);
-    background: var(--widget); color: var(--text); font-size: 14px; outline: none;
+    background: var(--widget); color: var(--text); font-size: var(--fs-md); outline: none;
   }
   input[type=text]:focus, input[type=password]:focus, select:focus { border-color: var(--accent); }
   input:disabled, select:disabled, textarea:disabled { opacity: var(--op-disabled); }
@@ -32,7 +32,7 @@
   input[type=number] {
     box-sizing: border-box; width: 64px; flex: 0 0 64px;
     padding: 6px 8px; border-radius: var(--radius-s); border: 1px solid var(--surface);
-    background: var(--widget); color: var(--text); font-size: 13px; outline: none; text-align: center;
+    background: var(--widget); color: var(--text); font-size: var(--fs-base); outline: none; text-align: center;
   }
   input[type=number]:focus { border-color: var(--accent); }
   input[type=range] {
@@ -43,7 +43,7 @@
      дизейбл --op-disabled и кольцо фокуса; варианты .btn-* ниже. */
   button {
     padding: 8px 18px; border: none; border-radius: var(--radius-s); cursor: pointer;
-    background: var(--surface); color: var(--text); font-size: 14px;
+    background: var(--surface); color: var(--text); font-size: var(--fs-md);
     transition: background-color var(--dur-ui) var(--ease-standard),
                 color var(--dur-ui) var(--ease-standard),
                 border-color var(--dur-ui) var(--ease-standard),
@@ -64,7 +64,7 @@
     border: 1px solid var(--widget);
     background: var(--surface); color: var(--text);
     border-radius: var(--radius-s);
-    font-size: 13px; cursor: pointer;
+    font-size: var(--fs-base); cursor: pointer;
   }
   .btn-outline:hover, .theme-actions button:hover,
   .bypass-dialog-row button:hover, .bypass-repo:hover, .bypass-row-btn:hover {
@@ -74,7 +74,7 @@
      «текст на акценте» в приложении (бывший --on-accent убран) */
   .btn-primary {
     background: var(--accent); border-color: transparent;
-    color: var(--bg); font-weight: 600;
+    color: var(--bg); font-weight: var(--fw-semibold);
   }
   .btn-primary:hover {
     background: color-mix(in srgb, var(--accent) 86%, var(--bg)); color: var(--bg);
@@ -82,33 +82,33 @@
   /* ghost: текстовая кнопка - без заливки, только подчёркивание */
   .btn-ghost, .link-btn {
     background: none; border: none; padding: 2px 4px;
-    color: var(--accent); font-size: 13px; cursor: pointer; opacity: .9;
+    color: var(--accent); font-size: var(--fs-base); cursor: pointer; opacity: .9;
   }
   .btn-ghost:hover, .link-btn:hover {
     background: none; text-decoration: underline; opacity: 1;
   }
   /* размеры: sm - плотные кнопки карточек, lg - крупные диалога обхода */
-  .btn-sm { padding: 7px 12px; font-size: 13px; }
-  .btn-lg { padding: 10px 18px; font-size: 14px; }
+  .btn-sm { padding: 7px 12px; font-size: var(--fs-base); }
+  .btn-lg { padding: 10px 18px; font-size: var(--fs-md); }
   .icon-btn {
     width: 36px; height: 36px; padding: 0; font-size: 18px; line-height: 1;
     display: flex; align-items: center; justify-content: center; flex: none;
   }
   /* компактная иконочная кнопка - шапки карточек и диалогов */
-  .icon-btn-sm { width: 30px; height: 30px; font-size: 15px; }
+  .icon-btn-sm { width: 30px; height: 30px; font-size: var(--fs-lg); }
   .row { display: flex; align-items: center; gap: 8px; }
   .row input[type=text] { flex: 1; }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
-  .check { display: flex; align-items: center; gap: 6px; margin: 10px 0 4px; font-size: 13px; }
+  .check { display: flex; align-items: center; gap: 6px; margin: 10px 0 4px; font-size: var(--fs-base); }
   .check input { width: 15px; height: 15px; accent-color: var(--accent); }
   .range-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
   /* Кнопки в строке не сжимаются: иначе подпись рвётся на две строки и
      кнопки слипаются - ширина по содержимому, перенос целиком по строке */
   .range-row button { flex: 0 0 auto; white-space: nowrap; }
-  .range-row label { display: inline-block; margin: 0; min-width: 0; font-size: 13px; white-space: nowrap; }
+  .range-row label { display: inline-block; margin: 0; min-width: 0; font-size: var(--fs-base); white-space: nowrap; }
   .range-row input[type=text], .range-row input[type=password], .range-row select { flex: 1 1 0; min-width: 0; }
   .row input { flex: 1 1 0; min-width: 0; }
-  .note { margin-top: 6px; font-size: 12px; opacity: .7; }
+  .note { margin-top: 6px; font-size: var(--fs-sm); opacity: .7; }
   /* пустое пояснение не рисуется вообще: иначе оно занимает место и
      остаётся тёмным квадратом рядом с кнопками. Полоса прогресса текста
      не содержит вовсе - для неё исключение, иначе она не появится */
@@ -163,7 +163,7 @@
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   /* время пробы уходит вправо (при переносе - на свою строку) */
-  #dpi-state .state-route { margin-left: auto; font-size: 12px; opacity: .8; }
+  #dpi-state .state-route { margin-left: auto; font-size: var(--fs-sm); opacity: .8; }
   #dpi-state .state-route.ok { color: var(--ok); opacity: 1; }
   #dpi-state .state-route.warn { color: var(--warn); opacity: 1; }
   #dpi-state .state-route.bad { color: var(--err); opacity: 1; }
@@ -181,7 +181,7 @@
     background: var(--surface); color: var(--text);
     border: 1px solid var(--widget); border-radius: var(--radius-s);
     box-shadow: 0 10px 30px rgba(0, 0, 0, .45);
-    font-size: 12px; line-height: 1.35;
+    font-size: var(--fs-sm); line-height: 1.35;
     pointer-events: none; opacity: 0;
     transition: opacity var(--dur-ui) var(--ease-out);
   }

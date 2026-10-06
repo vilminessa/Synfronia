@@ -40,7 +40,7 @@ __SETTINGS_CSS__
 
   
 <!-- SLOT:tabs -->
-<div class="tabs">
+<div class="tabs u-flex u-wrap u-gap-8">
     <button type="button" id="tab-video" class="tab active" data-i18n="tab.video">Видео</button>
     <button type="button" id="tab-playlist" class="tab" data-i18n="tab.playlist">Плейлист</button>
     <button type="button" id="tab-batch" class="tab" data-i18n="tab.batch">Массовая</button>
@@ -50,7 +50,7 @@ __SETTINGS_CSS__
 
   
 <!-- SLOT:panel-video -->
-<div id="panel-video" class="panel">
+<div id="panel-video" class="panel u-mb-4">
     <label for="url-video" data-i18n="url.video.label">Ссылка на видео:</label>
     <input type="text" id="url-video" placeholder="https://www.youtube.com/watch?v=…" autofocus>
   </div>
@@ -59,7 +59,7 @@ __SETTINGS_CSS__
 
   
 <!-- SLOT:panel-playlist -->
-<div id="panel-playlist" class="panel" hidden>
+<div id="panel-playlist" class="panel u-mb-4" hidden>
     <label for="url-playlist" data-i18n="url.playlist.label">Ссылка на плейлист:</label>
     <input type="text" id="url-playlist" placeholder="https://www.youtube.com/playlist?list=…">
     <div class="check"><input type="checkbox" id="group"><span data-i18n="group.label">Сгруппировать: плейлист в подпапку с его названием</span></div>
@@ -69,11 +69,11 @@ __SETTINGS_CSS__
 
   
 <!-- SLOT:panel-batch -->
-<div id="panel-batch" class="panel" hidden>
+<div id="panel-batch" class="panel u-mb-4" hidden>
     <label for="url-batch" data-i18n="url.batch.label">Ссылки (по одной на строку):</label>
     <textarea id="url-batch" rows="7" placeholder="https://www.youtube.com/watch?v=…&#10;https://www.youtube.com/watch?v=…" data-i18n-tip="bulk.hint"></textarea>
     <div id="bulk-view" class="bulk-view" hidden aria-hidden="true"></div>
-    <div class="bulk-row">
+    <div class="bulk-row u-flex u-items-center u-justify-between u-mt-6">
       <span id="batch-count" class="bulk-count">0</span>
       <span class="bulk-tools">
         <button type="button" id="bulk-failed" class="link-btn" data-i18n="bulk.failed_btn" hidden>Оставить неудавшиеся</button>
@@ -137,7 +137,7 @@ __SETTINGS_CSS__
 
   
 <!-- SLOT:actions -->
-<div class="actions">
+<div class="actions u-flex u-items-center u-gap-8 u-mt-16">
     <button id="download" class="dl" type="button">
       <span class="dl-fill"></span>
       <span class="dl-label" data-i18n="btn.download">Скачать</span>

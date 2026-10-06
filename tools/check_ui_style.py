@@ -26,7 +26,10 @@ syn-theme, утилиты живут в syn-utilities: компоненты < т
   11. переходы только на --dur-*/--ease-* (steps(3) пиксельного тумблера -
       исключение), reduce-motion - ровно один сводный блок с глобальным
       селектором, ручка html.reduce-motion сохранена. Длительности
-      ambient-циклов (logo-bloom, дождь) вне шкалы - их гасит свод.
+      ambient-циклов (logo-bloom, дождь) вне шкалы - их гасит свод;
+  12. типографика и адаптив: кегли/веса только из --fs-*/--fw-* (18 и 34 -
+      спец), пороги @media только 640/900, раскладка обоих окон несёт
+      u-утилиты в разметке.
 
 Запуск:  python tools/check_ui_style.py
 """
@@ -202,6 +205,27 @@ def main() -> int:
        "свод гасит все @keyframes и переходы разом (глобальный селектор)")
     ok("html.reduce-motion *" in css3,
        "ручка «Анимации интерфейса» (html.reduce-motion) на месте")
+
+    section("12. типографика и адаптив: шкала и единые пороги")
+    fs_lit = re.findall(r"font-size:\s*(\d+)px", css3)
+    stray_fs = sorted({f for f in fs_lit if f not in {"18", "34"}}, key=int)
+    ok(not stray_fs,
+       "кегли только var(--fs-*) (18 глиф-кнопки и 34 процент - спец)",
+       str(stray_fs))
+    fw_lit = re.findall(r"font-weight:\s*(\d{3})\b", css3)
+    ok(not fw_lit, "насыщенность только var(--fw-*)", str(fw_lit))
+    bp_ports = set(re.findall(r"@media\s*\((?:min|max)-width:\s*(\d+)px\)",
+                              css3 + have))
+    ok(bp_ports <= {"640", "900"},
+       "пороги адаптива в ui_src только из BREAKPOINTS", str(sorted(bp_ports)))
+    idx_html = (SRC / "index.html").read_text(encoding="utf-8")
+    card_html = (SRC / "settings.html").read_text(encoding="utf-8")
+    ok("u-flex" in idx_html and "u-gap-" in idx_html and "u-mt-" in idx_html,
+       "главное окно: раскладка несёт u-утилиты")
+    ok("u-flex-col" in card_html and "u-gap-" in card_html,
+       "карточка и диалог: раскладка несёт u-утилиты")
+    ok("font-size: var(--fs-2xl)" in css3 and "font-size: var(--fs-xl)" in css3,
+       "заголовки на ступенях шкалы (2xl/xl вместо 22/19px)")
 
     print()
     if _fails:

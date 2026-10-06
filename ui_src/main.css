@@ -4,20 +4,20 @@
   /* Alpine: без x-cloak элемент с директивой мелькнул бы необработанным
      до старта движка (у нас это станет актуально на этапе 4 - карточка) */
   [x-cloak] { display: none !important; }
-  h1 { font-size: 22px; margin: 0 0 8px; }
-  .sub { opacity: .65; font-size: 12px; }
+  h1 { font-size: var(--fs-2xl); margin: 0 0 8px; }
+  .sub { opacity: .65; font-size: var(--fs-sm); }
   /* Подпись автора и версии слева снизу; значение подставляет build_page
      из version.py, подпись не интерактивна и не мешает контенту */
   #app-version {
     position: fixed; left: 14px; bottom: 10px; z-index: 5;
-    font-size: 11px; color: var(--text); opacity: .5;
+    font-size: var(--fs-xs); color: var(--text); opacity: .5;
     pointer-events: none; user-select: none;
   }
   .head { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 14px; }
   .brand { flex: 1; min-width: 0; }
   .logo {
     display: inline-block;
-    font-family: var(--font-sans, "Segoe UI"), system-ui, sans-serif; font-size: 22px; font-weight: 700;
+    font-family: var(--font-sans, "Segoe UI"), system-ui, sans-serif; font-size: var(--fs-2xl); font-weight: var(--fw-bold);
     letter-spacing: 0.02em; line-height: 1.15; color: var(--text); white-space: nowrap;
     user-select: none;
     animation: logo-bloom 3.5s ease-in-out infinite;
@@ -45,7 +45,7 @@
   .clicker-row { text-align: center; margin-top: 10px; position: relative; }
   .clicker-msg {
     position: absolute; top: -34px; left: 0; right: 0; text-align: center;
-    font-size: 13px; color: var(--accent); opacity: 0; transition: opacity var(--dur-slow);
+    font-size: var(--fs-base); color: var(--accent); opacity: 0; transition: opacity var(--dur-slow);
     pointer-events: none; white-space: nowrap;
   }
   .clicker-msg.show {
@@ -64,7 +64,7 @@
   .clicker {
     min-width: 120px; height: 42px; padding: 0 18px; border-radius: var(--radius-l);
     background: var(--surface); border: 1px solid var(--widget); color: var(--text);
-    font-size: 15px; line-height: 1; cursor: pointer; vertical-align: middle;
+    font-size: var(--fs-lg); line-height: 1; cursor: pointer; vertical-align: middle;
     /* переходы и нажатие - из базы button (токены --dur-*) */
   }
   .clicker:hover { background: var(--widget); }
@@ -74,7 +74,7 @@
   }
   /* Вкладки переносятся по ширине окна: немецкие подписи не влезали в
      прежнюю узкую панель и выдавливали FTP за правый край. */
-  .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+  .tabs { margin-bottom: 14px; }
   .tab {
     flex: 0 1 auto; min-width: 0;
     border: 1px solid var(--surface); border-radius: var(--radius-m);
@@ -83,7 +83,7 @@
   /* наведение - только рамка: заливка accent читалась как активная вкладка */
   .tab:hover { background: var(--surface); color: var(--text); border-color: var(--accent); }
   .tab.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
-  .panel { margin-bottom: 4px; }
+  /* .panel - отступ в утилите разметки (u-mb-4) */
   /* Массовая вкладка: список ссылок, счётчик и очистка */
   #url-batch {
     width: 100%; min-height: 120px; resize: vertical;
@@ -92,11 +92,9 @@
     color: var(--text); font: 13px/1.45 Consolas, "JetBrains Mono", monospace;
   }
   #url-batch:focus { outline: none; border-color: var(--accent); }
-  .bulk-row {
-    display: flex; justify-content: space-between;
-    align-items: center; margin-top: 6px;
-  }
-  .bulk-count { font-size: 12px; opacity: .75; }
+  /* .bulk-row - раскладка в утилитах разметки (u-flex/u-justify-between/
+     u-items-center/u-mt-6) */
+  .bulk-count { font-size: var(--fs-sm); opacity: .75; }
   .bulk-tools { display: inline-flex; gap: 10px; align-items: center; }
   /* Режим просмотра массовой загрузки: список строк со статусами */
   .bulk-view {
@@ -185,20 +183,21 @@
   }
   @keyframes bulk-spin { to { transform: rotate(360deg); } }
   @keyframes bulk-draw { to { stroke-dashoffset: 0; } }
-  .actions { margin-top: 16px; display: flex; gap: 8px; align-items: center; }
+  /* .actions - раскладка в утилитах разметки (u-flex/u-items-center/
+     u-gap-8/u-mt-16) */
   .pb-wrap { margin-top: 14px; height: 10px; border-radius: var(--radius-s); background: var(--surface); overflow: hidden; }
   #pb { height: 100%; width: 0; background: var(--accent); transition: width var(--dur-enter); }
   #pb.indeterminate { width: 30%; animation: slide 1.2s infinite; }
   @keyframes slide { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
-  #status { margin-top: 6px; font-size: 13px; height: 18px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  #status { margin-top: 6px; font-size: var(--fs-base); height: 18px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   #log {
     width: 100%; min-height: 150px; margin-top: 6px; resize: vertical;
     background: var(--widget); color: var(--text); border: 1px solid var(--surface);
-    border-radius: var(--radius-s); padding: 8px; font-family: var(--font-mono, Consolas), monospace; font-size: 12px;
+    border-radius: var(--radius-s); padding: 8px; font-family: var(--font-mono, Consolas), monospace; font-size: var(--fs-sm);
   }
   #warn {
     display: none; margin-top: 10px; padding: 8px 12px; border-radius: var(--radius-s);
-    background: rgba(255, 180, 84, .15); border: 1px solid var(--warn); color: var(--warn); font-size: 13px;
+    background: rgba(255, 180, 84, .15); border: 1px solid var(--warn); color: var(--warn); font-size: var(--fs-base);
   }
 
   /* ---- полосы прокрутки в палитре темы ----
@@ -233,7 +232,7 @@
      Анимации - короткие и пружинистые, как микровзаимодействия Telegram. */
   .dl {
     position: relative; overflow: hidden;
-    min-width: 132px; font-weight: 500; line-height: 1.2;
+    min-width: 132px; font-weight: var(--fw-semibold); line-height: 1.2;
     /* переходы - из базы button (токены --dur- и --ease-); цвета состояний: */
     --dl-ok: var(--ok);        /* тема: массовая и кнопка красят успех
                                   одним и тем же зелёным */
@@ -369,9 +368,9 @@
     /* бокс въезжает как карточка настроек (keyframes card-in) */
     animation: card-in var(--dur-enter) cubic-bezier(.2, .9, .3, 1.15);
   }
-  #bypass-title { margin: 0 0 8px; font-size: 20px; font-weight: 700; }
-  #bypass-text { margin: 0 0 6px; font-size: 14px; line-height: 1.5; opacity: .92; }
-  #bypass-hint { font-size: 13px; opacity: .72; margin-bottom: 16px; min-height: 16px; }
+  #bypass-title { margin: 0 0 8px; font-size: var(--fs-xl); font-weight: var(--fw-bold); }
+  #bypass-text { margin: 0 0 6px; font-size: var(--fs-md); line-height: 1.5; opacity: .92; }
+  #bypass-hint { font-size: var(--fs-base); opacity: .72; margin-bottom: 16px; min-height: 16px; }
   #bypass-actions { display: flex; gap: 10px; flex-wrap: wrap; }
   /* кнопки диалога несут классы: включение - btn.btn-primary.btn-lg,
      отказ - btn.btn-outline.btn-lg (варианты лежат в app.css) */
@@ -418,7 +417,7 @@
     box-shadow: 0 10px 40px rgba(0, 0, 0, .35);
   }
   #ffmpeg-title {
-    margin: 0 0 6px; font-size: 44px; font-weight: 700; letter-spacing: .04em;
+    margin: 0 0 6px; font-size: var(--fs-display); font-weight: var(--fw-bold); letter-spacing: .04em;
     color: var(--text); animation: ff-title-bloom 3.6s ease-in-out infinite;
   }
   @keyframes ff-title-bloom {
@@ -427,14 +426,14 @@
     50% { text-shadow: 0 0 22px color-mix(in srgb, var(--accent) 90%, transparent),
       0 0 60px color-mix(in srgb, var(--accent) 60%, transparent); }
   }
-  #ffmpeg-sub { font-size: 15px; opacity: .9; margin: 0; line-height: 1.5; max-width: 440px; }
+  #ffmpeg-sub { font-size: var(--fs-lg); opacity: .9; margin: 0; line-height: 1.5; max-width: 440px; }
 
   /* кнопка hyperspace: цвет и рамку даёт класс btn-primary (app.css), здесь
      только геометрия сцены; canvas рисует звёзды поверх */
   #ffmpeg-dl {
     position: relative; cursor: pointer; padding: 0;
     width: 320px; height: 74px; overflow: hidden;
-    font-size: 19px;
+    font-size: var(--fs-xl);
   }
   /* «качается»: кнопка уходит в работу - нейтральная поверхность с
      акцентной обводкой; canvas поверх накапливает тёмный след и звёзды */
@@ -443,7 +442,7 @@
   }
   #ffmpeg-dl span {
     position: relative; z-index: 20; font-size: 1.05em; text-transform: uppercase;
-    font-weight: 700; letter-spacing: .06em;
+    font-weight: var(--fw-bold); letter-spacing: .06em;
   }
   #ffmpeg-dl canvas {
     z-index: 10; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
@@ -467,10 +466,10 @@
   @keyframes ring-spin { from { transform: rotate(-90deg); } to { transform: rotate(270deg); } }
   #ffmpeg-percent {
     position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-    font-size: 34px; font-weight: 700; color: var(--text);
+    font-size: 34px; font-weight: var(--fw-bold); color: var(--text);
     text-shadow: 0 0 12px color-mix(in srgb, var(--accent) 90%, transparent);
   }
-  #ffmpeg-status { margin-top: 26px; font-size: 15px; min-height: 20px; color: var(--text); opacity: .9; }
+  #ffmpeg-status { margin-top: 26px; font-size: var(--fs-lg); min-height: 20px; color: var(--text); opacity: .9; }
   /* «повторить»: вид даёт класс btn btn-outline (app.css), здесь позиция */
   #ffmpeg-retry {
     margin-top: 12px; display: none;

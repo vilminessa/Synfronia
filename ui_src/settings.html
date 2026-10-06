@@ -8,12 +8,12 @@
      themes.build_page дописывает фрагмент сам (themes._ensure_settings). -->
 <div id="settings-overlay" class="settings-overlay" hidden>
   <div class="settings-card" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-    <header class="win-head">
+    <header class="win-head u-flex u-items-center u-justify-between u-gap-12">
       <span class="win-title" id="settings-title" data-i18n="ui.settings">Настройки</span>
       <button type="button" id="settings-close" class="icon-btn icon-btn-sm" data-i18n-aria="ui.close" aria-label="Закрыть">&#x2715;&#xFE0E;</button>
     </header>
-    <div class="win-body" x-data="settingsPanel()">
-      <nav class="nav" id="settings-nav">
+    <div class="win-body u-flex" x-data="settingsPanel()">
+      <nav class="nav u-flex-col u-gap-4" id="settings-nav">
         <template x-for="(group, gi) in groups" :key="group.id">
           <button type="button" class="nav-item" :class="gi ? null : 'active'"
                   :id="'nav-' + group.id" @click="switchSection(group.id)">
@@ -21,7 +21,7 @@
           </button>
         </template>
       </nav>
-      <main class="section" id="settings-sections">
+      <main class="section u-flex-col u-gap-12" id="settings-sections">
         <template x-for="(group, gi) in groups" :key="group.id">
           <div role="tabpanel" :id="'section-' + group.id" :hidden="gi > 0">
             <template x-for="card in group.layout" :key="card.key">
@@ -48,16 +48,16 @@
        app.js ведёт его как часть настроек (hidden/inert остаются как были). -->
   <div id="bypass-dialog" class="bypass-dialog" hidden role="dialog"
        aria-modal="true" aria-labelledby="bypass-dialog-title">
-    <header class="win-head">
+    <header class="win-head u-flex u-items-center u-justify-between u-gap-12">
       <span class="win-title" id="bypass-dialog-title"
             data-i18n="sheet.dpi.dialog.title">Выберите обход</span>
       <button type="button" id="bypass-dialog-close" class="icon-btn icon-btn-sm"
               data-i18n-aria="ui.close" aria-label="Закрыть">&#x2715;&#xFE0E;</button>
     </header>
-    <div class="bypass-dialog-body">
+    <div class="bypass-dialog-body u-flex-col u-gap-12">
       <div class="bypass-dialog-sub" data-i18n="sheet.dpi.dialog.install">Установки</div>
-      <ul id="bypass-install-list" class="bypass-list"></ul>
-      <div class="bypass-dialog-row">
+      <ul id="bypass-install-list" class="bypass-list u-flex-col u-gap-6"></ul>
+      <div class="bypass-dialog-row u-flex u-wrap u-gap-8">
         <button type="button" id="bypass-dialog-add" class="btn btn-outline btn-sm" data-i18n="sheet.dpi.add">Добавить папку…</button>
         <button type="button" id="bypass-dialog-detect" class="btn btn-outline btn-sm" data-i18n="sheet.dpi.detect">Найти установленные</button>
         <button type="button" id="bypass-dialog-remove" class="btn btn-outline btn-sm" data-i18n="sheet.dpi.remove">Убрать из списка</button>
@@ -65,15 +65,15 @@
       <!-- Стратегии активной установки: выбор здесь же, а не только текстом
            в панели - пользователь должен видеть, сколько их доступно -->
       <div class="bypass-dialog-sub" data-i18n="sheet.dpi.dialog.strategies">Стратегии активной установки</div>
-      <ul id="bypass-strategy-list" class="bypass-list bypass-strategies"></ul>
+      <ul id="bypass-strategy-list" class="bypass-list u-flex-col u-gap-6 bypass-strategies"></ul>
       <div class="bypass-dialog-dl">
         <div class="bypass-dialog-sub" data-i18n="sheet.dpi.dialog.download">Скачать версию</div>
-        <div id="bypass-repo-row" class="bypass-repo-row"></div>
-        <ul id="bypass-release-list" class="bypass-list"></ul>
+        <div id="bypass-repo-row" class="bypass-repo-row u-flex u-wrap u-gap-8"></div>
+        <ul id="bypass-release-list" class="bypass-list u-flex-col u-gap-6"></ul>
         <div id="bypass-download-note" class="note"></div>
       </div>
     </div>
-    <footer class="bypass-dialog-foot">
+    <footer class="bypass-dialog-foot u-flex u-justify-end u-gap-8">
       <button type="button" id="bypass-dialog-done" class="btn btn-primary btn-sm"
               data-i18n="sheet.dpi.dialog.done">Готово</button>
     </footer>

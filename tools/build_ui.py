@@ -62,8 +62,8 @@ NEWLINE = "\r\n"  # рабочая копия репозитория в CRLF (co
 # ---- библиотека стилей: шкалы -> ui_src/util.css (генерация в gen_util_css) ----
 STYLE = {
     "space": (2, 4, 6, 8, 12, 16, 24, 32),            # отступы: имя токена = px
-    "fs": {"xs": 11, "sm": 12, "base": 13, "md": 14, "lg": 16, "xl": 20,
-           "2xl": 24, "display": 44},                 # кегли
+    "fs": {"2xs": 10, "xs": 11, "sm": 12, "base": 13, "md": 14, "lg": 16,
+           "xl": 20, "2xl": 24, "display": 44},             # кегли
     "fw": {"regular": 400, "semibold": 600, "bold": 700},   # насыщенность
     "dur": {"press": "90ms", "ui": "150ms", "enter": "200ms", "slow": "300ms"},
     "ease": {"standard": "cubic-bezier(.4, 0, .2, 1)", "out": "ease-out",
@@ -113,6 +113,8 @@ def gen_util_css() -> str:
         ("u-cursor-pointer", "cursor: pointer"),
     ])
     grp("флекс", [
+        ("u-flex-col", "flex-direction: column"),
+        ("u-flex-row", "flex-direction: row"),
         ("u-flex-1", "flex: 1 1 0%"),
         ("u-flex-none", "flex: none"),
         ("u-items-center", "align-items: center"),

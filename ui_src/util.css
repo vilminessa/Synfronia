@@ -10,7 +10,7 @@
   /* отступы: имя = px (2, 4, 6, 8, 12, 16, 24, 32) */
   --sp-2: 2px; --sp-4: 4px; --sp-6: 6px; --sp-8: 8px; --sp-12: 12px; --sp-16: 16px; --sp-24: 24px; --sp-32: 32px;
   /* кегли */
-  --fs-xs: 11px; --fs-sm: 12px; --fs-base: 13px; --fs-md: 14px; --fs-lg: 16px; --fs-xl: 20px; --fs-2xl: 24px; --fs-display: 44px;
+  --fs-2xs: 10px; --fs-xs: 11px; --fs-sm: 12px; --fs-base: 13px; --fs-md: 14px; --fs-lg: 16px; --fs-xl: 20px; --fs-2xl: 24px; --fs-display: 44px;
   /* насыщенность шрифта */
   --fw-regular: 400; --fw-semibold: 600; --fw-bold: 700;
   /* длительности */
@@ -45,6 +45,8 @@
   .u-select-none { user-select: none; }
   .u-cursor-pointer { cursor: pointer; }
   /* флекс */
+  .u-flex-col { flex-direction: column; }
+  .u-flex-row { flex-direction: row; }
   .u-flex-1 { flex: 1 1 0%; }
   .u-flex-none { flex: none; }
   .u-items-center { align-items: center; }
@@ -205,6 +207,7 @@
   .u-mr-32 { margin-right: var(--sp-32); }
   .u-ml-auto { margin-left: auto; }
   /* типографика */
+  .u-fs-2xs { font-size: var(--fs-2xs); }
   .u-fs-xs { font-size: var(--fs-xs); }
   .u-fs-sm { font-size: var(--fs-sm); }
   .u-fs-base { font-size: var(--fs-base); }
