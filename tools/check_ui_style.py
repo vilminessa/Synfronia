@@ -17,7 +17,10 @@ syn-theme, утилиты живут в syn-utilities: компоненты < т
      палитры темы (и её радиусов/шрифтов);
   6. themes.py объявляет порядок слоёв и оборачивает CSS темы в syn-theme -
      иначе авторский стиль темы молча проиграл бы компонентам;
-  7. @media в util.css используют только BREAKPOINTS-значения.
+  7. @media в util.css используют только BREAKPOINTS-значения;
+  8. селекторы утилит валидны (с точкой) и адаптив-варианты посчитаны;
+  9. кнопки на токенах: disabled - только var(--op-disabled), нажатие везде
+     scale(.96), кольцо фокуса - var(--focus-ring).
 
 Запуск:  python tools/check_ui_style.py
 """
@@ -129,6 +132,25 @@ def main() -> int:
     sm_cols = [f".u-{bp}-cols-1 {{" for bp, _w in build_ui.BREAKPOINTS]
     ok(all(c in have for c in sm_cols), "адаптивные варианты cols-1 посчитаны",
        str(sm_cols))
+
+    section("9. кнопки: disabled, нажатие и фокус - на токенах")
+    css3 = "".join((SRC / name).read_text(encoding="utf-8").replace("\r\n", "\n")
+                   for name in ("app.css", "main.css", "settings.css"))
+    bad_dis = re.findall(r":disabled[^{}]*\{[^}]*opacity:\s*\.(?:45|5)(?:[;\s]|$)",
+                         css3)
+    ok(not bad_dis, "disabled-opacity только через var(--op-disabled)",
+       str(bad_dis[:3]))
+    ok("--op-disabled: .45" in have, "токен --op-disabled есть в util.css")
+    scales = re.findall(r":active[^{}]*\{[^}]*scale\((\.[0-9]+)\)", css3)
+    bad_scale = sorted({s for s in scales if s != ".96"})
+    ok(not bad_scale, "нажатие кнопок везде scale(.96)", str(bad_scale))
+    ring_rules = [body for body in
+                  re.findall(r":focus-visible[^{}]*\{([^}]*)\}", css3)
+                  if "outline" in body]
+    ok(bool(ring_rules)
+       and all("var(--focus-ring)" in body for body in ring_rules),
+       "кольцо фокуса везде через var(--focus-ring)",
+       f"правил с outline: {len(ring_rules)}")
 
     print()
     if _fails:

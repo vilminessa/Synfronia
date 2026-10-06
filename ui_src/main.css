@@ -65,11 +65,11 @@
     min-width: 120px; height: 42px; padding: 0 18px; border-radius: var(--radius-l);
     background: var(--surface); border: 1px solid var(--widget); color: var(--text);
     font-size: 15px; line-height: 1; cursor: pointer; vertical-align: middle;
-    transition: transform .08s, background .15s, border-color .15s;
+    /* переходы и нажатие - из базы button (токены --dur-*) */
   }
   .clicker:hover { background: var(--widget); }
   .clicker:active, .clicker.pressed {
-    transform: scale(.9);
+    transform: scale(.96);
     background: var(--accent); border-color: var(--accent); color: var(--bg);
   }
   /* Вкладки переносятся по ширине окна: немецкие подписи не влезали в
@@ -77,16 +77,18 @@
   .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
   .tab {
     flex: 0 1 auto; min-width: 0;
-    padding: 8px 18px; border: 1px solid var(--surface); border-radius: var(--radius-m);
-    background: var(--surface); color: var(--text); font-size: 14px; cursor: pointer;
+    border: 1px solid var(--surface); border-radius: var(--radius-m);
+    /* фон/текст/переходы - из базы button; padding 8×18 остаётся базовым */
   }
+  /* наведение - только рамка: заливка accent читалась как активная вкладка */
+  .tab:hover { background: var(--surface); color: var(--text); border-color: var(--accent); }
   .tab.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
   .panel { margin-bottom: 4px; }
   /* Массовая вкладка: список ссылок, счётчик и очистка */
   #url-batch {
     width: 100%; min-height: 120px; resize: vertical;
     padding: 8px 10px; border-radius: var(--radius-s);
-    border: 1px solid var(--surface); background: var(--bg);
+    border: 1px solid var(--surface); background: var(--widget);
     color: var(--text); font: 13px/1.45 Consolas, "JetBrains Mono", monospace;
   }
   #url-batch:focus { outline: none; border-color: var(--accent); }
@@ -183,11 +185,6 @@
   }
   @keyframes bulk-spin { to { transform: rotate(360deg); } }
   @keyframes bulk-draw { to { stroke-dashoffset: 0; } }
-  .link-btn {
-    background: none; border: none; padding: 2px 4px;
-    color: var(--accent); font-size: 13px; cursor: pointer; opacity: .9;
-  }
-  .link-btn:hover { text-decoration: underline; opacity: 1; }
   .actions { margin-top: 16px; display: flex; gap: 8px; align-items: center; }
   .pb-wrap { margin-top: 14px; height: 10px; border-radius: var(--radius-s); background: var(--surface); overflow: hidden; }
   #pb { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
@@ -377,15 +374,8 @@
   #bypass-text { margin: 0 0 6px; font-size: 14px; line-height: 1.5; opacity: .92; }
   #bypass-hint { font-size: 13px; opacity: .72; margin-bottom: 16px; min-height: 16px; }
   #bypass-actions { display: flex; gap: 10px; flex-wrap: wrap; }
-  #bypass-actions button {
-    cursor: pointer; padding: 10px 18px; border-radius: 10px; font-size: 14px;
-    border: 1px solid var(--widget, rgba(255, 255, 255, .14));
-    background: transparent; color: inherit;
-  }
-  #bypass-actions #bypass-on {
-    background: var(--accent, #4f8cff); border-color: transparent;
-    color: var(--on-accent, #fff); font-weight: 600;
-  }
+  /* кнопки диалога несут классы: включение - btn.btn-primary.btn-lg,
+     отказ - btn.btn-outline.btn-lg (варианты лежат в app.css) */
 
   /* ---- ffmpeg bloom-оверлей: дождь поверх темы ---- */
   #ffmpeg-overlay {

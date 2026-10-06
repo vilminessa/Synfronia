@@ -20,7 +20,7 @@
   /* высоты контролов */
   --h-sm: 26px; --h-md: 34px; --h-lg: 42px;
   /* прозрачности */
-  --op-half: .5; --op-dim: .75; --op-quiet: .9;
+  --op-disabled: .45; --op-half: .5; --op-dim: .75; --op-quiet: .9;
   /* интерлиньяж */
   --lead-tight: 1.2; --lead-snug: 1.35; --lead-normal: 1.5;
   /* таблетка и кольцо фокуса — общие, не зависят от темы */
@@ -258,6 +258,7 @@
   .u-rounded-l { border-radius: var(--radius-l); }
   .u-rounded-pill { border-radius: var(--radius-pill); }
   /* прозрачность */
+  .u-op-disabled { opacity: var(--op-disabled); }
   .u-op-half { opacity: var(--op-half); }
   .u-op-dim { opacity: var(--op-dim); }
   .u-op-quiet { opacity: var(--op-quiet); }

@@ -69,7 +69,7 @@ STYLE = {
     "ease": {"standard": "cubic-bezier(.4, 0, .2, 1)", "out": "ease-out",
              "spring": "cubic-bezier(.2, .9, .25, 1.28)"},
     "height": {"sm": "26px", "md": "34px", "lg": "42px"},   # контролы
-    "op": {"half": ".5", "dim": ".75", "quiet": ".9"},      # прозрачности
+    "op": {"disabled": ".45", "half": ".5", "dim": ".75", "quiet": ".9"},  # прозрачности
     "lead": {"tight": "1.2", "snug": "1.35", "normal": "1.5"},
 }
 # палитра темы (живёт в :root шаблона/темы, не здесь) - утилиты цвета на неё ссылаются

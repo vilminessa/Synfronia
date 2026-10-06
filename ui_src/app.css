@@ -22,7 +22,13 @@
     background: var(--widget); color: var(--text); font-size: 14px; outline: none;
   }
   input[type=text]:focus, input[type=password]:focus, select:focus { border-color: var(--accent); }
-  input:disabled, select:disabled, button:disabled { opacity: .45; }
+  input:disabled, select:disabled, textarea:disabled { opacity: var(--op-disabled); }
+  /* единое кольцо фокуса (токен --focus-ring из util.css): по клавише,
+     :focus-visible, чтобы клик мышью не рисовал обводку */
+  button:focus-visible, input:focus-visible, select:focus-visible,
+  textarea:focus-visible, .knob:focus-visible {
+    outline: var(--focus-ring); outline-offset: 2px;
+  }
   input[type=number] {
     box-sizing: border-box; width: 64px; flex: 0 0 64px;
     padding: 6px 8px; border-radius: var(--radius-s); border: 1px solid var(--surface);
@@ -32,16 +38,64 @@
   input[type=range] {
     flex: 1 1 0; min-width: 0; accent-color: var(--accent); height: 4px;
   }
+  /* ---- кнопки: база и готовые варианты (атомарные параметры - util.css) ----
+     База даёт единые переходы (токены --dur- и --ease-), нажатие scale(.96),
+     дизейбл --op-disabled и кольцо фокуса; варианты .btn-* ниже. */
   button {
     padding: 8px 18px; border: none; border-radius: var(--radius-s); cursor: pointer;
     background: var(--surface); color: var(--text); font-size: 14px;
+    transition: background-color var(--dur-ui) var(--ease-standard),
+                color var(--dur-ui) var(--ease-standard),
+                border-color var(--dur-ui) var(--ease-standard),
+                box-shadow var(--dur-ui) var(--ease-standard),
+                transform var(--dur-press) var(--ease-standard);
   }
   button:hover { background: var(--accent); color: var(--bg); }
+  button:active { transform: scale(.96); }
+  button:disabled { opacity: var(--op-disabled); }
   button:disabled:hover { background: var(--surface); color: var(--text); cursor: default; }
+  /* outline-вариант: рамка загорается акцентом, фон и текст не трогаем -
+     акцентный текст на светлых темах проваливался (жалоба у mode-switch).
+     Сгруппирован с компонентами, которые несут те же классы: один текст -
+     обе точки применения, класс готов для новых элементов разметки. */
+  .btn-outline, .theme-actions button, .bypass-dialog-row button,
+  .bypass-repo, .bypass-row-btn {
+    padding: 7px 12px;
+    border: 1px solid var(--widget);
+    background: var(--surface); color: var(--text);
+    border-radius: var(--radius-s);
+    font-size: 13px; cursor: pointer;
+  }
+  .btn-outline:hover, .theme-actions button:hover,
+  .bypass-dialog-row button:hover, .bypass-repo:hover, .bypass-row-btn:hover {
+    background: var(--surface); border-color: var(--accent); color: var(--text);
+  }
+  /* primary: акцентная заливка, текст цвета фона темы - единственный способ
+     «текст на акценте» в приложении (бывший --on-accent убран) */
+  .btn-primary {
+    background: var(--accent); border-color: transparent;
+    color: var(--bg); font-weight: 600;
+  }
+  .btn-primary:hover {
+    background: color-mix(in srgb, var(--accent) 86%, var(--bg)); color: var(--bg);
+  }
+  /* ghost: текстовая кнопка - без заливки, только подчёркивание */
+  .btn-ghost, .link-btn {
+    background: none; border: none; padding: 2px 4px;
+    color: var(--accent); font-size: 13px; cursor: pointer; opacity: .9;
+  }
+  .btn-ghost:hover, .link-btn:hover {
+    background: none; text-decoration: underline; opacity: 1;
+  }
+  /* размеры: sm - плотные кнопки карточек, lg - крупные диалога обхода */
+  .btn-sm { padding: 7px 12px; font-size: 13px; }
+  .btn-lg { padding: 10px 18px; font-size: 14px; }
   .icon-btn {
     width: 36px; height: 36px; padding: 0; font-size: 18px; line-height: 1;
     display: flex; align-items: center; justify-content: center; flex: none;
   }
+  /* компактная иконочная кнопка - шапки карточек и диалогов */
+  .icon-btn-sm { width: 30px; height: 30px; font-size: 15px; }
   .row { display: flex; align-items: center; gap: 8px; }
   .row input[type=text] { flex: 1; }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
@@ -93,7 +147,7 @@
   .state-row button { flex: 0 0 auto; white-space: nowrap; }
   /* тумблер молчит во время прогона стратегий - старт/стоп посреди
      перебора сломали бы его чередование запусков */
-  .state-row button:disabled { opacity: .45; cursor: default; }
+  .state-row button:disabled { opacity: var(--op-disabled); cursor: default; }
   #dpi-state {
     flex: 1 1 auto; min-width: 0;
     display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px;

@@ -10,7 +10,7 @@
   <div class="settings-card" role="dialog" aria-modal="true" aria-labelledby="settings-title">
     <header class="win-head">
       <span class="win-title" id="settings-title" data-i18n="ui.settings">Настройки</span>
-      <button type="button" id="settings-close" class="icon-btn" data-i18n-aria="ui.close" aria-label="Закрыть">&#x2715;&#xFE0E;</button>
+      <button type="button" id="settings-close" class="icon-btn icon-btn-sm" data-i18n-aria="ui.close" aria-label="Закрыть">&#x2715;&#xFE0E;</button>
     </header>
     <div class="win-body" x-data="settingsPanel()">
       <nav class="nav" id="settings-nav">
@@ -51,16 +51,16 @@
     <header class="win-head">
       <span class="win-title" id="bypass-dialog-title"
             data-i18n="sheet.dpi.dialog.title">Выберите обход</span>
-      <button type="button" id="bypass-dialog-close" class="icon-btn"
+      <button type="button" id="bypass-dialog-close" class="icon-btn icon-btn-sm"
               data-i18n-aria="ui.close" aria-label="Закрыть">&#x2715;&#xFE0E;</button>
     </header>
     <div class="bypass-dialog-body">
       <div class="bypass-dialog-sub" data-i18n="sheet.dpi.dialog.install">Установки</div>
       <ul id="bypass-install-list" class="bypass-list"></ul>
       <div class="bypass-dialog-row">
-        <button type="button" id="bypass-dialog-add" data-i18n="sheet.dpi.add">Добавить папку…</button>
-        <button type="button" id="bypass-dialog-detect" data-i18n="sheet.dpi.detect">Найти установленные</button>
-        <button type="button" id="bypass-dialog-remove" data-i18n="sheet.dpi.remove">Убрать из списка</button>
+        <button type="button" id="bypass-dialog-add" class="btn btn-outline btn-sm" data-i18n="sheet.dpi.add">Добавить папку…</button>
+        <button type="button" id="bypass-dialog-detect" class="btn btn-outline btn-sm" data-i18n="sheet.dpi.detect">Найти установленные</button>
+        <button type="button" id="bypass-dialog-remove" class="btn btn-outline btn-sm" data-i18n="sheet.dpi.remove">Убрать из списка</button>
       </div>
       <!-- Стратегии активной установки: выбор здесь же, а не только текстом
            в панели - пользователь должен видеть, сколько их доступно -->
@@ -74,7 +74,7 @@
       </div>
     </div>
     <footer class="bypass-dialog-foot">
-      <button type="button" id="bypass-dialog-done" class="bypass-done"
+      <button type="button" id="bypass-dialog-done" class="btn btn-primary btn-sm"
               data-i18n="sheet.dpi.dialog.done">Готово</button>
     </footer>
   </div>
