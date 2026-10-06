@@ -104,11 +104,21 @@ python tools/ui_probe_page.py --state bypass --theme liquid_glass
 ```bat
 msedge --headless=new --disable-gpu --hide-scrollbars --force-device-scale-factor=1 ^
   --virtual-time-budget=8000 --run-all-compositor-stages-before-draw ^
-  --window-size=1600,1000 --screenshot=screenshots\01-main.png http://localhost:<port>/page.html
+  --window-size=1600,1000 --screenshot=screenshots\01-main.png http://127.0.0.1:<port>/page.html
 ```
 
 (страницу раздаёт любой статический сервер, например
 `python -m http.server --directory %LOCALAPPDATA%\Synfronia\probe`).
+
+Нюансы съёмки:
+
+- URL — именно `127.0.0.1`: `localhost` в headless Edge может уйти в IPv6
+  и дать `ERR_CONNECTION_REFUSED`;
+- сервер обязан быть живым — перед съёмкой проверьте ответ
+  (`Invoke-WebRequest http://127.0.0.1:<port>/page.html`); мёртвый или
+  зависший сервер даёт ложные кадры;
+- после съёмки сверьте кадры с эталонами объективно (средний цвет,
+  `git show HEAD:screenshots/...`), а не только на глаз.
 
 ## Правка интерфейса
 
