@@ -4,7 +4,7 @@ r"""Модульные темы и сборка страницы.
 theme.json (палитра/мета/extends/entry), custom.css, slots/*.html,
 ресурсы (url(...) и {{asset:rel}} -> data:URI). Из этого собирается
 итоговый HTML: build_page() наполняет __THEME_ROOT__/__THEME_CSS__/
-__APP_CSS__/__MAIN_CSS__/__SETTINGS_CSS__/__COMMONJS__/__MOTION__/__APPJS__/
+__UTIL_CSS__/__APP_CSS__/__MAIN_CSS__/__SETTINGS_CSS__/__COMMONJS__/__MOTION__/__APPJS__/
 __SETTINGS_JS__/__ALPINE__/__I18N__/__THEMES__/__SETTINGS_SCHEMA__ в ui.BASE_TEMPLATE.
 Карточка настроек (ui.SETTINGS_HTML) — часть этой же страницы: отдельного
 окна настроек больше нет, а если тема собрала страницу из своего entry без
@@ -856,6 +856,7 @@ CSS наследуется по цепочке extends: файлы родите�
 
   __THEME_ROOT__    палитра темы (:root CSS-переменные)
   __THEME_CSS__     собранный CSS темы (с data:URI внутри)
+  __UTIL_CSS__      библиотека стили: токены + утилиты u-* (генерирует build_ui)
   __APP_CSS__       базовые стили приложения
   __MAIN_CSS__      стили только главного окна
   __SETTINGS_CSS__  стили карточки настроек
@@ -1220,7 +1221,16 @@ def _fill_placeholders(template: str, theme: dict, picked: dict) -> str:
     fonts_css = font_css(list(dict.fromkeys(
         [picked["sans"], picked["mono"], picked.get("head") or ""] + all_fams)))
     page = template.replace("__THEME_ROOT__", _palette_root_vars(theme, picked))
-    page = page.replace("__THEME_CSS__", theme.get("css") or "")
+    # авторский CSS темы живёт в слое syn-theme: главнее компонентов
+    # (syn-components), но уступает явным утилитам элемента (syn-utilities).
+    # Объявление порядка слоёв обязано встретиться на странице раньше первого
+    # слоя - держим его здесь, а не только в util.css: у entry-шаблонов темы
+    # своего __UTIL_CSS__ может не быть
+    theme_css = theme.get("css") or ""
+    layers = "@layer syn-components, syn-theme, syn-utilities;"
+    page = page.replace(
+        "__THEME_CSS__",
+        f"{layers}\n@layer syn-theme {{\n{theme_css}\n}}" if theme_css else layers)
     page = page.replace("__FONTS_CSS__", fonts_css)
     if "__FONTS_CSS__" not in template:
         # свой entry-шаблон без плейсхолдера: добавляем стиль шрифтов сами
@@ -1238,6 +1248,7 @@ def _fill_placeholders(template: str, theme: dict, picked: dict) -> str:
     elif "__ALPINE__" not in page and "__APPJS__" in page:
         page = page.replace("__APPJS__",
                             "__APPJS__</script><script>__ALPINE__", 1)
+    page = page.replace("__UTIL_CSS__", _ui.UTIL_CSS)
     page = page.replace("__APP_CSS__", _ui.APP_CSS)
     page = page.replace("__MAIN_CSS__", _ui.MAIN_CSS)
     page = page.replace("__COMMONJS__", _ui.COMMON_JS)
@@ -1298,11 +1309,12 @@ def build_page(theme_key: str, lang: str | None = None, fonts: dict | None = Non
     • ассеты {{asset:rel}} и url(...) в CSS встраиваются как data:URI;
     • шрифты из папки fonts (font_sans / font_mono, переопределённые полями
       темы font / font_mono) встраиваются как @font-face с data:URI;
-    • плейсхолдеры (__THEME_ROOT__, __THEME_CSS__, __FONTS_CSS__, __APP_CSS__,
-      __MAIN_CSS__, __SETTINGS_CSS__, __COMMONJS__, __MOTION__, __APPJS__,
-      __SETTINGS_JS__, __ALPINE__, __SETTINGS_SCHEMA__, __I18N__, __THEMES__,
-      __APP_VERSION__) подставляются простой заменой; __MOTION__/__ALPINE__
-      при их отсутствии в entry дописываются сами (см. комментарий выше).
+    • плейсхолдеры (__THEME_ROOT__, __THEME_CSS__, __UTIL_CSS__, __FONTS_CSS__,
+      __APP_CSS__, __MAIN_CSS__, __SETTINGS_CSS__, __COMMONJS__, __MOTION__,
+      __APPJS__, __SETTINGS_JS__, __ALPINE__, __SETTINGS_SCHEMA__, __I18N__,
+      __THEMES__, __APP_VERSION__) подставляются простой заменой;
+      __MOTION__/__ALPINE__ при их отсутствии в entry дописываются сами
+      (см. комментарий выше).
     """
     theme = _page_theme(theme_key)
     folders = theme.get("_slot_folders") or []

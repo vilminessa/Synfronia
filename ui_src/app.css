@@ -1,3 +1,4 @@
+@layer syn-components {
   /* Общие стили: главное окно и окно настроек. Своя вёрстка окон лежит
      в main.css / settings.css, здесь только база и элементы управления. */
   * { box-sizing: border-box; }
@@ -204,3 +205,4 @@
   #tip-thread.tip-on { opacity: 1; }
   .tip-thread-line { stroke: currentColor; stroke-width: 1; fill: none; opacity: .65; }
   .tip-thread-head { fill: currentColor; stroke: currentColor; stroke-width: 1; }
+}

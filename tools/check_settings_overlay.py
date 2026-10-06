@@ -47,9 +47,10 @@ import ui  # noqa: E402
 from core import build_page  # noqa: E402
 import gui  # noqa: E402
 
-PLACEHOLDERS = ("__THEME_ROOT__", "__THEME_CSS__", "__FONTS_CSS__", "__APP_CSS__",
-                "__MAIN_CSS__", "__SETTINGS_CSS__", "__COMMONJS__", "__APPJS__",
-                "__SETTINGS_JS__", "__I18N__", "__THEMES__", "__SETTINGS_SCHEMA__")
+PLACEHOLDERS = ("__THEME_ROOT__", "__THEME_CSS__", "__UTIL_CSS__", "__FONTS_CSS__",
+                "__APP_CSS__", "__MAIN_CSS__", "__SETTINGS_CSS__", "__COMMONJS__",
+                "__APPJS__", "__SETTINGS_JS__", "__I18N__", "__THEMES__",
+                "__SETTINGS_SCHEMA__")
 
 _checks = 0
 _fails: list[str] = []

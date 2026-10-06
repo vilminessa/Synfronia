@@ -605,17 +605,27 @@ async function waitForPage() {
     console.log("--- полосы прокрутки ---");
     const sbScan = JSON.parse(await evaluate(`JSON.stringify((function () {
       var rules = [], sheets = [];
+      function walk(list, id) {
+        for (var r = 0; list && r < list.length; r++) {
+          var rule = list[r];
+          // @layer / @media / @keyframes - вложенные правила плоский обход
+          // не видит (у слоя нет selectorText, но есть cssRules)
+          if (!rule.selectorText && rule.cssRules && rule.cssRules.length) {
+            walk(rule.cssRules, id);
+            continue;
+          }
+          var sel = rule.selectorText || "";
+          if (sel.indexOf("scrollbar") < 0 && sel !== "#log") continue;
+          rules.push(sel + " | " + (rule.style ? rule.style.cssText : "") + " @" + id);
+        }
+      }
       for (var s = 0; s < document.styleSheets.length; s++) {
         var sh = document.styleSheets[s];
         var id = (sh.ownerNode && sh.ownerNode.id) || "";
         sheets.push(id);
         var list = null;
         try { list = sh.cssRules; } catch (e) { continue; }
-        for (var r = 0; list && r < list.length; r++) {
-          var sel = list[r].selectorText || "";
-          if (sel.indexOf("scrollbar") < 0 && sel !== "#log") continue;
-          rules.push(sel + " | " + (list[r].style ? list[r].style.cssText : "") + " @" + id);
-        }
+        walk(list, id);
       }
       // эталон цвета переменной и реальный палец на своём блоке
       var ref = document.createElement("div");

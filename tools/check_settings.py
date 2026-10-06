@@ -475,7 +475,8 @@ def main() -> int:
        "активная тема хранится в общем коде, а не берётся из селекта окна")
     ok("dl.dest" in settings_js and "set_dest" in settings_js,
        "папка загрузки уходит в Python через set_dest")
-    for ph in ("__THEME_ROOT__", "__THEME_CSS__", "__FONTS_CSS__", "__APP_CSS__"):
+    for ph in ("__THEME_ROOT__", "__THEME_CSS__", "__UTIL_CSS__", "__FONTS_CSS__",
+               "__APP_CSS__"):
         ok(ph in main_html, f"{ph} подставляется в шаблон")
         ok(ph not in card_html, f"фрагмент карточки не подставляет {ph}")
     for ph in ("__I18N__", "__THEMES__"):

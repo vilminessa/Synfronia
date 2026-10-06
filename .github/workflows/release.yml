@@ -76,6 +76,7 @@ jobs:
           python tools/check_test_fonts.py
           python tools/check_tools_output.py
           python tools/check_debug.py
+          python tools/check_ui_style.py
       - name: Пробники вёрстки (headless Edge)
         run: |
           python tools/ui_probe_page.py

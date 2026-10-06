@@ -74,6 +74,7 @@ python tools/check_release_yml.py       # линт release.yml и beta.yml: па
 python tools/check_debug.py             # отладочная консоль: очистка, логи, пакеты обхода, меню
 python tools/check_push_channel.py      # правила пуша/тегов
 python tools/check_webview_guard.py     # диагностика сирот WebView2
+python tools/check_ui_style.py          # библиотека стилей: util.css из шкал, слои, u-*
 python tools/build_ui.py --check        # ui.py собран из ui_src/ без расхождений
 node  tools/ui_fonts_probe.js           # вёрстка главного окна (headless Edge)
 node  tools/ui_themes_probe.js          # та же проверка по всем темам
@@ -119,10 +120,36 @@ python tools/build_ui.py            # ui_src/ -> ui.py
 python tools/build_ui.py --check    # проверить, что ui.py актуален (в CI)
 ```
 
-Плейсхолдеры (`__THEME_ROOT__`, `__THEME_CSS__`, `__FONTS_CSS__`, `__APP_CSS__`,
-`__MAIN_CSS__`, `__SETTINGS_CSS__`, `__SETTINGS_HTML__`, `__COMMONJS__`,
-`__APPJS__`, `__SETTINGS_JS__`, `__I18N__`, `__THEMES__`,
+Плейсхолдеры (`__THEME_ROOT__`, `__THEME_CSS__`, `__UTIL_CSS__`, `__FONTS_CSS__`,
+`__APP_CSS__`, `__MAIN_CSS__`, `__SETTINGS_CSS__`, `__SETTINGS_HTML__`,
+`__COMMONJS__`, `__APPJS__`, `__SETTINGS_JS__`, `__I18N__`, `__THEMES__`,
 `__SETTINGS_SCHEMA__`, `__APP_VERSION__`) подставляются при сборке страницы.
+
+## Библиотека стилей
+
+Стили собраны как библиотека в духе Tailwind — три слоя:
+
+- **токены и утилиты** — `ui_src/util.css`, АВТО-ГЕНЕРИРУЕМЫЙ файл: шкалы
+  (`STYLE`, `PALETTE`, `BREAKPOINTS`) живут в `tools/build_ui.py`, генерация
+  даёт `:root`-токены (`--sp-*`, `--fs-*`, `--fw-*`, `--dur-*`, `--ease-*`,
+  `--h-*`, `--op-*`, `--radius-pill`, `--focus-ring`) и атомарные классы
+  `u-*`: отступы `u-p-12`/`u-mt-4`, зазор `u-gap-8`, сетка `u-cols-2`,
+  кегли `u-fs-base`, цвета `u-bg-accent`, скругления `u-rounded-m`,
+  движение `u-transition` + `u-dur-*`/`u-ease-*`, фокус `u-focus-ring`;
+  адаптивные варианты считаются для сетки и отступов: `u-sm-cols-1` (≥640),
+  `u-md-gap-16` (≥900). Новая ступень шкалы или новая утилита — правка
+  генератора и `python tools/build_ui.py`.
+- **слои каскада**: `@layer syn-components, syn-theme, syn-utilities` —
+  компоненты (`app/main/settings.css` упакованы в `syn-components`) <
+  авторский CSS темы (`syn-theme`, оборачивает `themes.py`) < утилиты
+  (`u-*`); палитра темы живёт в `:root` вне слоёв и главнее всех.
+- **компоненты** — именованные блоки (`.btn`, `.field`, `.tab`…) поверх
+  токенов; элемент в разметке получает компонент + готовые параметры `u-*`.
+
+Ручная правка `util.css` запрещена: её ловят и `build_ui.py --check`, и
+`tools/check_ui_style.py` — он же следит за упаковкой в слои, отсутствием
+чужих `u-*`-селекторов, разрешимостью `var(...)`, валидностью селекторов и
+брейкпоинтами.
 
 ## Состав
 
@@ -258,9 +285,9 @@ shallow-клона нет общей истории). Формат тега — 
 }
 ```
 
-- `entry` даёт плейсхолдеры `__THEME_ROOT__`, `__THEME_CSS__`, `__FONTS_CSS__`,
-  `__APP_CSS__`, `__MAIN_CSS__`, `__COMMONJS__`, `__APPJS__`, `__I18N__`,
-  `__THEMES__`, `__SETTINGS_SCHEMA__`, секции `<!-- SLOT:имя -->` и
+- `entry` даёт плейсхолдеры `__THEME_ROOT__`, `__THEME_CSS__`, `__UTIL_CSS__`,
+  `__FONTS_CSS__`, `__APP_CSS__`, `__MAIN_CSS__`, `__COMMONJS__`, `__APPJS__`,
+  `__I18N__`, `__THEMES__`, `__SETTINGS_SCHEMA__`, секции `<!-- SLOT:имя -->` и
   `{{asset:путь}}` (ассеты как `data:URI`).
 - Карточку настроек тема не подменяет: её рисует код по схеме.
 - Битые поля не ломают интерфейс — они попадают в журнал и помечаются `⚠`

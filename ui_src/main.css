@@ -1,3 +1,4 @@
+@layer syn-components {
   /* Стили только главного окна. Общие элементы управления лежат в app.css,
      вёрстка окна настроек — в settings.css. */
   /* Alpine: без x-cloak элемент с директивой мелькнул бы необработанным
@@ -477,3 +478,4 @@
   }
   #ffmpeg-retry:hover { background: rgba(255,255,255,.12); }
   .ffmpeg-hidden { display: none !important; }
+}
