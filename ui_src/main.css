@@ -45,7 +45,7 @@
   .clicker-row { text-align: center; margin-top: 10px; position: relative; }
   .clicker-msg {
     position: absolute; top: -34px; left: 0; right: 0; text-align: center;
-    font-size: 13px; color: var(--accent); opacity: 0; transition: opacity .5s;
+    font-size: 13px; color: var(--accent); opacity: 0; transition: opacity var(--dur-slow);
     pointer-events: none; white-space: nowrap;
   }
   .clicker-msg.show {
@@ -187,7 +187,7 @@
   @keyframes bulk-draw { to { stroke-dashoffset: 0; } }
   .actions { margin-top: 16px; display: flex; gap: 8px; align-items: center; }
   .pb-wrap { margin-top: 14px; height: 10px; border-radius: var(--radius-s); background: var(--surface); overflow: hidden; }
-  #pb { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+  #pb { height: 100%; width: 0; background: var(--accent); transition: width var(--dur-enter); }
   #pb.indeterminate { width: 30%; animation: slide 1.2s infinite; }
   @keyframes slide { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
   #status { margin-top: 6px; font-size: 13px; height: 18px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -234,7 +234,7 @@
   .dl {
     position: relative; overflow: hidden;
     min-width: 132px; font-weight: 500; line-height: 1.2;
-    transition: background .2s, color .2s, border-color .2s, box-shadow .2s;
+    /* переходы - из базы button (токены --dur- и --ease-); цвета состояний: */
     --dl-ok: var(--ok);        /* тема: массовая и кнопка красят успех
                                   одним и тем же зелёным */
     --dl-err: var(--warn);     /* ошибка = цвет предупреждения темы */
@@ -248,7 +248,7 @@
     background: color-mix(in srgb, var(--accent) 34%, transparent);
     border-right: 1px solid var(--accent);
     border-right-color: color-mix(in srgb, var(--accent) 70%, transparent);
-    transition: width .28s cubic-bezier(.4, 0, .2, 1), background .2s;
+    transition: width var(--dur-slow) var(--ease-standard), background-color var(--dur-ui) var(--ease-standard);
     z-index: 0; pointer-events: none;
   }
   /* вне прогресса заливки нет: у итога остаётся чистая поверхность */
@@ -258,12 +258,12 @@
      схлопнется до отступов */
   .dl-label {
     position: relative; z-index: 2; display: block;
-    transition: opacity .18s, transform .18s; pointer-events: none;
+    transition: opacity var(--dur-ui) var(--ease-standard), transform var(--dur-ui) var(--ease-standard); pointer-events: none;
   }
   .dl-pct, .dl-icon {
     position: absolute; inset: 0; z-index: 2; display: flex;
     align-items: center; justify-content: center; gap: 6px;
-    transition: opacity .18s, transform .18s; pointer-events: none;
+    transition: opacity var(--dur-ui) var(--ease-standard), transform var(--dur-ui) var(--ease-standard); pointer-events: none;
   }
   .dl-pct { font-variant-numeric: tabular-nums; opacity: 0; transform: scale(.9); }
   .dl-icon { opacity: 0; transform: scale(.4) rotate(-14deg); }
@@ -320,13 +320,7 @@
   .dl.dl-fail:disabled:hover, .dl.dl-cancel:disabled:hover {
     background: var(--surface);
   }
-  @media (prefers-reduced-motion: reduce) {
-    .dl, .dl-fill, .dl-label, .dl-pct, .dl-icon,
-    .dl.dl-indeterminate::after,
-    .dl.dl-ok .dl-icon, .dl.dl-err .dl-icon, .dl.dl-warn .dl-icon,
-    .dl.dl-fail .dl-icon, .dl.dl-cancel .dl-icon,
-    .clicker-msg.show { animation: none !important; transition: none !important; }
-  }
+  /* prefers-reduced-motion гасит всё единым блоком в app.css */
 
   /* Ручка «Анимации интерфейса» (настройки → Интерфейс): обобщённый
      prefers-reduced-motion, но по классу на <html>. Длительности в 0,01 мс
@@ -362,6 +356,8 @@
     -webkit-backdrop-filter: blur(5px);
     backdrop-filter: blur(5px);
     font-family: var(--font-sans, "Segoe UI"), system-ui, sans-serif;
+    /* вход как у оверлея настроек (keyframes overlay-in в settings.css) */
+    animation: overlay-in var(--dur-enter) var(--ease-out);
   }
   #bypass-overlay.bypass-hidden { display: none; }
   #bypass-box {
@@ -370,6 +366,8 @@
     border: 1px solid var(--widget, rgba(255, 255, 255, .12));
     color: var(--text, #eaf6ff);
     box-shadow: 0 18px 50px rgba(0, 0, 0, .45);
+    /* бокс въезжает как карточка настроек (keyframes card-in) */
+    animation: card-in var(--dur-enter) cubic-bezier(.2, .9, .3, 1.15);
   }
   #bypass-title { margin: 0 0 8px; font-size: 20px; font-weight: 700; }
   #bypass-text { margin: 0 0 6px; font-size: 14px; line-height: 1.5; opacity: .92; }
@@ -389,6 +387,8 @@
     font-family: var(--font-sans, "Segoe UI"), system-ui, sans-serif;
     -webkit-backdrop-filter: blur(6px);
     backdrop-filter: blur(6px);
+    /* вход как у оверлея настроек (keyframes overlay-in в settings.css) */
+    animation: overlay-in var(--dur-enter) var(--ease-out);
   }
   /* дождь (по мотивам codepen jh3y/WyNdMG: капли со случайными CSS-переменными) */
   #ffmpeg-rain { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 1; }
@@ -459,7 +459,7 @@
   #ffmpeg-ring .ring-fg {
     stroke: var(--accent); stroke-linecap: round;
     stroke-dasharray: 326.7; stroke-dashoffset: 326.7;
-    transition: stroke-dashoffset .25s linear;
+    transition: stroke-dashoffset var(--dur-enter) var(--ease-standard);
     filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent) 85%, transparent));
   }
   #ffmpeg-ring.ffmpeg-extracting { animation: ring-spin 1.1s linear infinite; }

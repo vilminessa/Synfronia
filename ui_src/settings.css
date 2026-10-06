@@ -8,7 +8,7 @@
     background: rgba(0, 0, 0, .42);
     -webkit-backdrop-filter: blur(10px) saturate(.85);
     backdrop-filter: blur(10px) saturate(.85);
-    animation: overlay-in .18s ease-out;
+    animation: overlay-in var(--dur-enter) var(--ease-out);
   }
   /* «Размытие фона» выключено (html.no-blur): без blur подложка плотнее,
      иначе страница за карточкой читалась бы сквозь неё без сглаживания */
@@ -30,7 +30,7 @@
     border-radius: var(--radius-l);
     box-shadow: 0 24px 70px rgba(0, 0, 0, .5);
     overflow: hidden;
-    animation: card-in .2s cubic-bezier(.2, .9, .3, 1.15);
+    animation: card-in var(--dur-enter) cubic-bezier(.2, .9, .3, 1.15);
   }
   @keyframes card-in {
     from { opacity: 0; transform: translateY(12px) scale(.98); }
@@ -61,7 +61,7 @@
     text-align: left; width: 100%; padding: 9px 12px;
     background: transparent; border: 1px solid transparent; color: var(--text);
     border-radius: var(--radius-m); font-size: 14px;
-    transition: background .15s, color .15s, border-color .15s, transform .12s;
+    transition: background-color var(--dur-ui) var(--ease-standard), color var(--dur-ui) var(--ease-standard), border-color var(--dur-ui) var(--ease-standard), transform var(--dur-press) var(--ease-standard);
   }
   /* Контраст при наведении. Фон - --bg, а не --widget: только пара
      text/bg гарантирована любой темой (у своих тем --widget может
@@ -161,7 +161,7 @@
   }
   .check.pixel-toggle .px-knob {
     fill: none; shape-rendering: crispEdges;
-    transition: transform .09s steps(3);
+    transition: transform var(--dur-press) steps(3);
   }
   .check.pixel-toggle .px-knob-fill {
     fill: var(--text); shape-rendering: crispEdges;
@@ -212,7 +212,7 @@
   .theme-actions .act-btn .ico { display: inline-flex; width: 17px; height: 17px; }
   .theme-actions .act-btn .ico svg { width: 100%; height: 100%; display: block; }
   .act-btn:hover .ico { transform: rotate(-12deg) scale(1.08); }
-  .act-btn .ico { transition: transform .2s cubic-bezier(.3, .8, .3, 1.2); }
+  .act-btn .ico { transition: transform var(--dur-ui) var(--ease-spring); }
   .act-btn:active .ico { animation: act-press .32s ease-out; }
   @keyframes act-press {
     0% { transform: scale(1); }
@@ -398,7 +398,7 @@
     box-shadow: 0 10px 30px rgba(0, 0, 0, .45);
     font-size: 12px; line-height: 1.35;
     white-space: nowrap;
-    transition: left .15s ease;
+    transition: left var(--dur-ui) var(--ease-standard);
     z-index: 2;
   }
   .tp-thread {
@@ -452,7 +452,7 @@
     position: absolute; inset: 0; z-index: 1;
     display: flex; align-items: center; justify-content: center;
     font-size: 10px; font-weight: 600; font-variant-numeric: tabular-nums;
-    color: var(--text); opacity: 0; transition: opacity .12s;
+    color: var(--text); opacity: 0; transition: opacity var(--dur-ui) var(--ease-standard);
     pointer-events: none;
   }
   .knob.dragging .knob-val, .knob.editing .knob-val { opacity: 1; }
@@ -498,7 +498,7 @@
     border-radius: var(--radius-l);
     box-shadow: 0 30px 90px rgba(0, 0, 0, .6);
     overflow: hidden;
-    animation: card-in .2s cubic-bezier(.2, .9, .3, 1.15);
+    animation: card-in var(--dur-enter) cubic-bezier(.2, .9, .3, 1.15);
   }
   .bypass-dialog[hidden] { display: none; }
   .bypass-dialog-body {
@@ -556,12 +556,5 @@
   }
   /* «Готово» в подвале: btn btn-primary btn-sm (вариант в app.css) */
 
-  @media (prefers-reduced-motion: reduce) {
-    .settings-overlay, .settings-card { animation: none; }
-    .knob-val, .tp-bubble { transition: none; }
-    .act-btn:hover .ico, .act-btn:active .ico, .act-btn.busy .ico { animation: none; transition: none; }
-    /* блик и пыль на кнопках гасим; без анимации пыль невидима (opacity: 0),
-       а блик стоит вне кнопки (background-position 220%) */
-    .nav-item:hover, .mode-switch button:hover { animation: none; }
-  }
+  /* prefers-reduced-motion гасит всё единым блоком в app.css */
 }

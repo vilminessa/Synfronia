@@ -22,7 +22,11 @@ syn-theme, утилиты живут в syn-utilities: компоненты < т
   9. кнопки на токенах: disabled - только var(--op-disabled), нажатие везде
      scale(.96), кольцо фокуса - var(--focus-ring);
   10. hex-цвета - только allowlist магии подсказок (conic/маска/пылинки),
-      цвета итогов .dl - из палитры темы.
+      цвета итогов .dl - из палитры темы;
+  11. переходы только на --dur-*/--ease-* (steps(3) пиксельного тумблера -
+      исключение), reduce-motion - ровно один сводный блок с глобальным
+      селектором, ручка html.reduce-motion сохранена. Длительности
+      ambient-циклов (logo-bloom, дождь) вне шкалы - их гасит свод.
 
 Запуск:  python tools/check_ui_style.py
 """
@@ -138,6 +142,9 @@ def main() -> int:
     section("9. кнопки: disabled, нажатие и фокус - на токенах")
     css3 = "".join((SRC / name).read_text(encoding="utf-8").replace("\r\n", "\n")
                    for name in ("app.css", "main.css", "settings.css"))
+    # комментарии вычищаются: слова вида «transition» внутри них давали
+    # ложные совпадения (текст комментария дотягивался до ближайшей ;)
+    css3 = re.sub(r"/\*.*?\*/", "", css3, flags=re.S)
     bad_dis = re.findall(r":disabled[^{}]*\{[^}]*opacity:\s*\.(?:45|5)(?:[;\s]|$)",
                          css3)
     ok(not bad_dis, "disabled-opacity только через var(--op-disabled)",
@@ -167,6 +174,34 @@ def main() -> int:
        str(stray_hex))
     ok(not re.search(r"--dl-(ok|fail):\s*#", css3),
        "цвета итогов .dl берутся из палитры темы (var(--ok)/var(--err))")
+
+    section("11. переходы и reduce-motion: токены и один свод")
+    # шкала взаимодействий касается transition; ambient-циклы (logo-bloom,
+    # дождь, блик) - осознанно вне шкалы, их гасит reduce-блок
+    bad_dur, bad_ease = [], []
+    for decl in re.findall(r"transition[^;{}]*:\s*([^;{}]+);", css3):
+        if "none" in decl or "!important" in decl:
+            continue                      # reduce-блоки и сводная ручка
+        for lit in re.findall(r"\d*\.?\d+m?s\b", decl):
+            bad_dur.append(f"{lit} в «{decl.strip()[:44]}»")
+        for ease in re.findall(
+                r"(?<![\w-])(?:cubic-bezier\([^)]*\)|ease-in-out|ease-out"
+                r"|ease-in|linear|ease)(?![\w-])", decl):
+            bad_ease.append(f"{ease} в «{decl.strip()[:44]}»")
+    ok(not bad_dur, "длительности переходов только var(--dur-*)", str(bad_dur[:3]))
+    ok(not bad_ease,
+       "сглаживания переходов только var(--ease-*) (steps(3) пиксельного тумблера - исключение)",
+       str(bad_ease[:3]))
+    rm_count = css3.count("@media (prefers-reduced-motion: reduce)")
+    ok(rm_count == 1, "reduce-motion: ровно один сводный блок на все файлы",
+       str(rm_count))
+    rm_tail = css3.split("@media (prefers-reduced-motion: reduce)", 1)[-1]
+    ok("*, *::before, *::after" in rm_tail
+       and "animation-duration: .01ms !important" in rm_tail
+       and "transition-duration: .01ms !important" in rm_tail,
+       "свод гасит все @keyframes и переходы разом (глобальный селектор)")
+    ok("html.reduce-motion *" in css3,
+       "ручка «Анимации интерфейса» (html.reduce-motion) на месте")
 
     print()
     if _fails:

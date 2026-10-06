@@ -138,7 +138,7 @@
     content: ""; display: block; height: 100%;
     width: var(--p, 0%);
     background: var(--accent);
-    transition: width .3s ease;
+    transition: width var(--dur-slow) var(--ease-out);
   }
   /* ---- плашка состояния обхода: точка + что запущено + последняя проба --- */
   /* свой ряд (см. row_class в схеме): плита и тумблер всегда в одну линию,
@@ -183,7 +183,7 @@
     box-shadow: 0 10px 30px rgba(0, 0, 0, .45);
     font-size: 12px; line-height: 1.35;
     pointer-events: none; opacity: 0;
-    transition: opacity .12s ease-out;
+    transition: opacity var(--dur-ui) var(--ease-out);
   }
   .tip.tip-on { opacity: 1; }
   .tip .tip-text { display: block; }
@@ -244,9 +244,20 @@
     100% { opacity: 0; transform: translate(var(--dx, 12px), var(--dy, -20px)) scale(1.2); }
   }
   @media (prefers-reduced-motion: reduce) {
-    .tip::before, .tip::after, .tp-bubble::before, .tp-bubble::after { animation: none; }
+    /* ОДИН сводный блок на все три файла вместо размазанных: кадр
+       дорисуется, цикл и переход останавливаются - как html.reduce-motion
+       (ручка «Анимации интерфейса»); for-анимации (✓ в массовой) поэтому
+       не застревают на нулевом кадре, а бесконечные останавливаются */
+    *, *::before, *::after {
+      animation-duration: .01ms !important;
+      animation-iteration-count: 1 !important;
+      animation-delay: 0s !important;
+      transition-duration: .01ms !important;
+      transition-delay: 0s !important;
+    }
+    /* подсказке важна видимость, а не движение: свечение остаётся
+       ровным (в покое его гасила бы анимация tipGlow) */
     .tip::after, .tp-bubble::after { opacity: .3; }
-    .tip i.dust, .tp-bubble i.dust { animation: none; opacity: 0; }
   }
   /* Нить между подсказкой и элементом: полноэкранный SVG под подсказкой,
      сам не кликается и не читается скринридером. */
@@ -254,7 +265,7 @@
     position: fixed; inset: 0; width: 100%; height: 100%;
     z-index: 89; pointer-events: none;
     color: var(--accent); opacity: 0;
-    transition: opacity .12s ease-out;
+    transition: opacity var(--dur-ui) var(--ease-out);
   }
   #tip-thread.tip-on { opacity: 1; }
   .tip-thread-line { stroke: currentColor; stroke-width: 1; fill: none; opacity: .65; }
